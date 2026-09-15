@@ -1,0 +1,17 @@
+[package]
+name = "todora"
+version = "0.1.0"
+edition = "2024"
+description = "A 2.5D top-down racer"
+license = "MIT"
+repository = "https://github.com/oliverlukschander/todora"
+
+[dependencies]
+bevy = "0.19"
+
+# Playable debug builds: cheap crate code, optimized engine.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
