@@ -200,6 +200,17 @@ impl Track {
         self.ribbon.locate(pos).s / self.ribbon.length()
     }
 
+    /// Put the car back on the racing line at the nearest point, stopped and
+    /// pointing the way the lap runs. What the driver gets from the reset key,
+    /// and what [`confine`] does for a car that has stranded itself.
+    pub(crate) fn rescue(&self, transform: &mut Transform, car: &mut Car) {
+        let ground = self.ground(transform.translation);
+        *transform = Transform::from_translation(ground.centre)
+            .looking_to(ground.tangent, Vec3::Y)
+            .with_scale(transform.scale);
+        *car = Car::default();
+    }
+
     /// What the car is standing on. The loft is the only surface in the world,
     /// so this reads the same [`PROFILE`] the mesh was swept from — the car
     /// rides the kerb because the kerb is 5 cm proud in the profile, not because
@@ -351,10 +362,7 @@ fn confine(time: Res<Time>, track: Res<Track>, mut cars: Query<(&mut Transform, 
             car.stranded = 0.0;
         }
         if car.stranded > RESCUE_AFTER {
-            *transform = Transform::from_translation(ground.centre)
-                .looking_to(ground.tangent, Vec3::Y)
-                .with_scale(transform.scale);
-            *car = Car::default();
+            track.rescue(&mut transform, &mut car);
             continue;
         }
 
@@ -566,6 +574,39 @@ mod tests {
                 // The centreline point is on the centreline, whatever we asked about.
                 assert!(track.ground(ground.centre).lateral.abs() < 0.02);
             }
+        }
+    }
+
+    /// A reset has to leave the car somewhere it can drive away from, whatever
+    /// mess it was in.
+    #[test]
+    fn a_reset_puts_the_car_back_on_the_line() {
+        let track = track();
+        let start = track.start_transform();
+        let right = *start.right();
+        for stuck in [WALL, -WALL, HALF_WIDTH + 1.0, 0.0] {
+            let mut transform = Transform::from_translation(start.translation + right * stuck)
+                // Facing backwards, sideways, and scaled like the real car.
+                .looking_to(-*start.forward(), Vec3::Y)
+                .with_scale(Vec3::splat(0.8));
+            let mut car = Car {
+                velocity: right * 9.0,
+                yaw_rate: 3.0,
+                stranded: 4.0,
+                ..default()
+            };
+            track.rescue(&mut transform, &mut car);
+
+            let ground = track.ground(transform.translation);
+            assert!(ground.lateral.abs() < 0.01, "reset {stuck} m out landed off-line");
+            assert!(car.velocity.length() < 1e-4, "reset left the car moving");
+            assert_eq!(car.yaw_rate, 0.0);
+            assert_eq!(car.stranded, 0.0);
+            assert_eq!(transform.scale, Vec3::splat(0.8), "reset resized the car");
+            assert!(
+                transform.forward().dot(ground.tangent) > 0.99,
+                "reset {stuck} m out left the car facing the wrong way"
+            );
         }
     }
 

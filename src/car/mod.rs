@@ -91,7 +91,13 @@ fn drive(
         handbrake: keys.pressed(KeyCode::Space),
     };
 
+    let reset = keys.just_pressed(KeyCode::KeyR);
+
     for (mut transform, mut car) in &mut cars {
+        if reset {
+            track.rescue(&mut transform, &mut car);
+            continue;
+        }
         let heading = level(*transform.forward());
         let right = heading.cross(Vec3::Y);
         let ground = track.ground(transform.translation);
