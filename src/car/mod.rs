@@ -162,7 +162,6 @@ mod tests {
 
     use super::*;
     use crate::track::Track;
-use crate::Reset;
 
     /// A plain driver: aim at the centreline, and carry the speed the tyres can
     /// hold through the tightest bend it can see. No racing line, no reflexes —
@@ -297,5 +296,102 @@ use crate::Reset;
             "spent {:.0} s of 90 going nowhere",
             lap.stopped
         );
+    }
+}
+
+#[cfg(test)]
+mod analysis {
+    use super::*;
+    use crate::track::Track;
+
+    /// What kind of lap the physics makes of this circuit, for picking grip and
+    /// top speed by something other than taste.
+    ///
+    /// Walks the centreline and solves the fastest lap the tyres allow, the way
+    /// a racing-line solver does: corner speeds from the radii, a forward pass
+    /// for what the engine can add, a backward pass for what the brakes must take
+    /// away. Then it reports what that lap feels like —
+    ///
+    /// - **flat out**: how much of it is spent at top speed. Near zero and the
+    ///   engine is wasted; near half and there is nothing to brake for.
+    /// - **braking**: how much of it is spent slowing down. This is the part a
+    ///   driver can be good or bad at.
+    /// - **spread**: fastest corner over slowest. Variety.
+    /// - **90% loss**: what a driver using nine tenths of the grip gives up over
+    ///   a lap. Small and there is nothing left to master; huge and one mistake
+    ///   ends the lap.
+    ///
+    /// `cargo test --lib speed_profile -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn speed_profile() {
+        let track = Track::new();
+        let step = 0.5f32;
+        let mut here = track.start_transform().translation;
+        let mut radii = Vec::new();
+        for _ in 0..4000 {
+            let g = track.ground(here);
+            radii.push((1.0 / g.curvature.abs().max(1e-4)).min(1e4));
+            here = g.centre + g.tangent * step;
+            if radii.len() > 40 && track.progress(here) < 0.01 {
+                break;
+            }
+        }
+        let n = radii.len();
+
+        println!("{:>5} {:>5} {:>6} {:>7} {:>7} {:>8} {:>7} {:>8}",
+            "grip", "top", "lap s", "flatout", "braking", "spread", "slowest", "90%loss");
+        for grip in [1.00f32, 1.22, 1.45] {
+        for top in [18.0f32, 21.0, 24.0, 28.0] {
+        let engine = 5.0f32;
+            let lat = grip * 9.81;
+            let mut v: Vec<f32> = radii.iter().map(|r| (lat * r).sqrt().min(top)).collect();
+            for _ in 0..3 {
+                for i in 0..n {
+                    let j = (i + 1) % n;
+                    v[j] = v[j].min((v[i] * v[i] + 2.0 * engine * step).sqrt());
+                }
+                for i in (0..n).rev() {
+                    let j = (i + 1) % n;
+                    v[i] = v[i].min((v[j] * v[j] + 2.0 * lat * step).sqrt());
+                }
+            }
+            let time: f32 = v.iter().map(|s| step / s).sum();
+            let flat_out = v.iter().filter(|s| **s >= top - 0.2).count();
+            let corner = (0..n)
+                .filter(|&i| v[i] <= (lat * radii[i]).sqrt() + 0.2 && v[i] < top - 0.2)
+                .count();
+            let braking = (0..n)
+                .filter(|&i| v[(i + 1) % n] < v[i] - 0.05)
+                .count();
+            let mut sorted = v.clone();
+            sorted.sort_by(f32::total_cmp);
+            // What a driver using only 90% of the grip loses over a lap. Small
+            // and there is nothing to master; huge and a mistake ends the lap.
+            let sloppy: f32 = {
+                let lat = 0.9 * grip * 9.81;
+                let mut w: Vec<f32> = radii.iter().map(|r| (lat * r).sqrt().min(top)).collect();
+                for _ in 0..3 {
+                    for i in 0..n {
+                        let j = (i + 1) % n;
+                        w[j] = w[j].min((w[i] * w[i] + 2.0 * engine * step).sqrt());
+                    }
+                    for i in (0..n).rev() {
+                        let j = (i + 1) % n;
+                        w[i] = w[i].min((w[j] * w[j] + 2.0 * lat * step).sqrt());
+                    }
+                }
+                w.iter().map(|s| step / s).sum()
+            };
+            let _ = corner;
+            println!(
+                "{grip:5.2} {top:5.0} {time:6.1} {:6.0}% {:6.0}% {:7.1}x {:7.1} {:+7.2}s",
+                100.0 * flat_out as f32 / n as f32,
+                100.0 * braking as f32 / n as f32,
+                sorted[n - 1] / sorted[0],
+                sorted[0],
+                sloppy - time,
+            );
+        }}
     }
 }
