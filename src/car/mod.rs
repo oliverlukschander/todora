@@ -312,7 +312,10 @@ mod tests {
         let lap = drive_one_lap(90.0, true);
         report("clumsy", &lap);
         assert!(lap.progress > 0.9, "90 s only got {:.0}% round", lap.progress * 100.0);
-        assert!(lap.off_road < 40.0, "off the road {:.0} s of 90", lap.off_road);
+        // Loose: the grass is a gravel trap now, so every excursion this driver
+        // makes is a slow one, and it makes plenty. What matters is that it is
+        // never stuck out there.
+        assert!(lap.off_road < 45.0, "off the road {:.0} s of 90", lap.off_road);
         assert!(lap.stopped < 20.0, "going nowhere {:.0} s of 90", lap.stopped);
     }
 

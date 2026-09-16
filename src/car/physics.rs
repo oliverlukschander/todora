@@ -100,9 +100,14 @@ const ENGINE_BRAKING: f32 = 1.9;
 const DRAG: f32 = 0.0022;
 const ROLLING: f32 = 0.3;
 /// Soft ground rolls badly: rolling resistance climbs as grip falls, so grass is
-/// about three times the drag of tarmac. That is how going off should cost you
-/// — the car bogs down and comes back, rather than being thrown.
+/// about three times the drag of tarmac even at a crawl.
 const SOFT_GROUND: f32 = 4.0;
+/// Off the road the ground ploughs, against whichever way the car is going. The
+/// old gravel traps ended laps, and the grass here should feel like one: the drag
+/// rises with speed and with the cube of how little grip there is, so a kerb
+/// costs next to nothing and the grass at pace costs most of a g. A car can
+/// still crawl back to the road.
+const OFF_ROAD_DRAG: f32 = 1.8;
 /// Reverse: from a standstill, up to a crawl.
 const REVERSE_ACCEL: f32 = 4.5;
 const REVERSE_SPEED: f32 = 8.0;
@@ -245,8 +250,9 @@ pub(crate) fn step(
     let forward = car.velocity.dot(heading);
     let mut push = 0.0;
     if controls.throttle > 0.0 {
+        // Off the road the wheels spin: the engine gets the surface's grip.
         let fade = 1.0 - (forward / TOP_SPEED).clamp(0.0, 1.0).powi(2);
-        push += ACCEL * controls.throttle * fade;
+        push += ACCEL * controls.throttle * fade * surface.grip;
     } else if rolling {
         push -= ENGINE_BRAKING * (forward / TOP_SPEED).clamp(-1.0, 1.0);
     }
@@ -258,12 +264,22 @@ pub(crate) fn step(
         // Independent of the corner. See `BRAKE`.
         push -= BRAKE * surface.grip * controls.brake * forward.signum();
     }
+    let soft = (1.0 - surface.grip).clamp(0.0, 1.0);
     if rolling {
-        let rolling_drag = ROLLING * (1.0 + SOFT_GROUND * (1.0 - surface.grip));
+        let rolling_drag = ROLLING * (1.0 + SOFT_GROUND * soft);
         push -= DRAG * speed * forward + rolling_drag * forward.signum();
     }
     let climb = -GRAVITY * SLOPE_PULL * surface.slope / (1.0 + surface.slope * surface.slope).sqrt();
     car.velocity += heading * ((push + climb) * dt);
+
+    // The gravel trap. It drags against travel, not against the nose, so a car
+    // sliding sideways through the grass is slowed just as hard as one driving
+    // through it.
+    let ploughing = OFF_ROAD_DRAG * soft.powi(3) * speed;
+    if rolling && ploughing > 0.0 {
+        let slow = (ploughing * dt).min(car.velocity.length());
+        car.velocity -= car.velocity.normalize_or_zero() * slow;
+    }
 
     // A car braked to a crawl stops, rather than creeping on the last of its
     // rounding error.
@@ -495,21 +511,53 @@ mod tests {
         assert!(shed > 1.1, "full brakes only shed {shed:.2} g");
     }
 
+    /// Off the road, the ground does the stopping. The old gravel traps ended
+    /// laps, and the grass here should cost most of a g at pace whether or not
+    /// the driver is braking. A kerb is not the grass, and a car can crawl back.
     #[test]
-    fn brakes_are_worth_less_on_grass() {
-        let stop = Controls {
-            brake: 1.0,
-            ..default()
+    fn the_grass_is_a_gravel_trap() {
+        let coast = |surface: Surface| {
+            let mut car = rolling(16.0);
+            drive(&mut car, Controls::default(), surface, 1.0);
+            16.0 - car.velocity.length()
         };
-        let mut tarmac = rolling(16.0);
-        drive(&mut tarmac, stop, FLAT, 0.6);
-        let mut grass = rolling(16.0);
-        drive(&mut grass, stop, GRASS, 0.6);
+        let lost_on_road = coast(FLAT);
+        let lost_in_grass = coast(GRASS);
+        let lost_on_kerb = coast(Surface {
+            grip: 0.72,
+            slope: 0.0,
+        });
         assert!(
-            grass.velocity.length() > tarmac.velocity.length() + 3.0,
-            "grass stopped it nearly as well as tarmac: {} against {}",
-            grass.velocity.length(),
-            tarmac.velocity.length()
+            lost_in_grass > 0.55 * GRAVITY,
+            "a second in the grass only shed {:.2} g",
+            lost_in_grass / GRAVITY
+        );
+        assert!(
+            lost_in_grass > 3.0 * lost_on_road,
+            "grass barely slower than tarmac: {lost_in_grass:.1} against {lost_on_road:.1} m/s"
+        );
+        // Over and above what the engine and the air take on any surface.
+        let kerb_extra = lost_on_kerb - lost_on_road;
+        let grass_extra = lost_in_grass - lost_on_road;
+        assert!(
+            kerb_extra < 0.3 * grass_extra,
+            "the kerbs punish like the grass: {kerb_extra:.1} against {grass_extra:.1} m/s extra"
+        );
+
+        let mut beached = Car::default();
+        drive(
+            &mut beached,
+            Controls {
+                throttle: 1.0,
+                ..default()
+            },
+            GRASS,
+            2.0,
+        );
+        assert!(
+            beached.velocity.length() > 2.0,
+            "stuck in the grass at {:.1} m/s",
+            beached.velocity.length()
         );
     }
 
@@ -643,9 +691,10 @@ mod tests {
     }
 
     /// A car that has lost it has to come back into line again — on the grass,
-    /// and downhill, which is where it happens — and braking must help, not
-    /// hurt. The first version of this model failed both: sideways, nothing
-    /// slowed it, and the brake key became the throttle.
+    /// and downhill, which is where it happens. On tarmac braking must help; in
+    /// the grass the ground does the stopping by itself. The first version of
+    /// this model failed all of it: sideways, nothing slowed the car, and the
+    /// brake key became the throttle.
     #[test]
     fn a_slide_comes_back_down() {
         let stop = Controls {
@@ -667,17 +716,18 @@ mod tests {
                 surface.grip,
                 surface.slope
             );
-            // Compared before the brakes have stopped the car altogether, at
-            // which point the held key is reverse and the speed is backwards.
-            let (coasting, _) = slide(2.0, Controls::default(), surface);
-            let (braked, _) = slide(2.0, stop, surface);
-            assert!(
-                braked < coasting - 3.0,
-                "grip {} slope {}: braking barely helped, {braked:.1} against {coasting:.1}",
-                surface.grip,
-                surface.slope
-            );
         }
+        // On tarmac, compared before the brakes have stopped the car altogether,
+        // at which point the held key is reverse and the speed is backwards.
+        let (coasting, _) = slide(2.0, Controls::default(), FLAT);
+        let (braked, _) = slide(2.0, stop, FLAT);
+        assert!(
+            braked < coasting - 3.0,
+            "braking barely helped on tarmac: {braked:.1} against {coasting:.1}"
+        );
+        // In the grass the surface stops a sliding car on its own.
+        let (in_the_grass, _) = slide(2.0, Controls::default(), GRASS);
+        assert!(in_the_grass < 8.0, "sliding through the grass still held {in_the_grass:.1} m/s");
     }
 
     /// The brake key must not turn into the throttle just because the car has
