@@ -26,25 +26,35 @@ const GRAVITY: f32 = 9.81;
 /// Kerb weight. Only ratios of force to mass matter, but carrying a real number
 /// keeps the engine and tyre figures readable.
 const MASS: f32 = 1180.0;
+/// How quickly a rotation left to itself dies away. This is the tyres scrubbing
+/// sideways, which the two-wheel model does not otherwise account for; too much
+/// of it and the car will not rotate into a corner at all.
+const YAW_SCRUB: f32 = 1.5;
 /// Yaw inertia of a slab the size of the car.
 const YAW_INERTIA: f32 = MASS * (1.92 * 1.92 + 0.88 * 0.88) / 12.0;
 /// Centre of gravity height, which is what turns acceleration into weight
 /// transfer: squat under power, dive under brakes.
 const CG_HEIGHT: f32 = 0.42 * SCALE;
 
-/// Peak grip as a multiple of the load on the tyre.
-const FRICTION: f32 = 1.15;
+/// Peak grip as a multiple of the load on the tyre. Sporty, deliberately: the
+/// circuit is tight and the wheelbase is short, and grip is what buys the margin
+/// back.
+const FRICTION: f32 = 1.22;
 /// The rear tyres are given a little more than the front, which is what makes a
 /// road car run wide rather than swap ends when it is pushed too hard. Throttle
 /// and the handbrake still spend that margin, so a drift is something you ask
 /// for rather than something that happens to you.
-const REAR_GRIP_BIAS: f32 = 1.12;
+const REAR_GRIP_BIAS: f32 = 1.06;
 /// Shape of the tyre curve: grip climbs with slip angle, peaks, then falls away.
 /// `STIFFNESS` sets how fast it climbs, `FALLOFF` how sharply it lets go.
 const STIFFNESS: f32 = 9.0;
 const FALLOFF: f32 = 1.5;
 /// Slip angle where that curve peaks. Past it the tyre is sliding, not gripping.
 const PEAK_SLIP: f32 = 0.192;
+/// How far past that peak the steering is allowed to reach. A little over gives
+/// the driver somewhere to go when the car will not quite turn in; much over and
+/// full lock only scrubs the fronts away.
+const SLIP_HEADROOM: f32 = 1.0;
 
 /// Drive force at a standstill, tapering to nothing at top speed.
 const ENGINE: f32 = 7_600.0;
@@ -69,14 +79,10 @@ const HANDBRAKE: f32 = 14_000.0;
 const DRAG: f32 = 2.6;
 const ROLLING_RESISTANCE: f32 = 260.0;
 
-/// Steering lock at a standstill. Above walking pace the lock is cut to what the
-/// front tyres can actually hold — see [`lock`].
-const MAX_STEER: f32 = 0.56;
-/// How far past that limit the driver is allowed to ask. A little over is what
-/// makes it possible to provoke a slide on purpose.
-const LOCK_MARGIN: f32 = 1.2;
+/// Steering lock at a standstill. Above walking pace it is cut back — see [`lock`].
+const MAX_STEER: f32 = 0.70;
 /// How fast the wheels follow the key, so steering has weight.
-const STEER_RATE: f32 = 7.0;
+const STEER_RATE: f32 = 4.0;
 
 /// Below this the tyre model has no meaningful slip angle to work from, and a
 /// tyre has no sideways bite either: a stopped wheel turned to full lock pushes
@@ -228,9 +234,9 @@ pub(crate) fn step(
 
     car.velocity += (heading * forward_accel + right * lateral_accel) * dt;
     car.yaw_rate += yaw_accel * dt;
-    // Tyre scrub about the vertical axis. Without it the car keeps spinning long
-    // after the tyres have let go.
-    car.yaw_rate *= 1.0 - (2.2 * dt).min(1.0);
+    // Tyre scrub about the vertical axis. Enough to settle the car once the tyres
+    // have let go, not so much that it fights every corner.
+    car.yaw_rate *= 1.0 - (YAW_SCRUB * dt).min(1.0);
 
     if controls.throttle == 0.0 && controls.brake == 0.0 && car.velocity.length() < 0.3 {
         car.velocity = Vec3::ZERO;
@@ -243,16 +249,20 @@ pub(crate) fn step(
     car.yaw_rate * dt
 }
 
-/// Steering lock at `speed`, in radians.
+/// Steering lock at `speed`, in radians. Two parts, and both are needed.
 ///
-/// A corner of radius `R` taken at `v` needs `v^2 / R` of lateral acceleration,
-/// and a wheelbase `L` at lock `d` gives `R = L / d`. So the lock the tyres can
-/// actually hold is `mu * g * L / v^2`, and asking for much more than that only
-/// scrubs the fronts away. Winding the lock off with speed is what lets a binary
-/// key hold a corner at the limit instead of spearing off it.
+/// Bending the car through a corner of radius `R` takes `L / R` of lock, and the
+/// tightest corner the tyres can hold at `v` is `v^2 / (mu g)` — so that part is
+/// `mu g L / v^2`, and it falls away fast with speed.
+///
+/// On top of it the front tyre has to be running at a slip angle to make any
+/// force at all, and the most that is ever worth is the angle its curve peaks at.
+/// Leaving that out is what made the car feel like it would not turn: at 18 m/s
+/// the geometry alone asks for three degrees of lock, and three degrees of lock
+/// puts no load through a tyre.
 fn lock(speed: f32) -> f32 {
-    let holds = LOCK_MARGIN * FRICTION * GRAVITY * WHEELBASE / speed.max(1.0).powi(2);
-    MAX_STEER.min(holds)
+    let bend = FRICTION * GRAVITY * WHEELBASE / speed.max(1.0).powi(2);
+    MAX_STEER.min(bend + PEAK_SLIP * SLIP_HEADROOM)
 }
 
 /// One tyre's share of the friction budget.
@@ -353,20 +363,61 @@ mod tests {
         );
     }
 
-    /// The lock on offer must be what the front tyres can hold, or a key held
-    /// down spears the car off every corner.
-    #[test]
-    fn the_lock_never_asks_more_than_the_tyres_have() {
-        assert_eq!(lock(0.0), MAX_STEER, "no lock at a standstill");
-        for speed in [6.0f32, 10.0, 16.0, 24.0] {
-            let turn = speed * speed * lock(speed) / WHEELBASE;
-            assert!(
-                turn <= FRICTION * GRAVITY * LOCK_MARGIN + 0.01,
-                "full lock at {speed} m/s asks for {:.1} m/s^2",
-                turn
+    /// Hold the key down and see what happens: peak lateral g, and whether the
+    /// car ended up travelling somewhere other than where it points.
+    fn corner(speed: f32, steer: f32, throttle: f32) -> (f32, bool) {
+        let mut car = rolling(speed);
+        let mut yaw = 0.0f32;
+        let dt = 1.0 / 240.0;
+        let (mut peak, mut spun) = (0.0f32, false);
+        for i in 0..(2.5 / dt) as usize {
+            let heading = Quat::from_rotation_y(yaw) * Vec3::NEG_Z;
+            yaw += step(
+                &mut car,
+                heading,
+                heading.cross(Vec3::Y),
+                Controls { throttle, steer, ..default() },
+                FLAT,
+                dt,
             );
+            if i > 60 {
+                peak = peak.max(car.g_force.x.abs());
+            }
+            if car.velocity.normalize_or(heading).dot(heading) < 0.7 {
+                spun = true;
+            }
         }
-        assert!(lock(24.0) < lock(10.0), "the lock has to wind off with speed");
+        (peak, spun)
+    }
+
+    /// The car has to be able to use the grip it has, at every speed, from a key
+    /// held down. Too little lock and it will not turn — which is what a steering
+    /// lock built from the cornering geometry alone gets you, because three
+    /// degrees of lock puts no load through a tyre.
+    #[test]
+    fn full_lock_reaches_the_grip_it_has() {
+        assert_eq!(lock(0.0), MAX_STEER, "no lock at a standstill");
+        assert!(lock(22.0) < lock(10.0), "the lock has to wind off with speed");
+        for speed in [8.0f32, 12.0, 16.0, 20.0] {
+            let (peak, spun) = corner(speed, 1.0, 0.35);
+            // Not the full figure: a car set up to run wide rather than swap
+            // ends saturates its front tyres a little before its rears, and the
+            // difference is the understeer that keeps it driveable.
+            assert!(
+                peak > FRICTION * 0.78,
+                "full lock at {speed} m/s only pulled {peak:.2} g of {FRICTION}"
+            );
+            assert!(!spun, "full lock at {speed} m/s spun the car");
+        }
+    }
+
+    /// Steering alone must not swap the ends round. A rear-drive car should need
+    /// the throttle or the handbrake for that, not a key press.
+    #[test]
+    fn steering_alone_does_not_spin_it() {
+        for speed in [10.0f32, 16.0, 22.0] {
+            assert!(!corner(speed, 1.0, 0.0).1, "lifting off at {speed} m/s spun it");
+        }
     }
 
     #[test]
@@ -564,4 +615,5 @@ mod tests {
         }
     }
 }
+
 

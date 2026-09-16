@@ -35,7 +35,7 @@ struct GReadout;
 fn setup(mut commands: Commands) {
     commands.spawn((
         Text::new(
-            "W — throttle\nS — brake, reverse at a stop\nA / D — steer\nSpace — handbrake\nR — back on track\nScroll — zoom",
+            "W — throttle\nS — brake, reverse at a stop\nA / D — steer\nSpace — handbrake\nR — restart\nScroll — zoom",
         ),
         TextFont {
             font_size: FontSize::Px(16.0),

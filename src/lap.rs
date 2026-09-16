@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use crate::car::{Car, DriveSet};
 use crate::track::Track;
+use crate::Reset;
 
 pub struct LapPlugin;
 
@@ -9,7 +10,8 @@ impl Plugin for LapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LapTimer>()
             .add_systems(Update, tick)
-            .add_systems(Update, gate.after(DriveSet));
+            .add_systems(Update, gate.after(DriveSet))
+            .add_systems(Update, start_again.after(DriveSet));
     }
 }
 
@@ -77,6 +79,12 @@ fn gate(track: Res<Track>, mut timer: ResMut<LapTimer>, cars: Query<&Transform, 
     timer.prev_along = Some(along);
 }
 
+fn start_again(mut resets: MessageReader<Reset>, mut timer: ResMut<LapTimer>) {
+    if resets.read().next().is_some() {
+        *timer = LapTimer::default();
+    }
+}
+
 pub fn format_time(secs: f32) -> String {
     let t = secs.max(0.0);
     let m = (t / 60.0) as u32;
@@ -87,6 +95,34 @@ pub fn format_time(secs: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A reset has to leave no trace of the lap that was running.
+    #[test]
+    fn a_reset_puts_the_clock_back() {
+        let mut app = App::new();
+        app.add_message::<Reset>()
+            .insert_resource(LapTimer {
+                current: 42.0,
+                last: Some(61.0),
+                best: Some(58.0),
+                completed: 3,
+                running: true,
+                prev_along: Some(2.0),
+                max_progress: 0.8,
+            })
+            .add_systems(Update, start_again);
+
+        app.update();
+        assert_eq!(app.world().resource::<LapTimer>().completed, 3, "reset by itself");
+
+        app.world_mut().write_message(Reset);
+        app.update();
+        let timer = app.world().resource::<LapTimer>();
+        assert_eq!(timer.completed, 0);
+        assert_eq!(timer.current, 0.0);
+        assert!(timer.last.is_none() && timer.best.is_none());
+        assert!(!timer.running);
+    }
 
     #[test]
     fn formats_arcade_clock() {

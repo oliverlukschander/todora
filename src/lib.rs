@@ -21,11 +21,16 @@ pub fn run() {
         .run();
 }
 
+/// Start again: car on the grid, clock at zero, marks wiped. Sent by the reset
+/// key; each plugin puts its own state back, because each plugin is what owns it.
+#[derive(Message)]
+pub(crate) struct Reset;
+
 pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
+        app.add_message::<Reset>().add_plugins((
             world::WorldPlugin,
             track::TrackPlugin,
             car::CarPlugin,

@@ -86,6 +86,8 @@ pub struct Fix {
     pub lateral: f32,
     /// Rise over run along `tangent`.
     pub slope: f32,
+    /// Signed curvature; its reciprocal is the radius of the corner.
+    pub curvature: f32,
     /// Plan distance of `point` from the start/finish line.
     pub s: f32,
 }
@@ -168,6 +170,7 @@ impl Ribbon {
             right: self.stations[0].right,
             lateral: 0.0,
             slope: self.stations[0].slope,
+            curvature: self.stations[0].curvature,
             s: 0.0,
         };
         for i in 0..n {
@@ -190,6 +193,7 @@ impl Ribbon {
                     right,
                     lateral: flat(pos - point).dot(right),
                     slope: a.slope.lerp(b.slope, t),
+                    curvature: a.curvature.lerp(b.curvature, t),
                     s: a.s + step * t,
                 };
             }

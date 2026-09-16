@@ -155,7 +155,7 @@ pub struct Track {
 }
 
 impl Track {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let control: Vec<Vec3> = CENTERLINE
             .iter()
             .map(|p| Vec3::new(p[0] * PLAN_SCALE, p[1] * HEIGHT_SCALE, p[2] * PLAN_SCALE))
@@ -200,6 +200,45 @@ impl Track {
         self.ribbon.locate(pos).s / self.ribbon.length()
     }
 
+    /// Sit the car on the loft, hold it inside the outermost strip, and fetch it
+    /// back if it has stranded itself out there.
+    ///
+    /// This is the only thing the circuit does to the car. Everything else the
+    /// road asks of it — grip, the pull of a climb, the kerb under a wheel —
+    /// reaches the car through [`Track::ground`], so the driving model stays in
+    /// one place.
+    pub(crate) fn hold(&self, transform: &mut Transform, car: &mut Car, dt: f32) {
+        let ground = self.ground(transform.translation);
+        transform.translation.y = ground.height;
+
+        // Off the road and going nowhere: a spin into the barrier leaves the car
+        // nose-first against it, where everything it does is outward and
+        // everything outward is taken away.
+        if ground.lateral.abs() > HALF_WIDTH && car.velocity.length() < GOING_NOWHERE {
+            car.stranded += dt;
+        } else {
+            car.stranded = 0.0;
+        }
+        if car.stranded > RESCUE_AFTER {
+            self.rescue(transform, car);
+            return;
+        }
+
+        if ground.lateral.abs() <= WALL {
+            return;
+        }
+        let held = ground.lateral.clamp(-WALL, WALL);
+        let correction = ground.right * (held - ground.lateral);
+        transform.translation += Vec3::new(correction.x, 0.0, correction.z);
+        // Take out whatever was carrying it outward and push a little of it back,
+        // leaving the speed along the circuit alone.
+        let side = ground.lateral.signum();
+        let outward = car.velocity.dot(ground.right) * side;
+        if outward > 0.0 {
+            car.velocity -= ground.right * (outward * (1.0 + BOUNCE) * side);
+        }
+    }
+
     /// Put the car back on the racing line at the nearest point, stopped and
     /// pointing the way the lap runs. What the driver gets from the reset key,
     /// and what [`confine`] does for a car that has stranded itself.
@@ -225,6 +264,7 @@ impl Track {
             right: fix.right,
             lateral: fix.lateral,
             slope: fix.slope,
+            curvature: fix.curvature,
             grip: if across <= TARMAC_HALF {
                 1.0
             } else if across <= HALF_WIDTH {
@@ -249,6 +289,11 @@ pub(crate) struct Ground {
     pub(crate) lateral: f32,
     /// Rise over run along `tangent`. Gravity pulls against this.
     pub(crate) slope: f32,
+    /// Signed curvature of the circuit here; its reciprocal is the corner radius.
+    /// Only the driver in `car`'s driveability test reads it — it is how that
+    /// driver knows to slow down for what is coming.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) curvature: f32,
     /// Fraction of tarmac grip.
     pub(crate) grip: f32,
 }
@@ -350,35 +395,7 @@ fn loft(ribbon: &Ribbon) -> Mesh {
 fn confine(time: Res<Time>, track: Res<Track>, mut cars: Query<(&mut Transform, &mut Car)>) {
     let dt = time.delta_secs();
     for (mut transform, mut car) in &mut cars {
-        let ground = track.ground(transform.translation);
-        transform.translation.y = ground.height;
-
-        // Off the road and going nowhere: a spin into the barrier leaves the car
-        // nose-first against it, where everything it does is outward and
-        // everything outward is taken away.
-        if ground.lateral.abs() > HALF_WIDTH && car.velocity.length() < GOING_NOWHERE {
-            car.stranded += dt;
-        } else {
-            car.stranded = 0.0;
-        }
-        if car.stranded > RESCUE_AFTER {
-            track.rescue(&mut transform, &mut car);
-            continue;
-        }
-
-        if ground.lateral.abs() <= WALL {
-            continue;
-        }
-        let held = ground.lateral.clamp(-WALL, WALL);
-        let correction = ground.right * (held - ground.lateral);
-        transform.translation += Vec3::new(correction.x, 0.0, correction.z);
-        // Take out whatever was carrying it outward and push a little of it back,
-        // leaving the speed along the circuit alone.
-        let side = ground.lateral.signum();
-        let outward = car.velocity.dot(ground.right) * side;
-        if outward > 0.0 {
-            car.velocity -= ground.right * (outward * (1.0 + BOUNCE) * side);
-        }
+        track.hold(&mut transform, &mut car, dt);
     }
 }
 
@@ -577,10 +594,10 @@ mod tests {
         }
     }
 
-    /// A reset has to leave the car somewhere it can drive away from, whatever
-    /// mess it was in.
+    /// A car that has stranded itself has to be left somewhere it can drive away
+    /// from, whatever mess it was in.
     #[test]
-    fn a_reset_puts_the_car_back_on_the_line() {
+    fn a_rescue_puts_the_car_back_on_the_line() {
         let track = track();
         let start = track.start_transform();
         let right = *start.right();
@@ -598,14 +615,14 @@ mod tests {
             track.rescue(&mut transform, &mut car);
 
             let ground = track.ground(transform.translation);
-            assert!(ground.lateral.abs() < 0.01, "reset {stuck} m out landed off-line");
-            assert!(car.velocity.length() < 1e-4, "reset left the car moving");
+            assert!(ground.lateral.abs() < 0.01, "rescue {stuck} m out landed off-line");
+            assert!(car.velocity.length() < 1e-4, "rescue left the car moving");
             assert_eq!(car.yaw_rate, 0.0);
             assert_eq!(car.stranded, 0.0);
-            assert_eq!(transform.scale, Vec3::splat(0.8), "reset resized the car");
+            assert_eq!(transform.scale, Vec3::splat(0.8), "rescue resized the car");
             assert!(
                 transform.forward().dot(ground.tangent) > 0.99,
-                "reset {stuck} m out left the car facing the wrong way"
+                "rescue {stuck} m out left the car facing the wrong way"
             );
         }
     }

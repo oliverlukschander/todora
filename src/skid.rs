@@ -16,6 +16,7 @@ use bevy::{
 
 use crate::car::{level, Car, DriveSet, HALF_TRACK, REAR_AXLE, WHEEL_WIDTH};
 use crate::track::Track;
+use crate::Reset;
 
 /// How far past its grip the rear axle has to be before it scrubs rubber off.
 const LETS_GO: f32 = 0.3;
@@ -33,7 +34,7 @@ pub struct SkidPlugin;
 impl Plugin for SkidPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup)
-            .add_systems(Update, (lay, redraw).chain().after(DriveSet));
+            .add_systems(Update, (wipe, lay, redraw).chain().after(DriveSet));
     }
 }
 
@@ -42,6 +43,8 @@ struct Marks {
     /// Made on the first mark, not before: a mesh with no vertices in it upsets
     /// the renderer's allocator, and an empty trail is the usual case.
     mesh: Option<Handle<Mesh>>,
+    /// What is drawing that mesh, so a reset can take it away again.
+    entity: Option<Entity>,
     material: Handle<StandardMaterial>,
     /// Each mark is the quad between where a tyre was and where it is now.
     quads: VecDeque<[Vec3; 4]>,
@@ -54,6 +57,7 @@ struct Marks {
 fn setup(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
     commands.insert_resource(Marks {
         mesh: None,
+        entity: None,
         material: materials.add(StandardMaterial {
             base_color: Color::WHITE,
             // Rubber on tarmac is a stain, not a surface: no shading, and a depth
@@ -67,6 +71,21 @@ fn setup(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>
         drawing: [None, None],
         dirty: false,
     });
+}
+
+/// Wipe the road clean. The entity goes with the marks rather than being left
+/// holding an empty mesh, which is the one thing the renderer objects to.
+fn wipe(mut commands: Commands, mut resets: MessageReader<Reset>, mut marks: ResMut<Marks>) {
+    if resets.read().next().is_none() {
+        return;
+    }
+    if let Some(entity) = marks.entity.take() {
+        commands.entity(entity).despawn();
+    }
+    marks.mesh = None;
+    marks.quads.clear();
+    marks.drawing = [None, None];
+    marks.dirty = false;
 }
 
 fn lay(track: Res<Track>, mut marks: ResMut<Marks>, cars: Query<(&Transform, &Car)>) {
@@ -120,8 +139,11 @@ fn redraw(mut commands: Commands, mut marks: ResMut<Marks>, mut meshes: ResMut<A
         }
         None => {
             let handle = meshes.add(rebuilt);
-            commands.spawn((Mesh3d(handle.clone()), MeshMaterial3d(marks.material.clone())));
+            let entity = commands
+                .spawn((Mesh3d(handle.clone()), MeshMaterial3d(marks.material.clone())))
+                .id();
             marks.mesh = Some(handle);
+            marks.entity = Some(entity);
         }
     }
 }
@@ -199,6 +221,7 @@ mod tests {
             .init_asset::<Mesh>()
             .insert_resource(Marks {
                 mesh: None,
+                entity: None,
                 material: Handle::default(),
                 quads: VecDeque::new(),
                 drawing: [None, None],
@@ -228,6 +251,37 @@ mod tests {
         assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 1);
         let meshes = app.world().resource::<Assets<Mesh>>();
         assert_eq!(meshes.get(&handle).map(|m| m.count_vertices()), Some(8));
+    }
+
+    /// A reset wipes the road, and takes the entity with it rather than leaving
+    /// it holding an empty mesh.
+    #[test]
+    fn a_reset_wipes_the_road() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+            .init_asset::<Mesh>()
+            .add_message::<Reset>()
+            .insert_resource(Marks {
+                mesh: None,
+                entity: None,
+                material: Handle::default(),
+                quads: VecDeque::from([quad(0.0), quad(1.0)]),
+                drawing: [Some([Vec3::ZERO, Vec3::X]), None],
+                dirty: true,
+            })
+            .add_systems(Update, (wipe, redraw).chain());
+
+        app.update();
+        let drawn = app.world().resource::<Marks>().entity;
+        assert!(drawn.is_some(), "the marks never got drawn");
+
+        app.world_mut().write_message(Reset);
+        app.update();
+        let marks = app.world().resource::<Marks>();
+        assert!(marks.quads.is_empty(), "marks survived the reset");
+        assert!(marks.mesh.is_none() && marks.entity.is_none());
+        assert_eq!(marks.drawing, [None, None]);
+        assert!(app.world().get_entity(drawn.unwrap()).is_err(), "entity survived");
     }
 
     /// The oldest marks have to be on their way out, or the trail ends in a
