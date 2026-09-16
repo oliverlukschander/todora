@@ -34,7 +34,14 @@ const YAW_SCRUB: f32 = 1.5;
 const YAW_INERTIA: f32 = MASS * (1.92 * 1.92 + 0.88 * 0.88) / 12.0;
 /// Centre of gravity height, which is what turns acceleration into weight
 /// transfer: squat under power, dive under brakes.
-const CG_HEIGHT: f32 = 0.42 * SCALE;
+///
+/// What matters is its ratio to the wheelbase, and the wheelbase here is short,
+/// so the same height costs far more transfer than it would on a real car. At
+/// 0.32 the rear carried a fifth of the weight under hard braking and had
+/// nothing left to resist a yaw with: brake and turn together and the car came
+/// round, every time. Low enough and it stays put. Steady cornering does not
+/// notice either way — only braking and power move weight along the car.
+const CG_HEIGHT: f32 = 0.24 * SCALE;
 
 /// Peak grip as a multiple of the load on the tyre. Sporty, deliberately: the
 /// circuit is tight and the wheelbase is short, and grip is what buys the margin
@@ -73,6 +80,14 @@ const SIDEWAYS: f32 = 2.0;
 /// leaves a sliver to steer with, which is the difference between braking hard
 /// and braking well, and it is also why a straight-line stop leaves no marks.
 const BRAKE_EFFORT: f32 = 0.95;
+/// The rear brakes are deliberately under-served. Asking each axle for the same
+/// share of what it has stops the car in the shortest distance and leaves the
+/// rear with nothing to resist a yaw with — which is how a car spins under
+/// braking. Braking hard already puts nearly all the weight on the nose; taking
+/// the last of what the rear has left it with 601 N of side grip, and anything
+/// at all would then pivot the car. A real car's brake bias sits forward of
+/// ideal for the same reason, and pays for it in stopping distance.
+const REAR_BRAKE_EFFORT: f32 = 0.6;
 /// The handbrake locks the rear axle rather than merely slowing it, so it has to
 /// ask for more than the rear tyres can ever give. The tyre still only delivers
 /// what it has; the difference is what marks the road.
@@ -156,10 +171,11 @@ pub(crate) fn step(
     surface: Surface,
     dt: f32,
 ) -> f32 {
-    car.steer_angle = car.steer_angle.lerp(
-        controls.steer * lock(car.velocity.length()),
-        (STEER_RATE * dt).min(1.0),
-    );
+    let speed = car.velocity.length();
+    let lock_now = lock(speed);
+    car.steer_angle = car
+        .steer_angle
+        .lerp(controls.steer * lock_now, (STEER_RATE * dt).min(1.0));
     let steer = car.steer_angle;
 
     // Body frame: along the nose, and out of the driver's right window. Velocity
@@ -193,7 +209,6 @@ pub(crate) fn step(
     // Whether the car is moving, not whether it is moving the way it is pointed.
     // Gating any of this on the forward component alone means a car sliding
     // broadside has nothing slowing it: no drag, no engine, and no brakes.
-    let speed = car.velocity.length();
     let rolling = speed > STOPPED;
     // How much of that motion is along the wheels. A wheel sliding straight
     // sideways is not turning, so nothing that reaches the road through its
@@ -242,7 +257,9 @@ pub(crate) fn step(
     let front_long = -effort * front_budget * rolling_share;
     // What the rear axle is being asked for, before the tyre has its say. The
     // difference between the two is what tells a hard stop from a locked wheel.
-    let rear_demand = drive - effort * rear_budget * rolling_share + rear_handbrake + engine_braking;
+    let rear_demand =
+        drive - effort * REAR_BRAKE_EFFORT * rear_budget * rolling_share + rear_handbrake
+            + engine_braking;
 
     // Sideways grip arrives with speed. Without this the car fights its own
     // steering at a crawl, and the drag of a fully-locked front wheel is enough
@@ -575,6 +592,47 @@ mod tests {
         car.velocity.length()
     }
 
+    /// Braking hard into a corner must not pivot the car. Hard braking puts
+    /// nearly all the weight on the nose, and an axle carrying a fifth of the
+    /// weight with the brakes taking everything it has left has nothing to
+    /// resist a yaw with — so it goes round, and once it starts nothing stops it.
+    #[test]
+    fn braking_into_a_corner_does_not_spin_it() {
+        for steer in [-1.0f32, 1.0] {
+            let mut car = rolling(20.0);
+            let mut yaw = 0.0f32;
+            let dt = 1.0 / 240.0;
+            let mut worst = 0.0f32;
+            for _ in 0..(2.5 / dt) as usize {
+                let heading = Quat::from_rotation_y(yaw) * Vec3::NEG_Z;
+                yaw += step(
+                    &mut car,
+                    heading,
+                    heading.cross(Vec3::Y),
+                    Controls {
+                        brake: 1.0,
+                        steer,
+                        ..default()
+                    },
+                    FLAT,
+                    dt,
+                );
+                // How far the car is travelling from where it is pointing, while
+                // it is still braking. Below walking pace it is stopping and
+                // backing up, which is another test.
+                if car.velocity.length() > 6.0 {
+                    let adrift = car.velocity.normalize_or(heading).angle_between(heading);
+                    worst = worst.max(adrift.abs());
+                }
+            }
+            assert!(
+                worst < 0.45,
+                "braking on {steer} lock swung the car {:.0} degrees off line",
+                worst.to_degrees()
+            );
+        }
+    }
+
     /// A car that has lost it has to come back down again — on the grass, and
     /// downhill, which is where it happens.
     ///
@@ -757,6 +815,7 @@ mod tests {
         }
     }
 }
+
 
 
 
