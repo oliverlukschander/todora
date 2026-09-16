@@ -78,6 +78,11 @@ const HANDBRAKE: f32 = 14_000.0;
 
 const DRAG: f32 = 2.6;
 const ROLLING_RESISTANCE: f32 = 260.0;
+/// Engine braking, off the throttle and rising with road speed. This is what
+/// stops a real car running away down a hill, and without it a descent here
+/// coasts to 84 km/h — which needs 46 m of corner radius on a circuit whose
+/// tightest is ten.
+const ENGINE_BRAKING: f32 = 1_800.0;
 
 /// Steering lock at a standstill. Above walking pace it is cut back — see [`lock`].
 const MAX_STEER: f32 = 0.70;
@@ -207,10 +212,18 @@ pub(crate) fn step(
     } else {
         0.0
     };
+    // Off the throttle the wheels turn the engine. It reaches the road through
+    // the same two contact patches as everything else, so it shares their grip
+    // rather than being free deceleration on top of it.
+    let engine_braking = if controls.throttle == 0.0 && rolling {
+        -ENGINE_BRAKING * (along.abs() / TOP_SPEED).min(1.0) * along.signum()
+    } else {
+        0.0
+    };
     let front_long = -effort * front_budget;
     // What the rear axle is being asked for, before the tyre has its say. The
     // difference between the two is what tells a hard stop from a locked wheel.
-    let rear_demand = drive - effort * rear_budget + rear_handbrake;
+    let rear_demand = drive - effort * rear_budget + rear_handbrake + engine_braking;
 
     // Sideways grip arrives with speed. Without this the car fights its own
     // steering at a crawl, and the drag of a fully-locked front wheel is enough
@@ -518,6 +531,30 @@ mod tests {
         assert!(shed <= FRICTION + 0.1, "{shed:.2} g is more grip than exists");
     }
 
+    /// Lift off at the top of a hill and the hill must not run away with the
+    /// car. Nothing steers at a speed the circuit has no radius for, and without
+    /// the engine holding it back a descent here coasted to 84 km/h — which
+    /// wants 46 m of corner, on a circuit whose tightest is ten.
+    #[test]
+    fn a_descent_does_not_run_away() {
+        // Steeper than anything the circuit has: `hills_roll_instead_of_stepping`
+        // holds its grade under 20%.
+        let downhill = Surface {
+            grip: 1.0,
+            slope: -0.2,
+        };
+        let mut car = rolling(12.0);
+        coast(&mut car, Controls::default(), downhill, 25.0);
+        let settled = car.velocity.length();
+        let radius = settled * settled / (FRICTION * GRAVITY);
+        assert!(
+            radius < 25.0,
+            "coasts to {settled:.1} m/s, wanting {radius:.0} m of corner"
+        );
+        // And it is coasting, not stopping: a hill should still be free speed.
+        assert!(settled > 8.0, "the hill gave nothing back: {settled:.1} m/s");
+    }
+
     /// Grip is what the brakes spend, so less of it has to mean a longer stop.
     #[test]
     fn brakes_are_worth_less_on_grass() {
@@ -622,6 +659,7 @@ mod tests {
         }
     }
 }
+
 
 
 
