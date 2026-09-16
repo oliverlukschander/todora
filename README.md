@@ -10,7 +10,9 @@ The circuit is one closed spline plus one cross-section profile. Tarmac, edge li
 cargo run
 ```
 
-**WASD** or **arrows** to drive. **Shift** to brake. **Scroll** to zoom.
+**WASD** or **arrows** to drive. **Shift** to brake. **Space** for the handbrake. **Scroll** to zoom.
+
+The car is rear-wheel drive with a weight and tyres that only have so much grip. Each axle spends one friction budget on driving and cornering together, so power on the way out of a corner costs you the corner — which is where the drifts and the tyre marks come from. The g-meter top left shows what the car is pulling: sideways through a corner, up and down under power and braking and over the circuit's climbs.
 
 Needs a recent stable Rust (`rustup` on macOS). First Bevy compile is slow; later ones are not.
 
@@ -20,7 +22,8 @@ Needs a recent stable Rust (`rustup` on macOS). First Bevy compile is slow; late
 |---|---|
 | `src/main.rs` | Binary entry. Calls `todora::run()`. |
 | `src/lib.rs` | `GamePlugin` — register new feature plugins here. |
-| `src/<feature>.rs` | One plugin per feature (`car`, `camera`, `track`, `world`, `lap`, `hud`). |
+| `src/<feature>.rs` | One plugin per feature (`camera`, `world`, `lap`, `hud`, `skid`). |
+| `src/car/` | `physics.rs` is the bicycle model and the only place the car's behaviour is decided; `mod.rs` wires input and the road under the wheels into it. |
 | `src/track/` | `layout.rs` is the Red Bull Ring trace; `ribbon.rs` turns it into a centreline; `mod.rs` holds the cross-section and lofts it. |
 | `assets/` | Runtime files Bevy loads. glTF lives in `assets/models/`. |
 | `art/` | Source art. Blender files in `art/models/`. |

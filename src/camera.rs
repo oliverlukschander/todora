@@ -7,10 +7,11 @@ use crate::car::{Car, DriveSet};
 use crate::track::Track;
 use crate::world::SKY;
 
-const BACK: f32 = 8.5;
-const HEIGHT: f32 = 4.4;
-const LOOK_AHEAD: f32 = 2.2;
-const LOOK_HEIGHT: f32 = 0.7;
+// Framed on the car, which is about 1.9 m long.
+const BACK: f32 = 6.8;
+const HEIGHT: f32 = 3.5;
+const LOOK_AHEAD: f32 = 1.8;
+const LOOK_HEIGHT: f32 = 0.6;
 const FOLLOW_XZ: f32 = 6.5;
 const FOLLOW_Y: f32 = 11.0;
 const ZOOM_MIN: f32 = 0.35;

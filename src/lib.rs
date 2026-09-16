@@ -2,6 +2,7 @@ mod camera;
 mod car;
 mod hud;
 mod lap;
+mod skid;
 mod track;
 mod world;
 
@@ -30,6 +31,7 @@ impl Plugin for GamePlugin {
             car::CarPlugin,
             camera::CameraPlugin,
             lap::LapPlugin,
+            skid::SkidPlugin,
             hud::HudPlugin,
         ));
     }

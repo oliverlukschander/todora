@@ -51,10 +51,20 @@ const CORNER_MARGIN: f32 = 0.15;
 /// the station spacing, so a stripe is two stations long: about a third of the
 /// 2.4 m car.
 const STRIPE: usize = 2;
-/// Speed bled off per second with a wheel on the kerb.
-const RUMBLE: f32 = 16.0;
-/// Keep the car's body off the grass, not just its centre.
-const MARGIN: f32 = 0.52;
+/// Fraction of tarmac grip the kerbs and the grass give back.
+const KERB_GRIP: f32 = 0.72;
+const GRASS_GRIP: f32 = 0.38;
+/// The car may run wide onto the verge, but not off the loft into the sky.
+const WALL: f32 = EDGE - 0.6;
+/// Fraction of the impact the wall gives back. Absorbing it all lets a car that
+/// spun in nose-first sit there with its wheels spinning, because everything it
+/// does is outward and everything outward is deleted.
+const BOUNCE: f32 = 0.45;
+/// Sitting off the circuit going nowhere for this long earns a lift back to the
+/// racing line. A barrier you can wedge yourself against for good is worse than
+/// no barrier at all.
+const RESCUE_AFTER: f32 = 1.6;
+const GOING_NOWHERE: f32 = 1.5;
 
 /// Cross-section of the circuit, left verge to right verge: `(lateral, height,
 /// surface)`. `lateral` is metres right of the centreline, `height` is metres
@@ -189,6 +199,59 @@ impl Track {
     pub(crate) fn progress(&self, pos: Vec3) -> f32 {
         self.ribbon.locate(pos).s / self.ribbon.length()
     }
+
+    /// What the car is standing on. The loft is the only surface in the world,
+    /// so this reads the same [`PROFILE`] the mesh was swept from — the car
+    /// rides the kerb because the kerb is 5 cm proud in the profile, not because
+    /// anything says so twice.
+    pub(crate) fn ground(&self, pos: Vec3) -> Ground {
+        let fix = self.ribbon.locate(pos);
+        let across = fix.lateral.abs();
+        Ground {
+            centre: fix.point,
+            height: fix.point.y + profile_height(fix.lateral),
+            tangent: fix.tangent,
+            right: fix.right,
+            lateral: fix.lateral,
+            slope: fix.slope,
+            grip: if across <= TARMAC_HALF {
+                1.0
+            } else if across <= HALF_WIDTH {
+                KERB_GRIP
+            } else {
+                GRASS_GRIP
+            },
+        }
+    }
+}
+
+/// What the car is standing on, at one point.
+pub(crate) struct Ground {
+    /// Nearest point on the centreline, at circuit elevation.
+    pub(crate) centre: Vec3,
+    /// Surface height, kerb lip and verge fall included.
+    pub(crate) height: f32,
+    /// Unit heading of the circuit here, level in XZ.
+    pub(crate) tangent: Vec3,
+    pub(crate) right: Vec3,
+    /// Metres right of the centreline; negative is left.
+    pub(crate) lateral: f32,
+    /// Rise over run along `tangent`. Gravity pulls against this.
+    pub(crate) slope: f32,
+    /// Fraction of tarmac grip.
+    pub(crate) grip: f32,
+}
+
+/// Height of the cross-section at `lateral`, above the road surface.
+fn profile_height(lateral: f32) -> f32 {
+    let at = lateral.clamp(PROFILE[0].0, PROFILE[PROFILE.len() - 1].0);
+    for rib in PROFILE.windows(2) {
+        if at <= rib[1].0 {
+            let t = (at - rib[0].0) / (rib[1].0 - rib[0].0);
+            return rib[0].1.lerp(rib[1].1, t);
+        }
+    }
+    0.0
 }
 
 fn setup(
@@ -267,29 +330,46 @@ fn loft(ribbon: &Ribbon) -> Mesh {
     .with_inserted_indices(Indices::U32(indices))
 }
 
-/// Hold the car on the road: sit it on the loft's surface, rumble on the kerbs,
-/// and refuse the last stretch to the grass.
+/// Sit the car on the loft, hold it inside the outermost strip, and fetch it
+/// back if it ends up stranded out there.
+///
+/// This is the only thing the circuit does to the car. Everything else the road
+/// asks of it — grip, the pull of a climb, the kerb under a wheel — reaches the
+/// car through [`Track::ground`], so the driving model stays in one place.
 fn confine(time: Res<Time>, track: Res<Track>, mut cars: Query<(&mut Transform, &mut Car)>) {
     let dt = time.delta_secs();
-    let max_lat = HALF_WIDTH - MARGIN;
     for (mut transform, mut car) in &mut cars {
-        let fix = track.ribbon.locate(transform.translation);
-        transform.translation.y = fix.point.y;
-        if fix.lateral.abs() > TARMAC_HALF {
-            let bleed = RUMBLE * dt;
-            car.speed -= car.speed.clamp(-bleed, bleed);
+        let ground = track.ground(transform.translation);
+        transform.translation.y = ground.height;
+
+        // Off the road and going nowhere: a spin into the barrier leaves the car
+        // nose-first against it, where everything it does is outward and
+        // everything outward is taken away.
+        if ground.lateral.abs() > HALF_WIDTH && car.velocity.length() < GOING_NOWHERE {
+            car.stranded += dt;
+        } else {
+            car.stranded = 0.0;
         }
-        if fix.lateral.abs() <= max_lat {
+        if car.stranded > RESCUE_AFTER {
+            *transform = Transform::from_translation(ground.centre)
+                .looking_to(ground.tangent, Vec3::Y)
+                .with_scale(transform.scale);
+            *car = Car::default();
             continue;
         }
-        let clamped = fix.lateral.clamp(-max_lat, max_lat);
-        transform.translation.x = fix.point.x + fix.right.x * clamped;
-        transform.translation.z = fix.point.z + fix.right.z * clamped;
-        let velocity = *transform.forward() * car.speed;
-        let lateral_speed = velocity.dot(fix.right);
-        if lateral_speed * fix.lateral.signum() > 0.0 {
-            let along = velocity - fix.right * lateral_speed;
-            car.speed = along.length() * car.speed.signum();
+
+        if ground.lateral.abs() <= WALL {
+            continue;
+        }
+        let held = ground.lateral.clamp(-WALL, WALL);
+        let correction = ground.right * (held - ground.lateral);
+        transform.translation += Vec3::new(correction.x, 0.0, correction.z);
+        // Take out whatever was carrying it outward and push a little of it back,
+        // leaving the speed along the circuit alone.
+        let side = ground.lateral.signum();
+        let outward = car.velocity.dot(ground.right) * side;
+        if outward > 0.0 {
+            car.velocity -= ground.right * (outward * (1.0 + BOUNCE) * side);
         }
     }
 }
@@ -459,6 +539,34 @@ mod tests {
         }
         assert!(highest > 0.97, "the lap only reached {highest}");
         assert_eq!(crossings, 1, "the start gate opened {crossings} times");
+    }
+
+    /// What the car stands on has to be the same cross-section the mesh was
+    /// swept from, or the car rides at a height the road is not at.
+    #[test]
+    fn the_ground_reads_the_profile_it_was_lofted_from() {
+        let track = track();
+        let start = track.start_transform();
+        let right = *start.right();
+        for (across, grip, height) in [
+            (0.0, 1.0, 0.0),
+            (TARMAC_HALF - 0.01, 1.0, 0.0),
+            (HALF_WIDTH - 0.01, KERB_GRIP, KERB_TOP * (0.69 / 0.70)),
+            (HALF_WIDTH + 2.0, GRASS_GRIP, -0.20),
+        ] {
+            for side in [-1.0f32, 1.0] {
+                let ground = track.ground(start.translation + right * (side * across));
+                assert_eq!(ground.grip, grip, "grip {across} m off the line");
+                assert!(
+                    (ground.height - ground.centre.y - height).abs() < 0.02,
+                    "height {across} m off the line: {} against {height}",
+                    ground.height - ground.centre.y
+                );
+                assert!((ground.lateral - side * across).abs() < 0.02);
+                // The centreline point is on the centreline, whatever we asked about.
+                assert!(track.ground(ground.centre).lateral.abs() < 0.02);
+            }
+        }
     }
 
     /// The grid slot is on the tarmac, pointing down the circuit.

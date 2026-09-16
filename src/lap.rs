@@ -43,7 +43,7 @@ fn tick(time: Res<Time>, mut timer: ResMut<LapTimer>, cars: Query<&Car>) {
         timer.current += time.delta_secs();
         return;
     }
-    if cars.iter().any(|car| car.speed.abs() > 0.4) {
+    if cars.iter().any(|car| car.velocity.length() > 0.4) {
         timer.running = true;
     }
 }

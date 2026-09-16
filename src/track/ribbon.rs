@@ -65,6 +65,8 @@ pub struct Station {
     /// A rib `lateral` metres off the centreline is a regular offset only while
     /// `1 - curvature * lateral > 0`.
     pub curvature: f32,
+    /// Rise over run along `tangent`. What gravity pulls against on a climb.
+    pub slope: f32,
 }
 
 /// The closed centreline, ready to loft.
@@ -77,9 +79,13 @@ pub struct Ribbon {
 pub struct Fix {
     /// Nearest point on the centreline, at circuit elevation.
     pub point: Vec3,
+    /// Unit heading of the circuit here, level in XZ.
+    pub tangent: Vec3,
     pub right: Vec3,
     /// Metres right of the centreline; negative is left.
     pub lateral: f32,
+    /// Rise over run along `tangent`.
+    pub slope: f32,
     /// Plan distance of `point` from the start/finish line.
     pub s: f32,
 }
@@ -158,8 +164,10 @@ impl Ribbon {
         let mut best = f32::MAX;
         let mut fix = Fix {
             point: self.stations[0].pos,
+            tangent: self.stations[0].tangent,
             right: self.stations[0].right,
             lateral: 0.0,
+            slope: self.stations[0].slope,
             s: 0.0,
         };
         for i in 0..n {
@@ -178,8 +186,10 @@ impl Ribbon {
                 let right = a.right.lerp(b.right, t).normalize_or(a.right);
                 fix = Fix {
                     point,
+                    tangent: a.tangent.lerp(b.tangent, t).normalize_or(a.tangent),
                     right,
                     lateral: flat(pos - point).dot(right),
+                    slope: a.slope.lerp(b.slope, t),
                     s: a.s + step * t,
                 };
             }
@@ -194,12 +204,14 @@ impl Ribbon {
         let stations = (0..n)
             .map(|i| {
                 let tangent = flat(line[(i + 1) % n] - line[(i + n - 1) % n]).normalize_or(Vec3::X);
+                let (behind, ahead) = (line[(i + n - 1) % n], line[(i + 1) % n]);
                 Station {
                     pos: line[i],
                     tangent,
                     right: tangent.cross(Vec3::Y).normalize_or(Vec3::Z),
                     s: step * i as f32,
                     curvature: curvature_at(&line, i),
+                    slope: (ahead.y - behind.y) / flat(ahead - behind).length().max(1e-4),
                 }
             })
             .collect();
