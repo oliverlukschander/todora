@@ -189,12 +189,16 @@ mod tests {
             let astray = f32::atan2(heading.cross(ahead).y, heading.dot(ahead));
             let correction = astray * 1.6 + ground.lateral * 0.16;
             let hold = 0.95 * 9.81 * ground.grip;
+            // Braking on a descent has the hill working against it. A driver
+            // who does not allow for that brakes late on every downhill corner.
+            let downhill = (-ground.slope * ground.tangent.dot(heading) * 9.81).max(0.0);
+            let stopping = (hold - downhill).max(hold * 0.4);
             let mut limit: f32 = 24.0;
             for step in 0..=16 {
                 let reach = step as f32 * 3.0;
                 let probe = track.ground(transform.translation + ahead * reach);
                 let corner = hold / probe.curvature.abs().max(0.002);
-                limit = limit.min((corner + 2.0 * hold * reach).sqrt());
+                limit = limit.min((corner + 2.0 * stopping * reach).sqrt());
             }
             let speed = car.velocity.length();
             let busy = car.g_force.x.abs() > 0.75 || car.rear_slip > 0.2;
