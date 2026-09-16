@@ -40,6 +40,15 @@ const GRAVITY: f32 = 9.81;
 /// corner, and how fast a slide is scrubbed off. Sporty, deliberately — the
 /// circuit is tight and the wheelbase is short.
 pub(super) const GRIP: f32 = 14.0;
+/// Grip climbs with speed, the way downforce does: at top speed there is about
+/// a third more than at a crawl. A fast corner is still a wide corner, but not
+/// a hopeless one — which is the difference between arriving a little quick and
+/// arriving in the grass.
+const DOWNFORCE: f32 = 0.009;
+/// Braking loads the nose, and a loaded nose bites. Braking into a corner
+/// turns the car tighter, not looser: a driver who has arrived too fast needs
+/// the pedal to help, and the intuitive thing to do must be the right one.
+const BRAKE_BITE: f32 = 0.25;
 /// How much of that the handbrake takes away. The rear lets go, the nose keeps
 /// rotating, and the car drifts. The reference figure across arcade racers is a
 /// slide at about a third of full grip.
@@ -64,11 +73,11 @@ const MAX_STEER: f32 = 0.7;
 /// full lock is the only lock there is, so it sits close to the limit: over by
 /// much and every corner is a push wide.
 const LOCK_MARGIN: f32 = 1.1;
-/// How fast the wheels follow the key.
-const STEER_RATE: f32 = 7.0;
+/// How fast the wheels follow the key. Arcade-quick: a tap must be seen.
+const STEER_RATE: f32 = 10.0;
 /// How fast the car rotates toward where the wheels are asking. This is the
 /// weight: low and it wallows, high and it darts.
-const YAW_RESPONSE: f32 = 8.0;
+const YAW_RESPONSE: f32 = 11.0;
 /// How hard a slide pulls the nose back into line with travel. This is what
 /// ends a drift when the inputs let it, and what keeps a lift-off from becoming
 /// a spin.
@@ -97,10 +106,9 @@ const SOFT_GROUND: f32 = 4.0;
 /// Reverse: from a standstill, up to a crawl.
 const REVERSE_ACCEL: f32 = 4.5;
 const REVERSE_SPEED: f32 = 8.0;
-/// How much of the slope's pull the car feels. A hill still adds speed, but a
-/// hill at three times its real gradient — which is what the height scale gives
-/// this circuit — would otherwise arrive at every corner far too fast.
-const SLOPE_PULL: f32 = 0.7;
+/// How much of the slope's pull the car feels. All of it: the hills are tamed
+/// where they are made, in the circuit's grade cap, not by lying about gravity.
+const SLOPE_PULL: f32 = 1.0;
 
 // --- the seams ---------------------------------------------------------------
 
@@ -193,8 +201,9 @@ pub(crate) fn step(
         && forward < STOPPED
         && speed < REVERSE_SPEED
         && lateral.abs() < SIDEWAYS;
+    let base = grip_at(speed) * surface.grip;
     let asking = (forward * car.yaw_rate).abs();
-    let at_the_limit = (asking / (GRIP * surface.grip).max(0.1)).min(1.0);
+    let at_the_limit = (asking / base.max(0.1)).min(1.0);
     let power_slide = if rolling && !reversing {
         controls.throttle.powi(2) * at_the_limit * POWER_LETS_GO
     } else {
@@ -204,7 +213,8 @@ pub(crate) fn step(
     let already_sliding =
         ((slip.abs() - MARK_FROM) / (MARK_FULL - MARK_FROM)).clamp(0.0, 1.0) * SLIDING_COSTS;
     let hold = (1.0 - handbrake) * (1.0 - power_slide) * (1.0 - already_sliding);
-    let grip = GRIP * surface.grip * hold;
+    let nose_bite = if rolling && !reversing { 1.0 + BRAKE_BITE * controls.brake } else { 1.0 };
+    let grip = base * hold * nose_bite;
 
     // Yaw. The wheels ask for the rate that would carry the car round the arc
     // they point along; the slide asks the nose to come back toward travel. The
@@ -282,8 +292,13 @@ pub(crate) fn step(
 /// slides a touch and never spins. The lock shrinks as the square of speed, and
 /// that is the whole reason a fast corner is a wide corner.
 fn lock(speed: f32) -> f32 {
-    let asks = LOCK_MARGIN * GRIP * WHEELBASE / speed.max(1.0).powi(2);
+    let asks = LOCK_MARGIN * grip_at(speed) * WHEELBASE / speed.max(1.0).powi(2);
     asks.atan().min(MAX_STEER)
+}
+
+/// Sideways grip on tarmac at `speed`, downforce included.
+fn grip_at(speed: f32) -> f32 {
+    GRIP + DOWNFORCE * speed * speed
 }
 
 #[cfg(test)]
@@ -420,7 +435,8 @@ mod tests {
                 FLAT,
                 2.0,
             );
-            assert!(peak <= GRIP / GRAVITY + 0.05, "{peak:.2} g from {} of grip", GRIP / GRAVITY);
+            let most = grip_at(speed) / GRAVITY;
+            assert!(peak <= most + 0.05, "{peak:.2} g from {most:.2} of grip");
         }
     }
 

@@ -26,8 +26,11 @@ use ribbon::{Ribbon, Station};
 
 /// The car is the ruler: ~2.4 m long, ~1.1 m wide, 1 unit = 1 metre.
 const PLAN_SCALE: f32 = 0.4 / 3.0;
-/// Elevation is 40% of the real Red Bull Ring, then smoothed and grade-capped.
-const HEIGHT_SCALE: f32 = 0.4;
+/// Elevation as a fraction of the real Red Bull Ring, then smoothed and
+/// grade-capped. The plan is scaled far harder than this, so the hills come out
+/// steeper than real by the ratio of the two: at 0.4 that was three times, and
+/// every descent arrived at its corner too fast to take. This still rolls.
+const HEIGHT_SCALE: f32 = 0.28;
 /// Half of the 8 m road, kerbs and edge lines included.
 ///
 /// The brief called for 12 m. [`PROFILE`] explains why the circuit cannot carry

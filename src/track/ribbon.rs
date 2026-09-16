@@ -33,7 +33,7 @@ pub(crate) const MIN_RADIUS: f32 = 10.0;
 /// Rise over run, after smoothing. The DEM heights are quantised to whole metres
 /// and the plan is scaled far harder than the elevation, so a single 1 m DEM step
 /// otherwise lands inside one station and reads as a wall.
-const MAX_GRADE: f32 = 0.16;
+const MAX_GRADE: f32 = 0.12;
 /// Arc length the height profile is averaged over before the grade cap.
 const SMOOTH_SPAN: f32 = 24.0;
 /// Stretches of circuit closer together than this along the lap are neighbours,

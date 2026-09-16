@@ -163,74 +163,98 @@ mod tests {
     use super::*;
     use crate::track::Track;
 
-    /// A plain driver: aim at the centreline, and carry the speed the tyres can
-    /// hold through the tightest bend it can see. No racing line, no reflexes —
-    /// if this cannot get round, neither can anyone.
+    /// Two drivers round the real circuit, through the real physics and the
+    /// real barriers.
     ///
-    /// It is a smoke test that the circuit is completable, not a tuning oracle.
-    /// Chasing its numbers rewards a slow, dull car, because a faster one gives a
-    /// driver this simple more to get wrong.
-    fn drive_one_lap(seconds: f32) -> Lap {
+    /// The plain one aims at the centreline with proportional steering and
+    /// carries the speed the tyres can hold through the tightest bend it can
+    /// see a long way ahead. If it cannot get round, neither can anyone.
+    ///
+    /// The clumsy one is a person on a keyboard: full lock or nothing, a
+    /// reaction time, a short look up the road, and brakes that go on late. If
+    /// *it* gets round, the car is easy to learn — and that is the test that
+    /// matters, because the plain driver was lapping happily while the person
+    /// holding the keys was not.
+    ///
+    /// Neither is a tuning oracle. Chasing their numbers rewards a slow, dull car.
+    fn drive_one_lap(seconds: f32, clumsy: bool) -> Lap {
+        use std::collections::VecDeque;
         let track = Track::new();
         let mut transform = track.start_transform().with_scale(Vec3::splat(SCALE));
         let mut car = Car::default();
         let dt = 1.0 / 120.0;
         let mut lap = Lap::default();
         let mut travelled = 0.0f32;
+        // What the clumsy driver is reacting to: the world as it was 150 ms ago.
+        let mut seen: VecDeque<(f32, f32, f32)> = VecDeque::new();
+        let reaction = if clumsy { 18 } else { 0 };
+        let lookahead = if clumsy { 6 } else { 16 };
+        let late = if clumsy { 1.15 } else { 1.04 };
 
         for _ in 0..(seconds / dt) as usize {
             let heading = level(*transform.forward());
             let ground = track.ground(transform.translation);
-            // The way the lap runs, not the way the car happens to be pointing:
-            // aligning the target to the car lets the driver lap backwards.
             let ahead = ground.tangent;
-            // Signed, so facing the wrong way reads as half a turn of error
-            // rather than as no error at all.
             let astray = f32::atan2(heading.cross(ahead).y, heading.dot(ahead));
             let correction = astray * 1.6 + ground.lateral * 0.16;
+
             let hold = 0.95 * 9.81 * ground.grip;
-            // Braking on a descent has the hill working against it. A driver
-            // who does not allow for that brakes late on every downhill corner.
             let downhill = (-ground.slope * ground.tangent.dot(heading) * 9.81).max(0.0);
             let stopping = (hold - downhill).max(hold * 0.4);
             let mut limit: f32 = 24.0;
-            for step in 0..=16 {
+            for step in 0..=lookahead {
                 let reach = step as f32 * 3.0;
                 let probe = track.ground(transform.translation + ahead * reach);
                 let corner = hold / probe.curvature.abs().max(0.002);
                 limit = limit.min((corner + 2.0 * stopping * reach).sqrt());
             }
             let speed = car.velocity.length();
-            let busy = car.g_force.x.abs() > 0.75 || car.rear_slip > 0.2;
 
-            let controls = Controls {
-                // Do not drive hard at anything but the road ahead — unless
-                // stopped, when sitting still pointing the wrong way is the one
-                // thing that gets you nowhere.
-                throttle: if speed < 1.0 || (speed < limit * 0.96 && !busy && astray.abs() < 0.6) {
-                    1.0
-                } else {
-                    0.0
-                },
-                brake: if speed > limit * 1.04 { 1.0 } else { 0.0 },
-                // Proportional, so this measures the car rather than the
-                // driver: an on-off input oscillates harder the more capable the
-                // car gets, which grades a better car as worse.
-                steer: correction.clamp(-1.0, 1.0),
-                handbrake: false,
+            seen.push_back((correction, speed, limit));
+            let (correction, seen_speed, limit) = if seen.len() > reaction {
+                seen.pop_front().unwrap()
+            } else {
+                (correction, speed, limit)
+            };
+
+            let controls = if clumsy {
+                Controls {
+                    throttle: if seen_speed > limit * late { 0.0 } else { 1.0 },
+                    brake: if seen_speed > limit * late { 1.0 } else { 0.0 },
+                    steer: if correction > 0.03 {
+                        1.0
+                    } else if correction < -0.03 {
+                        -1.0
+                    } else {
+                        0.0
+                    },
+                    handbrake: false,
+                }
+            } else {
+                let busy = car.g_force.x.abs() > 0.75 || car.rear_slip > 0.2;
+                Controls {
+                    throttle: if speed < 1.0
+                        || (seen_speed < limit * 0.96 && !busy && astray.abs() < 0.6)
+                    {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                    brake: if seen_speed > limit * late { 1.0 } else { 0.0 },
+                    steer: correction.clamp(-1.0, 1.0),
+                    handbrake: false,
+                }
             };
 
             let surface = Surface {
                 grip: ground.grip,
-                slope: ground.slope * ground.tangent.dot(heading).signum(),
+                slope: ground.slope * ground.tangent.dot(heading),
             };
             let yaw = physics::step(&mut car, heading, heading.cross(Vec3::Y), controls, surface, dt);
             transform.rotate_y(yaw);
             transform.translation += car.velocity * dt;
             travelled += speed * dt;
 
-            // The same thing the circuit does to the real car, not a stand-in
-            // for it: barrier, kerb height and all.
             track.hold(&mut transform, &mut car, dt);
             let ground = track.ground(transform.translation);
             if ground.lateral.abs() > 4.0 {
@@ -239,8 +263,8 @@ mod tests {
             if ground.lateral.abs() > 5.5 {
                 lap.in_the_weeds += dt;
             }
-            let downhill = ground.slope * ground.tangent.dot(heading) < -0.04;
-            if downhill {
+            let heading = level(*transform.forward());
+            if ground.slope * ground.tangent.dot(heading) < -0.04 {
                 lap.descending += dt;
                 if ground.lateral.abs() > 4.0 {
                     lap.off_road_descending += dt;
@@ -266,24 +290,36 @@ mod tests {
         off_road_descending: f32,
     }
 
-    #[test]
-    fn a_plain_driver_gets_round() {
-        let lap = drive_one_lap(90.0);
+    fn report(who: &str, lap: &Lap) {
         println!(
-            "round {:.0}%  {:.0} m  off-road {:.1} s  weeds {:.1} s  stopped {:.1} s",
+            "{who}: round {:.0}%  {:.0} m  off-road {:.1} s  weeds {:.1} s  stopped {:.1} s  \
+             (descending {:.1} s, {:.0}% of it off-road; elsewhere {:.0}%)",
             lap.progress * 100.0,
             lap.distance,
             lap.off_road,
             lap.in_the_weeds,
-            lap.stopped
-        );
-        println!(
-            "descending {:.1} s, off-road for {:.1} of it ({:.0}%); elsewhere {:.0}%",
+            lap.stopped,
             lap.descending,
-            lap.off_road_descending,
             100.0 * lap.off_road_descending / lap.descending.max(0.1),
             100.0 * (lap.off_road - lap.off_road_descending) / (90.0 - lap.descending).max(0.1)
         );
+    }
+
+    /// Full lock or nothing, 150 ms behind, brakes late, cannot see far. This is
+    /// the person holding the keys, and the car has to be drivable by them.
+    #[test]
+    fn a_clumsy_driver_still_gets_round() {
+        let lap = drive_one_lap(90.0, true);
+        report("clumsy", &lap);
+        assert!(lap.progress > 0.9, "90 s only got {:.0}% round", lap.progress * 100.0);
+        assert!(lap.off_road < 40.0, "off the road {:.0} s of 90", lap.off_road);
+        assert!(lap.stopped < 20.0, "going nowhere {:.0} s of 90", lap.stopped);
+    }
+
+    #[test]
+    fn a_plain_driver_gets_round() {
+        let lap = drive_one_lap(90.0, false);
+        report("plain", &lap);
         assert!(
             lap.progress > 0.9,
             "90 s only got {:.0}% round, {:.0} m",

@@ -3,7 +3,7 @@ use bevy::{
     prelude::*,
 };
 
-use crate::car::{Car, DriveSet};
+use crate::car::{level, Car, DriveSet};
 use crate::track::Track;
 use crate::world::SKY;
 
@@ -78,14 +78,18 @@ fn follow(
         return;
     };
     let dt = time.delta_secs();
-    let desired =
-        car.translation - *car.forward() * (BACK * follow.zoom) + Vec3::Y * (HEIGHT * follow.zoom);
+    // The car lies along the slope; the camera must not. Hanging the boom off
+    // the pitched nose lifts it a metre and tilts it ten degrees steeper on a
+    // descent, which leaves the driver looking at the roof with the corner
+    // ahead crushed into the bottom of the frame.
+    let ahead = level(*car.forward());
+    let desired = car.translation - ahead * (BACK * follow.zoom) + Vec3::Y * (HEIGHT * follow.zoom);
     let t_xz = 1.0 - (-FOLLOW_XZ * dt).exp();
     let t_y = 1.0 - (-FOLLOW_Y * dt).exp();
     camera.translation.x = camera.translation.x.lerp(desired.x, t_xz);
     camera.translation.z = camera.translation.z.lerp(desired.z, t_xz);
     camera.translation.y = camera.translation.y.lerp(desired.y, t_y);
 
-    let look = car.translation + *car.forward() * LOOK_AHEAD + Vec3::Y * LOOK_HEIGHT;
+    let look = car.translation + ahead * LOOK_AHEAD + Vec3::Y * LOOK_HEIGHT;
     camera.look_at(look, Vec3::Y);
 }
