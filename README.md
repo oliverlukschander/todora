@@ -10,9 +10,9 @@ The circuit is one closed spline plus one cross-section profile. Tarmac, edge li
 cargo run
 ```
 
-**WASD** or **arrows** to drive. **Shift** to brake. **Space** for the handbrake. **Scroll** to zoom.
+**W** and **S** are the pedals — **S** brakes while you are rolling and reverses once you have stopped. **A** and **D** steer, **Space** is the handbrake, **Scroll** zooms. Arrow keys work too, and **Shift** still brakes.
 
-The car is rear-wheel drive with a weight and tyres that only have so much grip. Each axle spends one friction budget on driving and cornering together, so power on the way out of a corner costs you the corner — which is where the drifts and the tyre marks come from. The g-meter top left shows what the car is pulling: sideways through a corner, up and down under power and braking and over the circuit's climbs.
+The car is rear-wheel drive with a weight and tyres that only have so much grip. Each axle spends one friction budget on driving and cornering together, so power on the way out of a corner costs you the corner — which is where the drifts and the tyre marks come from. The brakes take a share of whatever grip each axle has rather than a fixed force, so they stop the car at about 1.2 g on tarmac, proportion themselves under load transfer, and go soft on the grass. The g-meter top left shows what the car is pulling: sideways through a corner, up and down under power and braking and over the circuit's climbs.
 
 Needs a recent stable Rust (`rustup` on macOS). First Bevy compile is slow; later ones are not.
 

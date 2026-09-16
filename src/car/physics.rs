@@ -50,14 +50,21 @@ const PEAK_SLIP: f32 = 0.192;
 const ENGINE: f32 = 7_600.0;
 const TOP_SPEED: f32 = 24.0;
 const REVERSE_SPEED: f32 = 9.0;
-const BRAKE: f32 = 11_000.0;
+/// Reverse is a fraction of the forward pull, and only up to a crawl.
+const REVERSE_EFFORT: f32 = 0.42;
+/// Rolling slower than this counts as stopped, which is when the brake key
+/// becomes reverse.
+const STOPPED: f32 = 0.5;
+/// The brakes can lock any wheel, so what stops the car is the tyre, not the
+/// pedal: each axle is asked for this much of the grip it has, whatever the load
+/// on it and whatever it is standing on. Asking for a shade under everything
+/// leaves a sliver to steer with, which is the difference between braking hard
+/// and braking well, and it is also why a straight-line stop leaves no marks.
+const BRAKE_EFFORT: f32 = 0.95;
 /// The handbrake locks the rear axle rather than merely slowing it, so it has to
 /// ask for more than the rear tyres can ever give. The tyre still only delivers
 /// what it has; the difference is what marks the road.
 const HANDBRAKE: f32 = 14_000.0;
-/// Rear brake share. Biasing forward keeps braking straight without the
-/// handbrake.
-const REAR_BRAKE_SHARE: f32 = 0.38;
 
 const DRAG: f32 = 2.6;
 const ROLLING_RESISTANCE: f32 = 260.0;
@@ -79,11 +86,13 @@ const CRAWL: f32 = 1.2;
 /// What the driver is asking for this frame.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Controls {
-    /// Forward on the right stick: positive drives, negative reverses.
+    /// 0 to 1.
     pub(crate) throttle: f32,
+    /// 0 to 1. The brake while the car is rolling, reverse once it has stopped —
+    /// two pedals on two keys, the way every arcade racer does it.
+    pub(crate) brake: f32,
     /// Positive steers left, matching Bevy's left-handed yaw about +Y.
     pub(crate) steer: f32,
-    pub(crate) braking: bool,
     pub(crate) handbrake: bool,
 }
 
@@ -160,34 +169,39 @@ pub(crate) fn step(
     let front_angle = ((across - FRONT_AXLE * car.yaw_rate) / pace).atan() + steer * along.signum();
     let rear_angle = ((across + REAR_AXLE * car.yaw_rate) / pace).atan();
 
+    let front_budget = FRICTION * surface.grip * front_load;
+    let rear_budget = FRICTION * REAR_GRIP_BIAS * surface.grip * rear_load;
+
     // Longitudinal demand. Rear wheel drive: the engine only ever asks the rear.
+    let rolling = along.abs() > STOPPED;
     let drive = if controls.throttle > 0.0 {
         // Pull holds up most of the way and then falls off a cliff, so the car
         // gets out of a hairpin without pinning the top speed to the engine.
         let fade = 1.0 - (along / TOP_SPEED).clamp(0.0, 1.0).powi(2);
         controls.throttle * ENGINE * fade
-    } else if controls.throttle < 0.0 && along > -REVERSE_SPEED {
-        controls.throttle * ENGINE * 0.45
+    } else if controls.brake > 0.0 && along <= STOPPED && along > -REVERSE_SPEED {
+        -controls.brake * ENGINE * REVERSE_EFFORT
     } else {
         0.0
     };
-    let brake = if controls.braking && along.abs() > CRAWL * 0.2 {
-        -BRAKE * along.signum()
+    // Braking takes a share of each axle's grip rather than a fixed force, which
+    // is ideal brake proportioning for free: the axle carrying the weight does
+    // the stopping, and neither ever locks on its own.
+    let effort = if controls.brake > 0.0 && rolling && along > 0.0 {
+        BRAKE_EFFORT * controls.brake
     } else {
         0.0
     };
-    let rear_handbrake = if controls.handbrake && along.abs() > CRAWL * 0.2 {
+    let rear_handbrake = if controls.handbrake && rolling {
         -HANDBRAKE * along.signum()
     } else {
         0.0
     };
-    let front_long = brake * (1.0 - REAR_BRAKE_SHARE);
+    let front_long = -effort * front_budget;
     // What the rear axle is being asked for, before the tyre has its say. The
     // difference between the two is what tells a hard stop from a locked wheel.
-    let rear_demand = drive + brake * REAR_BRAKE_SHARE + rear_handbrake;
+    let rear_demand = drive - effort * rear_budget + rear_handbrake;
 
-    let front_budget = FRICTION * surface.grip * front_load;
-    let rear_budget = FRICTION * REAR_GRIP_BIAS * surface.grip * rear_load;
     // Sideways grip arrives with speed. Without this the car fights its own
     // steering at a crawl, and the drag of a fully-locked front wheel is enough
     // to stop it pulling away at all.
@@ -198,7 +212,7 @@ pub(crate) fn step(
 
     // Gravity along the slope, and the losses that stop the car coasting forever.
     let climb = -GRAVITY * surface.slope / (1.0 + surface.slope * surface.slope).sqrt();
-    let resistance = if along.abs() > CRAWL * 0.2 {
+    let resistance = if rolling {
         -DRAG * along * along.abs() - ROLLING_RESISTANCE * along.signum()
     } else {
         0.0
@@ -218,7 +232,7 @@ pub(crate) fn step(
     // after the tyres have let go.
     car.yaw_rate *= 1.0 - (2.2 * dt).min(1.0);
 
-    if controls.throttle == 0.0 && !controls.braking && car.velocity.length() < 0.3 {
+    if controls.throttle == 0.0 && controls.brake == 0.0 && car.velocity.length() < 0.3 {
         car.velocity = Vec3::ZERO;
         car.yaw_rate = 0.0;
     }
@@ -427,6 +441,78 @@ mod tests {
         );
     }
 
+    /// The pedal must not be what limits the stop — the tyres must be. Anything
+    /// less and the brakes feel like a suggestion.
+    #[test]
+    fn the_brakes_pull_close_to_the_grip_limit() {
+        let mut car = rolling(20.0);
+        let before = car.velocity.length();
+        let stop = Controls {
+            brake: 1.0,
+            ..default()
+        };
+        coast(&mut car, stop, FLAT, 0.5);
+        let shed = (before - car.velocity.length()) / 0.5 / GRAVITY;
+        assert!(
+            shed > 0.95,
+            "full brakes only shed {shed:.2} g of a possible {FRICTION}"
+        );
+        assert!(shed <= FRICTION + 0.1, "{shed:.2} g is more grip than exists");
+    }
+
+    /// Grip is what the brakes spend, so less of it has to mean a longer stop.
+    #[test]
+    fn brakes_are_worth_less_on_grass() {
+        let stop = Controls {
+            brake: 1.0,
+            ..default()
+        };
+        let mut tarmac = rolling(16.0);
+        coast(&mut tarmac, stop, FLAT, 0.6);
+        let mut grass = rolling(16.0);
+        coast(&mut grass, stop, Surface { grip: 0.38, slope: 0.0 }, 0.6);
+        assert!(
+            grass.velocity.length() > tarmac.velocity.length() + 3.0,
+            "grass stopped it nearly as well as tarmac: {} against {}",
+            grass.velocity.length(),
+            tarmac.velocity.length()
+        );
+    }
+
+    /// Braking flat out still has to leave something to steer with, or every
+    /// corner entry is a straight line into the grass.
+    #[test]
+    fn there_is_grip_left_to_turn_on_the_brakes() {
+        let mut car = rolling(16.0);
+        let yaw = coast(
+            &mut car,
+            Controls {
+                brake: 1.0,
+                steer: 1.0,
+                ..default()
+            },
+            FLAT,
+            0.8,
+        );
+        assert!(yaw > 0.1, "full brakes killed the steering: {yaw} rad");
+    }
+
+    /// One key has to do both pedals: brake while rolling, reverse from a stop.
+    #[test]
+    fn the_brake_key_becomes_reverse_once_stopped() {
+        let mut car = rolling(10.0);
+        let stop = Controls {
+            brake: 1.0,
+            ..default()
+        };
+        coast(&mut car, stop, FLAT, 1.2);
+        assert!(car.speed(Vec3::NEG_Z) < 0.1, "it never came to a stop");
+        coast(&mut car, stop, FLAT, 1.5);
+        let backwards = -car.speed(Vec3::NEG_Z);
+        assert!(backwards > 1.5, "it only backed up at {backwards} m/s");
+        assert!(backwards < REVERSE_SPEED, "reverse ran away to {backwards}");
+    }
+
     /// The handbrake has to break the rear loose, and the model has to notice.
     #[test]
     fn the_handbrake_lets_the_back_go() {
@@ -457,9 +543,9 @@ mod tests {
         for i in 0..4_000 {
             let heading = Quat::from_rotation_y(yaw) * Vec3::NEG_Z;
             let controls = Controls {
-                throttle: ((i / 17) % 3) as f32 - 1.0,
+                throttle: ((i / 17) % 2) as f32,
+                brake: ((i / 23) % 2) as f32,
                 steer: (((i / 11) % 3) as f32 - 1.0) * 1.0,
-                braking: i % 23 == 0,
                 handbrake: (i / 31) % 2 == 0,
             };
             let surface = Surface {
@@ -478,3 +564,4 @@ mod tests {
         }
     }
 }
+

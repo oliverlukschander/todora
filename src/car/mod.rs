@@ -82,11 +82,12 @@ fn drive(
 ) {
     let dt = time.delta_secs().min(MAX_STEP);
     let controls = Controls {
-        throttle: axis(&keys, KeyCode::KeyW, KeyCode::ArrowUp)
-            - axis(&keys, KeyCode::KeyS, KeyCode::ArrowDown),
+        throttle: axis(&keys, KeyCode::KeyW, KeyCode::ArrowUp),
+        // Shift still brakes, for anyone who learned it that way.
+        brake: axis(&keys, KeyCode::KeyS, KeyCode::ArrowDown)
+            .max(axis(&keys, KeyCode::ShiftLeft, KeyCode::ShiftRight)),
         steer: axis(&keys, KeyCode::KeyA, KeyCode::ArrowLeft)
             - axis(&keys, KeyCode::KeyD, KeyCode::ArrowRight),
-        braking: keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]),
         handbrake: keys.pressed(KeyCode::Space),
     };
 
