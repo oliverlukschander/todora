@@ -108,8 +108,12 @@ fn drive(
         let ground = track.ground(transform.translation);
         let surface = Surface {
             grip: ground.grip,
-            // Positive where the circuit climbs the way the car is pointing.
-            slope: ground.slope * ground.tangent.dot(heading).signum(),
+            // The grade runs along the circuit; the car gets the component of it
+            // that lies along its nose. Projecting rather than taking the sign
+            // matters once the car is sideways: at ninety degrees to the road the
+            // sign flips on nothing at all, and gravity would slam back and forth
+            // frame to frame.
+            slope: ground.slope * ground.tangent.dot(heading),
         };
         let yaw = physics::step(&mut car, heading, right, controls, surface, dt);
         transform.rotate_y(yaw);
@@ -230,6 +234,13 @@ use crate::Reset;
             if ground.lateral.abs() > 5.5 {
                 lap.in_the_weeds += dt;
             }
+            let downhill = ground.slope * ground.tangent.dot(heading) < -0.04;
+            if downhill {
+                lap.descending += dt;
+                if ground.lateral.abs() > 4.0 {
+                    lap.off_road_descending += dt;
+                }
+            }
             if speed < 1.5 {
                 lap.stopped += dt;
             }
@@ -246,6 +257,8 @@ use crate::Reset;
         off_road: f32,
         in_the_weeds: f32,
         stopped: f32,
+        descending: f32,
+        off_road_descending: f32,
     }
 
     #[test]
@@ -258,6 +271,13 @@ use crate::Reset;
             lap.off_road,
             lap.in_the_weeds,
             lap.stopped
+        );
+        println!(
+            "descending {:.1} s, off-road for {:.1} of it ({:.0}%); elsewhere {:.0}%",
+            lap.descending,
+            lap.off_road_descending,
+            100.0 * lap.off_road_descending / lap.descending.max(0.1),
+            100.0 * (lap.off_road - lap.off_road_descending) / (90.0 - lap.descending).max(0.1)
         );
         assert!(
             lap.progress > 0.9,

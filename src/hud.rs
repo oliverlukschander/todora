@@ -32,6 +32,9 @@ struct Needle;
 #[derive(Component)]
 struct GReadout;
 
+#[derive(Component)]
+struct SpeedReadout;
+
 fn setup(mut commands: Commands) {
     commands.spawn((
         Text::new(
@@ -115,13 +118,22 @@ fn setup(mut commands: Commands) {
                 ],
             ),
             (
+                SpeedReadout,
+                Text::new("0 KM/H"),
+                TextFont {
+                    font_size: FontSize::Px(20.0),
+                    ..default()
+                },
+                TextColor(AMBER),
+            ),
+            (
                 GReadout,
                 Text::new("0.00 G"),
                 TextFont {
                     font_size: FontSize::Px(15.0),
                     ..default()
                 },
-                TextColor(AMBER),
+                TextColor(AMBER_DIM),
             ),
         ],
     ));
@@ -167,10 +179,16 @@ fn draw_g_meter(
     cars: Query<&Car>,
     mut needle: Query<&mut Node, With<Needle>>,
     mut readout: Query<&mut Text, With<GReadout>>,
+    mut speed: Query<&mut Text, (With<SpeedReadout>, Without<GReadout>)>,
 ) {
     let Ok(car) = cars.single() else {
         return;
     };
+    if let Ok(mut text) = speed.single_mut() {
+        // A hill adds a lot of speed, and a corner that will not come round is
+        // usually a corner arrived at too fast. Worth being able to see.
+        text.0 = format!("{:.0} KM/H", car.velocity.length() * 3.6);
+    }
     let reading = (car.g_force / FULL_SCALE).clamp_length_max(1.0) * (METER - NEEDLE) / 2.0;
     if let Ok(mut node) = needle.single_mut() {
         node.left = px((METER - NEEDLE) / 2.0 + reading.x);

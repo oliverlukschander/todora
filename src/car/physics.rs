@@ -162,8 +162,12 @@ pub(crate) fn step(
     let across = car.velocity.dot(right);
     let pace = along.abs().max(CRAWL);
 
-    // Static load, shifted by whatever the car did last frame. Squat puts the
-    // rear tyre down harder, which is why power-on drifts hook up again.
+    // Static load, shifted by what the tyres pushed against the road last frame.
+    // Squat puts the rear tyre down harder, which is why power-on drifts hook up
+    // again. Gravity is deliberately not in it: it pulls on the centre of mass
+    // rather than through the contact patches, so it cannot pitch the car — and
+    // counting it was taking weight off the front wheels all the way down every
+    // hill, which is exactly where you need them.
     let weight = MASS * GRAVITY;
     let transfer = MASS * car.g_force.y * GRAVITY * CG_HEIGHT / WHEELBASE;
     let front_load = (weight * REAR_AXLE / WHEELBASE - transfer).max(weight * 0.12);
@@ -224,8 +228,11 @@ pub(crate) fn step(
         0.0
     };
 
-    let forward_accel =
-        (front_long + rear_long + resistance - front_lat * steer.sin()) / MASS + climb;
+    // What the tyres are doing, and what the car does — which differ by the
+    // slope. The first is what pitches the car and what an accelerometer in it
+    // would read; the second is what actually moves it.
+    let traction = (front_long + rear_long + resistance - front_lat * steer.sin()) / MASS;
+    let forward_accel = traction + climb;
     let lateral_accel = (front_lat * steer.cos() + rear_lat) / MASS;
     // A leftward force ahead of the centre of mass yaws the car left; the same
     // force behind it yaws the car right.
@@ -243,7 +250,7 @@ pub(crate) fn step(
         car.yaw_rate = 0.0;
     }
 
-    car.g_force = Vec2::new(lateral_accel, forward_accel) / GRAVITY;
+    car.g_force = Vec2::new(lateral_accel, traction) / GRAVITY;
     car.rear_slip = slide(rear_angle, rear_demand, rear_budget, car.velocity.length());
 
     car.yaw_rate * dt
@@ -615,5 +622,6 @@ mod tests {
         }
     }
 }
+
 
 

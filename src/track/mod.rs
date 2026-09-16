@@ -20,7 +20,7 @@ use bevy::{
     render::render_resource::PrimitiveTopology,
 };
 
-use crate::car::{Car, DriveSet};
+use crate::car::{level, Car, DriveSet};
 use layout::CENTERLINE;
 use ribbon::{Ribbon, Station};
 
@@ -210,6 +210,12 @@ impl Track {
     pub(crate) fn hold(&self, transform: &mut Transform, car: &mut Car, dt: f32) {
         let ground = self.ground(transform.translation);
         transform.translation.y = ground.height;
+        // Sit the car on the slope rather than level on top of it. On the steep
+        // parts that is nine degrees, which is the nose buried in the road — and
+        // a hill you cannot see coming is a hill you arrive at far too fast.
+        let heading = level(*transform.forward());
+        let grade = ground.slope * ground.tangent.dot(heading);
+        transform.look_to(heading + Vec3::Y * grade, Vec3::Y);
 
         // Off the road and going nowhere: a spin into the barrier leaves the car
         // nose-first against it, where everything it does is outward and
@@ -624,6 +630,39 @@ mod tests {
                 transform.forward().dot(ground.tangent) > 0.99,
                 "rescue {stuck} m out left the car facing the wrong way"
             );
+        }
+    }
+
+    /// On the steep parts the car has to follow the road, not stay level on top
+    /// of it with its nose in the tarmac.
+    #[test]
+    fn the_car_lies_along_the_slope() {
+        let track = track();
+        let steepest = track
+            .ribbon
+            .stations()
+            .iter()
+            .max_by(|a, b| a.slope.abs().total_cmp(&b.slope.abs()))
+            .expect("the circuit has stations");
+        assert!(steepest.slope.abs() > 0.1, "nowhere steep enough to test");
+
+        for facing in [1.0f32, -1.0] {
+            let mut transform = Transform::from_translation(steepest.pos)
+                .looking_to(steepest.tangent * facing, Vec3::Y);
+            let mut car = Car::default();
+            track.hold(&mut transform, &mut car, 1.0 / 60.0);
+
+            // Running down the hill the nose points down, and up it points up.
+            let grade = steepest.slope * facing;
+            let want = grade / (1.0 + grade * grade).sqrt();
+            assert!(
+                (transform.forward().y - want).abs() < 0.01,
+                "facing {facing}, nose at {} against a grade of {want}",
+                transform.forward().y
+            );
+            // And it is still pointing the way it was, in plan.
+            let heading = crate::car::level(*transform.forward());
+            assert!(heading.dot(steepest.tangent * facing) > 0.999, "the pitch turned it");
         }
     }
 
