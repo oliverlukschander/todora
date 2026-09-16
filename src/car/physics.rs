@@ -39,32 +39,36 @@ const GRAVITY: f32 = 9.81;
 /// Sideways acceleration the tyres can produce on tarmac: how hard the car can
 /// corner, and how fast a slide is scrubbed off. Sporty, deliberately — the
 /// circuit is tight and the wheelbase is short.
-const GRIP: f32 = 12.0;
+pub(super) const GRIP: f32 = 14.0;
 /// How much of that the handbrake takes away. The rear lets go, the nose keeps
 /// rotating, and the car drifts. The reference figure across arcade racers is a
 /// slide at about a third of full grip.
 const HANDBRAKE_LETS_GO: f32 = 0.68;
 /// How much the throttle takes away once the car is already at the limit. Power
 /// on, mid-corner, at the edge of grip: the back steps out. That is the rear
-/// wheel drive, and the reason to be patient with the right foot.
-const POWER_LETS_GO: f32 = 0.4;
+/// wheel drive, and the reason to be patient with the right foot. It goes with
+/// the square of the throttle, so a feathered exit costs almost nothing and a
+/// booted one costs all of this.
+const POWER_LETS_GO: f32 = 0.45;
 /// Grip is worth a little less the further the car is already sliding, which is
 /// what lets a drift be held rather than snapping straight the moment the
-/// handbrake comes off.
+/// handbrake comes off. It only starts past the slip a clean corner carries, or
+/// it taxes every corner on the way to the one it is meant for.
 const SLIDING_COSTS: f32 = 0.35;
 
 // --- steering ----------------------------------------------------------------
 
 /// Lock at a standstill. Above walking pace it is wound off — see [`lock`].
 const MAX_STEER: f32 = 0.7;
-/// Full lock asks for this much more turn than the grip can give, so it always
-/// slides a little. Enough to lean on; not enough to lose it.
-const LOCK_MARGIN: f32 = 1.35;
+/// Full lock asks for a touch more turn than the grip can give. On a keyboard
+/// full lock is the only lock there is, so it sits close to the limit: over by
+/// much and every corner is a push wide.
+const LOCK_MARGIN: f32 = 1.1;
 /// How fast the wheels follow the key.
-const STEER_RATE: f32 = 5.0;
+const STEER_RATE: f32 = 7.0;
 /// How fast the car rotates toward where the wheels are asking. This is the
 /// weight: low and it wallows, high and it darts.
-const YAW_RESPONSE: f32 = 5.5;
+const YAW_RESPONSE: f32 = 8.0;
 /// How hard a slide pulls the nose back into line with travel. This is what
 /// ends a drift when the inputs let it, and what keeps a lift-off from becoming
 /// a spin.
@@ -192,12 +196,13 @@ pub(crate) fn step(
     let asking = (forward * car.yaw_rate).abs();
     let at_the_limit = (asking / (GRIP * surface.grip).max(0.1)).min(1.0);
     let power_slide = if rolling && !reversing {
-        controls.throttle * at_the_limit * POWER_LETS_GO
+        controls.throttle.powi(2) * at_the_limit * POWER_LETS_GO
     } else {
         0.0
     };
     let handbrake = if controls.handbrake && rolling { HANDBRAKE_LETS_GO } else { 0.0 };
-    let already_sliding = (slip.abs() / MARK_FULL).min(1.0) * SLIDING_COSTS;
+    let already_sliding =
+        ((slip.abs() - MARK_FROM) / (MARK_FULL - MARK_FROM)).clamp(0.0, 1.0) * SLIDING_COSTS;
     let hold = (1.0 - handbrake) * (1.0 - power_slide) * (1.0 - already_sliding);
     let grip = GRIP * surface.grip * hold;
 
@@ -751,4 +756,5 @@ mod tests {
         }
     }
 }
+
 

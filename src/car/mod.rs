@@ -347,7 +347,7 @@ mod analysis {
 
         println!("{:>5} {:>5} {:>6} {:>7} {:>7} {:>8} {:>7} {:>8}",
             "grip", "top", "lap s", "flatout", "braking", "spread", "slowest", "90%loss");
-        for grip in [1.00f32, 1.22, 1.45] {
+        for grip in [1.00f32, physics::GRIP / 9.81, 1.7] {
         for top in [18.0f32, 21.0, 24.0, 28.0] {
         let engine = 5.0f32;
             let lat = grip * 9.81;
