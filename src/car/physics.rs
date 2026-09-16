@@ -65,6 +65,8 @@ const REVERSE_EFFORT: f32 = 0.42;
 /// Rolling slower than this counts as stopped, which is when the brake key
 /// becomes reverse.
 const STOPPED: f32 = 0.5;
+/// Sideways faster than this and the car is sliding, not backing up.
+const SIDEWAYS: f32 = 2.0;
 /// The brakes can lock any wheel, so what stops the car is the tyre, not the
 /// pedal: each axle is asked for this much of the grip it has, whatever the load
 /// on it and whatever it is standing on. Asking for a shade under everything
@@ -188,13 +190,30 @@ pub(crate) fn step(
     let rear_budget = FRICTION * REAR_GRIP_BIAS * surface.grip * rear_load;
 
     // Longitudinal demand. Rear wheel drive: the engine only ever asks the rear.
-    let rolling = along.abs() > STOPPED;
+    // Whether the car is moving, not whether it is moving the way it is pointed.
+    // Gating any of this on the forward component alone means a car sliding
+    // broadside has nothing slowing it: no drag, no engine, and no brakes.
+    let speed = car.velocity.length();
+    let rolling = speed > STOPPED;
+    // How much of that motion is along the wheels. A wheel sliding straight
+    // sideways is not turning, so nothing that reaches the road through its
+    // rotation has anything to push against.
+    let rolling_share = along / speed.max(STOPPED);
+    // Reverse from a stop, or once already backing up — and never in a slide.
+    // A slide drops the forward component to nothing while the car is still
+    // travelling at speed, so the forward component alone cannot tell the two
+    // apart; what tells them apart is whether the car is going sideways.
+    let reversing = controls.brake > 0.0
+        && along < STOPPED
+        && speed < REVERSE_SPEED
+        && across.abs() < SIDEWAYS;
+
     let drive = if controls.throttle > 0.0 {
         // Pull holds up most of the way and then falls off a cliff, so the car
         // gets out of a hairpin without pinning the top speed to the engine.
         let fade = 1.0 - (along / TOP_SPEED).clamp(0.0, 1.0).powi(2);
         controls.throttle * ENGINE * fade
-    } else if controls.brake > 0.0 && along <= STOPPED && along > -REVERSE_SPEED {
+    } else if reversing && along > -REVERSE_SPEED {
         -controls.brake * ENGINE * REVERSE_EFFORT
     } else {
         0.0
@@ -202,7 +221,7 @@ pub(crate) fn step(
     // Braking takes a share of each axle's grip rather than a fixed force, which
     // is ideal brake proportioning for free: the axle carrying the weight does
     // the stopping, and neither ever locks on its own.
-    let effort = if controls.brake > 0.0 && rolling && along > 0.0 {
+    let effort = if controls.brake > 0.0 && rolling && !reversing {
         BRAKE_EFFORT * controls.brake
     } else {
         0.0
@@ -216,14 +235,14 @@ pub(crate) fn step(
     // the same two contact patches as everything else, so it shares their grip
     // rather than being free deceleration on top of it.
     let engine_braking = if controls.throttle == 0.0 && rolling {
-        -ENGINE_BRAKING * (along.abs() / TOP_SPEED).min(1.0) * along.signum()
+        -ENGINE_BRAKING * (along / TOP_SPEED).clamp(-1.0, 1.0)
     } else {
         0.0
     };
-    let front_long = -effort * front_budget;
+    let front_long = -effort * front_budget * rolling_share;
     // What the rear axle is being asked for, before the tyre has its say. The
     // difference between the two is what tells a hard stop from a locked wheel.
-    let rear_demand = drive - effort * rear_budget + rear_handbrake + engine_braking;
+    let rear_demand = drive - effort * rear_budget * rolling_share + rear_handbrake + engine_braking;
 
     // Sideways grip arrives with speed. Without this the car fights its own
     // steering at a crawl, and the drag of a fully-locked front wheel is enough
@@ -235,18 +254,21 @@ pub(crate) fn step(
 
     // Gravity along the slope, and the losses that stop the car coasting forever.
     let climb = -GRAVITY * surface.slope / (1.0 + surface.slope * surface.slope).sqrt();
-    let resistance = if rolling {
-        -DRAG * along * along.abs() - ROLLING_RESISTANCE * along.signum()
+    // Air resists the way the car is going, which once it is sliding is not the
+    // way it is pointing — so drag has a sideways share too.
+    let (drag_along, drag_across) = if rolling {
+        (-DRAG * speed * along, -DRAG * speed * across)
     } else {
-        0.0
+        (0.0, 0.0)
     };
+    let resistance = drag_along - ROLLING_RESISTANCE * rolling_share;
 
     // What the tyres are doing, and what the car does — which differ by the
     // slope. The first is what pitches the car and what an accelerometer in it
     // would read; the second is what actually moves it.
     let traction = (front_long + rear_long + resistance - front_lat * steer.sin()) / MASS;
     let forward_accel = traction + climb;
-    let lateral_accel = (front_lat * steer.cos() + rear_lat) / MASS;
+    let lateral_accel = (front_lat * steer.cos() + rear_lat + drag_across) / MASS;
     // A leftward force ahead of the centre of mass yaws the car left; the same
     // force behind it yaws the car right.
     let yaw_accel =
@@ -531,6 +553,82 @@ mod tests {
         assert!(shed <= FRICTION + 0.1, "{shed:.2} g is more grip than exists");
     }
 
+    /// Pointing one way and travelling sixty degrees off it, which is what
+    /// having lost it looks like. Returns the speed after `seconds`.
+    fn slide(seconds: f32, controls: Controls, grip: f32, slope: f32) -> f32 {
+        let heading = Vec3::NEG_Z;
+        let mut car = Car {
+            velocity: Quat::from_rotation_y(1.05) * heading * 18.0,
+            ..default()
+        };
+        let dt = 1.0 / 240.0;
+        for _ in 0..(seconds / dt) as usize {
+            step(
+                &mut car,
+                heading,
+                heading.cross(Vec3::Y),
+                controls,
+                Surface { grip, slope },
+                dt,
+            );
+        }
+        car.velocity.length()
+    }
+
+    /// A car that has lost it has to come back down again — on the grass, and
+    /// downhill, which is where it happens.
+    ///
+    /// Everything that slows a car used to be gated on its forward component,
+    /// and in a slide the forward component is nearly nothing: no drag, no
+    /// engine, and no brakes. Worse, the brake key read the same near-zero as a
+    /// standstill and became reverse. Sliding down a hill on the grass the car
+    /// held 12.8 m/s after four seconds of full brakes — more than it kept by
+    /// doing nothing at all.
+    #[test]
+    fn a_slide_comes_back_down() {
+        let stop = Controls {
+            brake: 1.0,
+            ..default()
+        };
+        for (grip, slope) in [(1.0f32, 0.0f32), (0.38, 0.0), (0.38, -0.16)] {
+            let coasted = slide(4.0, Controls::default(), grip, slope);
+            assert!(
+                coasted < 12.0,
+                "grip {grip} slope {slope}: still sliding at {coasted:.1} m/s after four seconds"
+            );
+            let braked = slide(4.0, stop, grip, slope);
+            assert!(
+                braked < coasted + 0.5,
+                "grip {grip} slope {slope}: braking made it worse, {braked:.1} against {coasted:.1}"
+            );
+        }
+    }
+
+    /// The brake key must not turn into the throttle just because the car has
+    /// spun: a slide drops the forward component to nothing while the car is
+    /// still travelling at speed.
+    #[test]
+    fn the_brake_stays_a_brake_in_a_spin() {
+        let spun = Controls {
+            brake: 1.0,
+            ..default()
+        };
+        // Travelling backwards along its own nose at speed, which is what the
+        // second half of a spin looks like.
+        let heading = Vec3::NEG_Z;
+        let mut car = Car {
+            velocity: -heading * 14.0,
+            ..default()
+        };
+        let before = car.velocity.length();
+        coast(&mut car, spun, FLAT, 1.0);
+        assert!(
+            car.velocity.length() < before - 3.0,
+            "the brakes did nothing in a spin: {before:.1} to {:.1} m/s",
+            car.velocity.length()
+        );
+    }
+
     /// Lift off at the top of a hill and the hill must not run away with the
     /// car. Nothing steers at a speed the circuit has no radius for, and without
     /// the engine holding it back a descent here coasted to 84 km/h — which
@@ -659,6 +757,7 @@ mod tests {
         }
     }
 }
+
 
 
 

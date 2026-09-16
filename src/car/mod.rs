@@ -200,8 +200,10 @@ mod tests {
             let busy = car.g_force.x.abs() > 0.75 || car.rear_slip > 0.2;
 
             let controls = Controls {
-                // Do not drive hard at anything but the road ahead.
-                throttle: if speed < limit * 0.96 && !busy && astray.abs() < 0.6 {
+                // Do not drive hard at anything but the road ahead — unless
+                // stopped, when sitting still pointing the wrong way is the one
+                // thing that gets you nowhere.
+                throttle: if speed < 1.0 || (speed < limit * 0.96 && !busy && astray.abs() < 0.6) {
                     1.0
                 } else {
                     0.0
