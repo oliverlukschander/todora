@@ -160,7 +160,7 @@ mod tests {
     //! dull car; what they guard is that the car stays drivable.
 
     use super::*;
-    use crate::car::{advance, SCALE};
+    use crate::car::{advance, Setup, SCALE};
 
     #[derive(Default)]
     struct Lap {
@@ -173,9 +173,8 @@ mod tests {
         off_road_descending: f32,
     }
 
-    fn lap(style: Style, seconds: f32) -> Lap {
+    fn lap(style: Style, handling: Handling, seconds: f32) -> Lap {
         let track = Track::new();
-        let handling = Handling::SHOOTING_BRAKE;
         let mut driver = Driver::new(style);
         let mut transform = track.start_transform().with_scale(Vec3::splat(SCALE));
         let mut car = Car::default();
@@ -228,7 +227,7 @@ mod tests {
 
     #[test]
     fn a_plain_driver_gets_round() {
-        let lap = lap(Style::Plain, 90.0);
+        let lap = lap(Style::Plain, Handling::SHOOTING_BRAKE, 90.0);
         report("plain", &lap);
         assert!(lap.progress > 0.9, "90 s only got {:.0}% round", lap.progress * 100.0);
         // Loose on purpose: these are the bounds of "can get round", not a target.
@@ -240,7 +239,7 @@ mod tests {
     /// the person holding the keys, and the car has to be drivable by them.
     #[test]
     fn a_clumsy_driver_still_gets_round() {
-        let lap = lap(Style::Clumsy, 90.0);
+        let lap = lap(Style::Clumsy, Handling::SHOOTING_BRAKE, 90.0);
         report("clumsy", &lap);
         assert!(lap.progress > 0.9, "90 s only got {:.0}% round", lap.progress * 100.0);
         // Loose: the grass is a gravel trap, so every excursion this driver
@@ -248,6 +247,47 @@ mod tests {
         // never stuck out there.
         assert!(lap.off_road < 45.0, "off the road {:.0} s of 90", lap.off_road);
         assert!(lap.stopped < 20.0, "going nowhere {:.0} s of 90", lap.stopped);
+    }
+
+    /// Every notch of the setup slider has to be lappable by the person holding
+    /// the keys, not just the one the car ships on. A setup that looks good on a
+    /// dial and cannot get round is not a setup.
+    #[test]
+    fn a_clumsy_driver_gets_round_on_every_setup() {
+        for notch in Setup::ALL {
+            let handling = notch.applied_to(Handling::SHOOTING_BRAKE);
+            let lap = lap(Style::Clumsy, handling, 45.0);
+            report(notch.name(), &lap);
+            assert!(
+                lap.progress > 0.35,
+                "{:?}: 45 s only got {:.0}% round",
+                notch,
+                lap.progress * 100.0
+            );
+            assert!(lap.stopped < 12.0, "{:?}: going nowhere {:.0} s of 45", notch, lap.stopped);
+        }
+    }
+
+    /// Which notch is quickest depends on who is driving — that is the whole
+    /// point of a setup slider. Run both drivers over all three.
+    ///
+    /// `cargo test --lib setup_slider -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn setup_slider() {
+        for style in [Style::Clumsy, Style::Plain] {
+            for notch in Setup::ALL {
+                let handling = notch.applied_to(Handling::SHOOTING_BRAKE);
+                let lap = lap(style, handling, 60.0);
+                println!(
+                    "{:?} on {:<11} {:6.0} m   off-road {:5.1} s",
+                    style,
+                    notch.name(),
+                    lap.distance,
+                    lap.off_road
+                );
+            }
+        }
     }
 
     /// What kind of lap the physics makes of this circuit, for picking grip and

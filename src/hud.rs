@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::car::Car;
+use crate::car::{Car, Setup};
 use crate::lap::{format_time, LapTimer};
 
 const AMBER: Color = Color::srgb(1.0, 0.72, 0.12);
@@ -13,13 +13,18 @@ const PANEL: Color = Color::srgba(0.04, 0.03, 0.02, 0.82);
 const METER: f32 = 92.0;
 const FULL_SCALE: f32 = 1.4;
 const NEEDLE: f32 = 12.0;
+/// The setup slider: as wide as the meter above it, with three notches the knob
+/// snaps between.
+const SLIDER: f32 = METER;
+const KNOB: f32 = 26.0;
+const TRACK: f32 = 10.0;
 
 pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup)
-            .add_systems(Update, (draw_clock, draw_g_meter));
+            .add_systems(Update, (draw_clock, draw_g_meter, draw_setup));
     }
 }
 
@@ -35,10 +40,16 @@ struct GReadout;
 #[derive(Component)]
 struct SpeedReadout;
 
+#[derive(Component)]
+struct SetupKnob;
+
+#[derive(Component)]
+struct SetupName;
+
 fn setup(mut commands: Commands) {
     commands.spawn((
         Text::new(
-            "W — throttle\nS — brake, reverse at a stop\nA / D — steer\nSpace — handbrake\nR — restart\nScroll — zoom",
+            "W — throttle\nS — brake, reverse at a stop\nA / D — steer\nSpace — handbrake\n1 / 2 / 3 — setup\nR — restart\nScroll — zoom",
         ),
         TextFont {
             font_size: FontSize::Px(16.0),
@@ -135,6 +146,48 @@ fn setup(mut commands: Commands) {
                 },
                 TextColor(AMBER_DIM),
             ),
+            // The setup slider: a track with three notches, and a knob on one.
+            (
+                Node {
+                    width: px(SLIDER),
+                    height: px(TRACK),
+                    border: UiRect::all(px(1)),
+                    border_radius: BorderRadius::all(px(TRACK / 2.0)),
+                    margin: UiRect::top(px(2)),
+                    ..default()
+                },
+                BackgroundColor(AMBER_DIM.with_alpha(0.18)),
+                BorderColor::all(AMBER_DIM),
+                children![
+                    notch_mark(0),
+                    notch_mark(1),
+                    notch_mark(2),
+                    (
+                        SetupKnob,
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: px(knob_left(1)),
+                            top: px(-1),
+                            width: px(KNOB),
+                            height: px(TRACK),
+                            border: UiRect::all(px(1)),
+                            border_radius: BorderRadius::all(px(TRACK / 2.0)),
+                            ..default()
+                        },
+                        BackgroundColor(AMBER),
+                        BorderColor::all(AMBER_DIM),
+                    ),
+                ],
+            ),
+            (
+                SetupName,
+                Text::new(Setup::default().name()),
+                TextFont {
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(AMBER_DIM),
+            ),
         ],
     ));
 
@@ -161,6 +214,43 @@ fn setup(mut commands: Commands) {
             TextColor(AMBER),
         )],
     ));
+}
+
+/// A tick on the slider's track, centred under the notch the knob sits on.
+fn notch_mark(notch: usize) -> impl Bundle {
+    (
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(knob_left(notch) + KNOB / 2.0 - 1.0),
+            top: px(TRACK / 2.0 - 1.0),
+            width: px(2),
+            height: px(2),
+            ..default()
+        },
+        BackgroundColor(AMBER_DIM),
+    )
+}
+
+/// Where the knob's left edge sits for a notch.
+fn knob_left(notch: usize) -> f32 {
+    notch as f32 * (SLIDER - KNOB) / 2.0
+}
+
+/// Slide the knob to the chosen notch and name it.
+fn draw_setup(
+    chosen: Res<Setup>,
+    mut knob: Query<&mut Node, With<SetupKnob>>,
+    mut name: Query<&mut Text, With<SetupName>>,
+) {
+    if !chosen.is_changed() {
+        return;
+    }
+    if let Ok(mut node) = knob.single_mut() {
+        node.left = px(knob_left(chosen.notch()));
+    }
+    if let Ok(mut text) = name.single_mut() {
+        text.0 = chosen.name().into();
+    }
 }
 
 fn draw_clock(timer: Res<LapTimer>, mut readout: Query<&mut Text, With<ClockReadout>>) {

@@ -11,6 +11,7 @@
 
 mod driver;
 mod physics;
+mod setup;
 
 use bevy::{prelude::*, world_serialization::WorldInstanceReady};
 
@@ -18,6 +19,7 @@ use crate::input::InputSet;
 use crate::track::Track;
 use crate::Reset;
 pub(crate) use physics::{Car, Controls, Handling, Surface, HALF_TRACK, REAR_AXLE, SCALE, WHEEL_WIDTH};
+pub(crate) use setup::Setup;
 
 const MODEL: &str = "models/shooting_brake.glb";
 /// The engine steps at this rate whatever the frame rate, so the car handles
@@ -60,7 +62,9 @@ pub struct CarPlugin;
 
 impl Plugin for CarPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup)
+        app.init_resource::<Setup>()
+            .add_systems(Startup, setup)
+            .add_systems(Update, apply_setup.before(DriveSet))
             .add_systems(Update, restart.after(InputSet).before(DriveSet))
             .add_systems(Update, drive.in_set(DriveSet).after(InputSet))
             .add_systems(Update, (turn_wheels, lean_body).after(DriveSet));
@@ -151,6 +155,17 @@ fn drive(
 ) {
     for (mut transform, mut car, handling, controls) in &mut cars {
         advance(&track, handling, *controls, &mut transform, &mut car, time.delta_secs());
+    }
+}
+
+/// Lean the car the way the slider says. The setup is a preference rather than
+/// race state, so it survives a restart and is applied the moment it moves.
+fn apply_setup(chosen: Res<Setup>, mut cars: Query<&mut Handling, With<Player>>) {
+    if !chosen.is_changed() {
+        return;
+    }
+    for mut handling in &mut cars {
+        *handling = chosen.applied_to(Handling::SHOOTING_BRAKE);
     }
 }
 

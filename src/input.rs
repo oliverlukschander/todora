@@ -8,7 +8,7 @@
 
 use bevy::prelude::*;
 
-use crate::car::{Controls, Player};
+use crate::car::{Controls, Player, Setup};
 use crate::Reset;
 
 /// Everything that reads the player runs in here, ahead of the car.
@@ -30,8 +30,23 @@ fn read(
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
     mut reset: MessageWriter<Reset>,
+    mut chosen: ResMut<Setup>,
     mut players: Query<&mut Controls, With<Player>>,
 ) {
+    // The setup slider. Number keys pick a notch outright; the pad slides along
+    // it. Only written when it actually moves, so the car is not re-leaned every
+    // frame the key is held.
+    let mut wanted = *chosen;
+    for (key, notch) in [
+        (KeyCode::Digit1, Setup::Understeer),
+        (KeyCode::Digit2, Setup::Balanced),
+        (KeyCode::Digit3, Setup::Oversteer),
+    ] {
+        if keys.just_pressed(key) {
+            wanted = notch;
+        }
+    }
+
     let mut asked = Controls {
         throttle: held(&keys, [KeyCode::KeyW, KeyCode::ArrowUp]),
         // Shift still brakes, for anyone who learned it that way.
@@ -70,6 +85,16 @@ fn read(
             .max(pad.get(GamepadButton::LeftTrigger2).unwrap_or(0.0));
         asked.handbrake |= pad.pressed(GamepadButton::South);
         restart |= pad.just_pressed(GamepadButton::Start);
+        if pad.just_pressed(GamepadButton::DPadLeft) {
+            wanted = wanted.slid(-1);
+        }
+        if pad.just_pressed(GamepadButton::DPadRight) {
+            wanted = wanted.slid(1);
+        }
+    }
+
+    if wanted != *chosen {
+        *chosen = wanted;
     }
 
     if restart {
