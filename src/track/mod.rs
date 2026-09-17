@@ -23,7 +23,7 @@ use bevy::prelude::*;
 
 use crate::car::{level, Car, DriveSet};
 use layout::CENTERLINE;
-use profile::{EDGE, GRASS_GRIP, HALF_WIDTH, KERB_GRIP, KERB_TOP, TARMAC_HALF};
+use profile::{EDGE, HALF_WIDTH};
 use ribbon::Ribbon;
 
 /// The car is the ruler: ~2.4 m long, ~1.1 m wide, 1 unit = 1 metre.
@@ -221,6 +221,7 @@ fn confine(time: Res<Time>, track: Res<Track>, mut cars: Query<(&mut Transform, 
 
 #[cfg(test)]
 mod tests {
+    use super::profile::{GRASS_GRIP, KERB_GRIP, KERB_TOP, TARMAC_HALF};
     use super::*;
 
     fn track() -> Track {
