@@ -1,8 +1,8 @@
-//! An arcade handling model: a velocity, a heading, and grip that decides how
-//! far the two may disagree.
+//! The engine: an arcade handling model. A velocity, a heading, and grip that
+//! decides how far the two may disagree.
 //!
 //! The steering says how fast the car rotates. Grip says how much of the car's
-//! sideways speed the tyres can scrub off each frame. When a corner asks for more
+//! sideways speed the tyres can scrub off each step. When a corner asks for more
 //! than that, the car keeps rotating but its velocity does not follow, and the
 //! difference is the slide — nose inside the line of travel, tyres marking the
 //! road. Let go and the slide pulls the nose back into line.
@@ -15,9 +15,12 @@
 //! "Car Physics for Games" for the kinematics, and the drift-racer pattern of a
 //! lateral grip coefficient that the handbrake and the throttle pull down.
 //!
-//! Everything is in metres per second squared and fractions of grip, because
-//! those are the numbers a designer can reason about. Weight is in the lag —
-//! the car rotates toward where the wheels point rather than snapping there.
+//! Everything a car is, as a car, lives in one [`Handling`] value — metres per
+//! second squared and fractions of grip, the numbers a designer can reason
+//! about. Weight is in the lag: the car rotates toward where the wheels point
+//! rather than snapping there. [`step`] is pure: it takes a [`Car`], a
+//! [`Handling`], what the driver wants and what the road offers, and advances by
+//! `dt`. Nothing here knows about entities, frames or keys.
 
 use bevy::prelude::*;
 
@@ -30,92 +33,10 @@ pub(crate) const HALF_TRACK: f32 = 0.50 * SCALE;
 /// Axle distances from the model origin, which sits between them.
 pub(crate) const FRONT_AXLE: f32 = 0.70 * SCALE;
 pub(crate) const REAR_AXLE: f32 = 0.76 * SCALE;
-const WHEELBASE: f32 = FRONT_AXLE + REAR_AXLE;
 
-const GRAVITY: f32 = 9.81;
+pub(crate) const GRAVITY: f32 = 9.81;
 
-// --- grip ------------------------------------------------------------------
-
-/// Sideways acceleration the tyres can produce on tarmac: how hard the car can
-/// corner, and how fast a slide is scrubbed off. Sporty, deliberately — the
-/// circuit is tight and the wheelbase is short.
-pub(super) const GRIP: f32 = 14.0;
-/// Grip climbs with speed, the way downforce does: at top speed there is about
-/// a third more than at a crawl. A fast corner is still a wide corner, but not
-/// a hopeless one — which is the difference between arriving a little quick and
-/// arriving in the grass.
-const DOWNFORCE: f32 = 0.009;
-/// Braking loads the nose, and a loaded nose bites. Braking into a corner
-/// turns the car tighter, not looser: a driver who has arrived too fast needs
-/// the pedal to help, and the intuitive thing to do must be the right one.
-const BRAKE_BITE: f32 = 0.25;
-/// How much of that the handbrake takes away. The rear lets go, the nose keeps
-/// rotating, and the car drifts. The reference figure across arcade racers is a
-/// slide at about a third of full grip.
-const HANDBRAKE_LETS_GO: f32 = 0.68;
-/// How much the throttle takes away once the car is already at the limit. Power
-/// on, mid-corner, at the edge of grip: the back steps out. That is the rear
-/// wheel drive, and the reason to be patient with the right foot. It goes with
-/// the square of the throttle, so a feathered exit costs almost nothing and a
-/// booted one costs all of this.
-const POWER_LETS_GO: f32 = 0.45;
-/// Grip is worth a little less the further the car is already sliding, which is
-/// what lets a drift be held rather than snapping straight the moment the
-/// handbrake comes off. It only starts past the slip a clean corner carries, or
-/// it taxes every corner on the way to the one it is meant for.
-const SLIDING_COSTS: f32 = 0.35;
-
-// --- steering ----------------------------------------------------------------
-
-/// Lock at a standstill. Above walking pace it is wound off — see [`lock`].
-const MAX_STEER: f32 = 0.7;
-/// Full lock asks for a touch more turn than the grip can give. On a keyboard
-/// full lock is the only lock there is, so it sits close to the limit: over by
-/// much and every corner is a push wide.
-const LOCK_MARGIN: f32 = 1.1;
-/// How fast the wheels follow the key. Arcade-quick: a tap must be seen.
-const STEER_RATE: f32 = 10.0;
-/// How fast the car rotates toward where the wheels are asking. This is the
-/// weight: low and it wallows, high and it darts.
-const YAW_RESPONSE: f32 = 11.0;
-/// How hard a slide pulls the nose back into line with travel. This is what
-/// ends a drift when the inputs let it, and what keeps a lift-off from becoming
-/// a spin.
-const ALIGN: f32 = 3.2;
-
-// --- longitudinal --------------------------------------------------------------
-
-const TOP_SPEED: f32 = 24.0;
-/// Pull off the line. It fades as the square of speed, so the car gets out of a
-/// hairpin hard and then eases into its top speed.
-const ACCEL: f32 = 9.5;
-/// Stopping power on tarmac, about 1.3 g. Always on offer, however hard the car
-/// is turning: the brakes never spend the grip the corner is using. That is the
-/// one place this model refuses to be a simulation, because a simulation is
-/// what spins a keyboard driver under braking.
-const BRAKE: f32 = 12.8;
-/// Off the throttle the engine holds the car back, rising with speed. It is what
-/// keeps a descent from running away.
-const ENGINE_BRAKING: f32 = 1.9;
-const DRAG: f32 = 0.0022;
-const ROLLING: f32 = 0.3;
-/// Soft ground rolls badly: rolling resistance climbs as grip falls, so grass is
-/// about three times the drag of tarmac even at a crawl.
-const SOFT_GROUND: f32 = 4.0;
-/// Off the road the ground ploughs, against whichever way the car is going. The
-/// old gravel traps ended laps, and the grass here should feel like one: the drag
-/// rises with speed and with the cube of how little grip there is, so a kerb
-/// costs next to nothing and the grass at pace costs most of a g. A car can
-/// still crawl back to the road.
-const OFF_ROAD_DRAG: f32 = 1.8;
-/// Reverse: from a standstill, up to a crawl.
-const REVERSE_ACCEL: f32 = 4.5;
-const REVERSE_SPEED: f32 = 8.0;
-/// How much of the slope's pull the car feels. All of it: the hills are tamed
-/// where they are made, in the circuit's grade cap, not by lying about gravity.
-const SLOPE_PULL: f32 = 1.0;
-
-// --- the seams ---------------------------------------------------------------
+// The seams of the model, which are not a matter of setup.
 
 /// Slower than this is stopped, which is when the brake key becomes reverse.
 const STOPPED: f32 = 0.5;
@@ -124,62 +45,194 @@ const SIDEWAYS: f32 = 2.0;
 /// A slide is worth a tyre mark from this angle, and is a full one at this angle.
 const MARK_FROM: f32 = 0.12;
 const MARK_FULL: f32 = 0.45;
-/// Part of a scrubbed-off slide comes back as forward speed. Not physics — it is
-/// the arcade convention that a drift held well should not cost the exit.
-const SLIDE_RECOVERY: f32 = 0.2;
 
-/// What the driver is asking for this frame.
-#[derive(Clone, Copy, Default)]
+/// Everything that makes one car drive like itself. A value, not a recompile:
+/// a second car, or the same car on a different setup, is another one of these.
+/// Accelerations are in metres per second squared; the rest are fractions.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Handling {
+    /// Axle to axle. What turns a steering angle into a rate of rotation.
+    pub wheelbase: f32,
+
+    /// Sideways acceleration the tyres can produce on tarmac: how hard the car
+    /// can corner, and how fast a slide is scrubbed off.
+    pub grip: f32,
+    /// Grip climbs with the square of speed, the way downforce does. A fast
+    /// corner is still a wide corner, but not a hopeless one.
+    pub downforce: f32,
+    /// Braking loads the nose, and a loaded nose bites: braking into a corner
+    /// turns the car tighter, not looser. A driver who has arrived too fast
+    /// needs the pedal to help, and the intuitive thing to do must be right.
+    pub brake_bite: f32,
+    /// How much grip the handbrake takes away. The rear lets go, the nose keeps
+    /// rotating, and the car drifts.
+    pub handbrake_lets_go: f32,
+    /// How much grip the throttle takes away once the car is already at the
+    /// limit. It goes with the square of the throttle, so a feathered exit
+    /// costs almost nothing and a booted one costs all of this. That is the
+    /// rear wheel drive.
+    pub power_lets_go: f32,
+    /// Grip is worth a little less the further the car is already sliding,
+    /// which is what lets a drift be held rather than snapping straight the
+    /// moment the handbrake comes off. It starts past the slip a clean corner
+    /// carries, or it taxes every corner on the way to the one it is meant for.
+    pub sliding_costs: f32,
+
+    /// Lock at a standstill. Above walking pace it is wound off — see
+    /// [`Handling::lock`].
+    pub max_steer: f32,
+    /// Full lock asks for this much more turn than the grip can give. On a
+    /// keyboard full lock is the only lock there is, so it sits close to the
+    /// limit: over by much and every corner is a push wide.
+    pub lock_margin: f32,
+    /// How fast the wheels follow the driver.
+    pub steer_rate: f32,
+    /// How fast the car rotates toward where the wheels are asking. This is the
+    /// weight: low and it wallows, high and it darts.
+    pub yaw_response: f32,
+    /// How hard a slide pulls the nose back into line with travel. What ends a
+    /// drift when the inputs let it, and keeps a lift-off from becoming a spin.
+    pub align: f32,
+
+    pub top_speed: f32,
+    /// Pull off the line. It fades as the square of speed, so the car gets out
+    /// of a hairpin hard and then eases into its top speed.
+    pub accel: f32,
+    /// Stopping power on tarmac. Always on offer, however hard the car is
+    /// turning: the brakes never spend the grip the corner is using. That is the
+    /// one place this model refuses to be a simulation, because a simulation is
+    /// what spins a keyboard driver under braking.
+    pub brake: f32,
+    /// Off the throttle the engine holds the car back, rising with speed. It is
+    /// what keeps a descent from running away.
+    pub engine_braking: f32,
+    pub drag: f32,
+    pub rolling: f32,
+    /// Soft ground rolls badly: rolling resistance climbs as grip falls.
+    pub soft_ground: f32,
+    /// Off the road the ground ploughs, against whichever way the car is going.
+    /// The drag rises with speed and with the cube of how little grip there is,
+    /// so a kerb costs next to nothing and the grass at pace costs most of a g.
+    /// A car can still crawl back to the road.
+    pub off_road_drag: f32,
+    /// Reverse: from a standstill, up to a crawl.
+    pub reverse_accel: f32,
+    pub reverse_speed: f32,
+    /// Part of a scrubbed-off slide comes back as forward speed. Not physics —
+    /// the arcade convention that a drift held well should not cost the exit.
+    pub slide_recovery: f32,
+}
+
+impl Handling {
+    /// The comic shooting brake, on the tyres it ships with.
+    pub const SHOOTING_BRAKE: Handling = Handling {
+        wheelbase: FRONT_AXLE + REAR_AXLE,
+        grip: 14.0,
+        downforce: 0.009,
+        brake_bite: 0.25,
+        handbrake_lets_go: 0.68,
+        power_lets_go: 0.45,
+        sliding_costs: 0.35,
+        max_steer: 0.7,
+        lock_margin: 1.1,
+        steer_rate: 10.0,
+        yaw_response: 11.0,
+        align: 3.2,
+        top_speed: 24.0,
+        accel: 9.5,
+        brake: 12.8,
+        engine_braking: 1.9,
+        drag: 0.0022,
+        rolling: 0.3,
+        soft_ground: 4.0,
+        off_road_drag: 1.8,
+        reverse_accel: 4.5,
+        reverse_speed: 8.0,
+        slide_recovery: 0.2,
+    };
+
+    /// Sideways grip on tarmac at `speed`, downforce included.
+    pub fn grip_at(&self, speed: f32) -> f32 {
+        self.grip + self.downforce * speed * speed
+    }
+
+    /// Steering lock at `speed`, in radians.
+    ///
+    /// A wheelbase `L` at lock `d` turns a car doing `v` at `v^2 tan(d) / L`.
+    /// Full lock is set to ask for a little more than the grip can give, so it
+    /// always slides a touch and never spins. The lock shrinks as the square of
+    /// speed, and that is the whole reason a fast corner is a wide corner.
+    pub fn lock(&self, speed: f32) -> f32 {
+        let asks = self.lock_margin * self.grip_at(speed) * self.wheelbase / speed.max(1.0).powi(2);
+        asks.atan().min(self.max_steer)
+    }
+}
+
+/// What the driver is asking for this step. Produced by the keys, a gamepad, or
+/// a [`super::driver::Driver`]; the engine does not care which.
+#[derive(Component, Clone, Copy, Default, Debug, PartialEq)]
 pub(crate) struct Controls {
     /// 0 to 1.
-    pub(crate) throttle: f32,
+    pub throttle: f32,
     /// 0 to 1. The brake while rolling, reverse once stopped.
-    pub(crate) brake: f32,
-    /// Positive steers left, matching Bevy's left-handed yaw about +Y.
-    pub(crate) steer: f32,
-    pub(crate) handbrake: bool,
+    pub brake: f32,
+    /// -1 to 1. Positive steers left, matching Bevy's left-handed yaw about +Y.
+    pub steer: f32,
+    pub handbrake: bool,
 }
 
 /// What the road is offering at the contact patches.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct Surface {
     /// Fraction of tarmac grip.
-    pub(crate) grip: f32,
+    pub grip: f32,
     /// Rise over run along `heading`; positive is a climb.
-    pub(crate) slope: f32,
+    pub slope: f32,
 }
 
-/// The car's motion, in world space except where noted.
-#[derive(Component, Default)]
+/// The car's motion, in world space except where noted. Everything after
+/// `stranded` is telemetry: read by the meter, the tyre marks and anyone else
+/// who wants to know what the car is doing, written only by [`step`].
+#[derive(Component, Default, Debug)]
 pub(crate) struct Car {
     /// Metres per second across the ground. Y is unused: the loft carries height.
-    pub(crate) velocity: Vec3,
+    pub velocity: Vec3,
     /// Radians per second about +Y.
-    pub(crate) yaw_rate: f32,
-    /// Where the front wheels actually point, which lags the key.
-    pub(crate) steer_angle: f32,
-    /// Acceleration in g, in the car's own frame: x to the right, y forward.
-    /// What an accelerometer bolted to the seat would read.
-    pub(crate) g_force: Vec2,
-    /// How hard the rear is sliding, 0 while it grips. Decides the tyre marks.
-    pub(crate) rear_slip: f32,
+    pub yaw_rate: f32,
+    /// Where the front wheels actually point, which lags the driver.
+    pub steer_angle: f32,
     /// Seconds spent off the circuit getting nowhere. The track uses it to
     /// decide when to fetch the car back.
-    pub(crate) stranded: f32,
+    pub stranded: f32,
+
+    /// Acceleration in g, in the car's own frame: x to the right, y forward.
+    /// What an accelerometer bolted to the seat would read.
+    pub g_force: Vec2,
+    /// Angle between where the car points and where it is going, in radians.
+    /// Positive when travelling to the right of the nose.
+    pub slip_angle: f32,
+    /// How much of the available sideways grip the corner is asking for. Past
+    /// one, the car is being asked for more than it has.
+    pub grip_used: f32,
+    /// How hard the rear is sliding, 0 while it grips. Decides the tyre marks.
+    pub rear_slip: f32,
 }
 
 impl Car {
     /// Speed along the car's own nose. Negative in reverse.
-    pub(crate) fn speed(&self, heading: Vec3) -> f32 {
+    pub fn speed(&self, heading: Vec3) -> f32 {
         self.velocity.dot(heading)
     }
 }
 
 /// Advance the car by `dt` and report the yaw to apply, in radians.
 ///
-/// `heading` and `right` are the car's own axes, level in XZ.
+/// `heading` and `right` are the car's own axes, level in XZ. Pure: call it as
+/// often as you like with as small a `dt` as you like, and the result depends
+/// only on the sum.
 pub(crate) fn step(
     car: &mut Car,
+    h: &Handling,
     heading: Vec3,
     right: Vec3,
     controls: Controls,
@@ -193,32 +246,44 @@ pub(crate) fn step(
     // Positive when travelling to the right of the nose.
     let slip = lateral.atan2(forward.abs());
 
-    // Steering. The wheels follow the key with a lag, to a lock that shrinks
+    // Steering. The wheels follow the driver with a lag, to a lock that shrinks
     // with speed.
     car.steer_angle = car
         .steer_angle
-        .lerp(controls.steer * lock(speed), (STEER_RATE * dt).min(1.0));
+        .lerp(controls.steer * h.lock(speed), (h.steer_rate * dt).min(1.0));
 
     // How much grip there is to work with right now. The handbrake and the
-    // throttle both take from it, and a car already sliding has a little less.
+    // throttle both take from it, a car already sliding has a little less, and
+    // a braking car has a little more at the nose.
     let rolling = speed > STOPPED;
+    // Reverse from a stop, or once already backing up — and never in a slide. A
+    // slide drops the forward component to nothing while the car is still
+    // travelling at speed; what tells the two apart is whether it is going
+    // sideways.
     let reversing = controls.brake > 0.0
         && forward < STOPPED
-        && speed < REVERSE_SPEED
+        && speed < h.reverse_speed
         && lateral.abs() < SIDEWAYS;
-    let base = grip_at(speed) * surface.grip;
-    let asking = (forward * car.yaw_rate).abs();
-    let at_the_limit = (asking / base.max(0.1)).min(1.0);
+    let base = h.grip_at(speed) * surface.grip;
+    let asking = (forward * car.yaw_rate).abs() / base.max(0.1);
     let power_slide = if rolling && !reversing {
-        controls.throttle.powi(2) * at_the_limit * POWER_LETS_GO
+        controls.throttle.powi(2) * asking.min(1.0) * h.power_lets_go
     } else {
         0.0
     };
-    let handbrake = if controls.handbrake && rolling { HANDBRAKE_LETS_GO } else { 0.0 };
+    let handbrake = if controls.handbrake && rolling {
+        h.handbrake_lets_go
+    } else {
+        0.0
+    };
     let already_sliding =
-        ((slip.abs() - MARK_FROM) / (MARK_FULL - MARK_FROM)).clamp(0.0, 1.0) * SLIDING_COSTS;
+        ((slip.abs() - MARK_FROM) / (MARK_FULL - MARK_FROM)).clamp(0.0, 1.0) * h.sliding_costs;
     let hold = (1.0 - handbrake) * (1.0 - power_slide) * (1.0 - already_sliding);
-    let nose_bite = if rolling && !reversing { 1.0 + BRAKE_BITE * controls.brake } else { 1.0 };
+    let nose_bite = if rolling && !reversing {
+        1.0 + h.brake_bite * controls.brake
+    } else {
+        1.0
+    };
     let grip = base * hold * nose_bite;
 
     // Yaw. The wheels ask for the rate that would carry the car round the arc
@@ -227,10 +292,10 @@ pub(crate) fn step(
     // has let go pulls the nose back weakly, and that is the drift: the nose
     // runs on ahead of where the car is going.
     let bite = (speed / 2.0).min(1.0);
-    let kinematic = forward * car.steer_angle.tan() / WHEELBASE;
-    let align = -slip * ALIGN * hold * bite;
+    let kinematic = forward * car.steer_angle.tan() / h.wheelbase;
+    let align = -slip * h.align * hold * bite;
     let target = kinematic * bite + align;
-    car.yaw_rate += (target - car.yaw_rate) * (YAW_RESPONSE * dt).min(1.0);
+    car.yaw_rate += (target - car.yaw_rate) * (h.yaw_response * dt).min(1.0);
     let yaw = car.yaw_rate * dt;
 
     // The car has turned; its velocity has not. In the new frame some of what
@@ -243,7 +308,7 @@ pub(crate) fn step(
     let scrub = sideways.clamp(-grip * dt, grip * dt);
     car.velocity -= right * scrub;
     if forward.abs() > STOPPED {
-        car.velocity += heading * (scrub.abs() * SLIDE_RECOVERY * forward.signum());
+        car.velocity += heading * (scrub.abs() * h.slide_recovery * forward.signum());
     }
 
     // Along the nose: engine, brakes, and everything that slows a car down.
@@ -251,31 +316,31 @@ pub(crate) fn step(
     let mut push = 0.0;
     if controls.throttle > 0.0 {
         // Off the road the wheels spin: the engine gets the surface's grip.
-        let fade = 1.0 - (forward / TOP_SPEED).clamp(0.0, 1.0).powi(2);
-        push += ACCEL * controls.throttle * fade * surface.grip;
+        let fade = 1.0 - (forward / h.top_speed).clamp(0.0, 1.0).powi(2);
+        push += h.accel * controls.throttle * fade * surface.grip;
     } else if rolling {
-        push -= ENGINE_BRAKING * (forward / TOP_SPEED).clamp(-1.0, 1.0);
+        push -= h.engine_braking * (forward / h.top_speed).clamp(-1.0, 1.0);
     }
     if reversing {
-        if forward > -REVERSE_SPEED {
-            push -= REVERSE_ACCEL * controls.brake;
+        if forward > -h.reverse_speed {
+            push -= h.reverse_accel * controls.brake;
         }
     } else if controls.brake > 0.0 && rolling {
-        // Independent of the corner. See `BRAKE`.
-        push -= BRAKE * surface.grip * controls.brake * forward.signum();
+        // Independent of the corner. See `Handling::brake`.
+        push -= h.brake * surface.grip * controls.brake * forward.signum();
     }
     let soft = (1.0 - surface.grip).clamp(0.0, 1.0);
     if rolling {
-        let rolling_drag = ROLLING * (1.0 + SOFT_GROUND * soft);
-        push -= DRAG * speed * forward + rolling_drag * forward.signum();
+        let rolling_drag = h.rolling * (1.0 + h.soft_ground * soft);
+        push -= h.drag * speed * forward + rolling_drag * forward.signum();
     }
-    let climb = -GRAVITY * SLOPE_PULL * surface.slope / (1.0 + surface.slope * surface.slope).sqrt();
+    let climb = -GRAVITY * surface.slope / (1.0 + surface.slope * surface.slope).sqrt();
     car.velocity += heading * ((push + climb) * dt);
 
     // The gravel trap. It drags against travel, not against the nose, so a car
     // sliding sideways through the grass is slowed just as hard as one driving
     // through it.
-    let ploughing = OFF_ROAD_DRAG * soft.powi(3) * speed;
+    let ploughing = h.off_road_drag * soft.powi(3) * speed;
     if rolling && ploughing > 0.0 {
         let slow = (ploughing * dt).min(car.velocity.length());
         car.velocity -= car.velocity.normalize_or_zero() * slow;
@@ -288,12 +353,16 @@ pub(crate) fn step(
         car.yaw_rate = 0.0;
     }
 
-    // What the seat feels: the change in velocity the tyres made, which is the
-    // total change less the slope's share.
+    // Telemetry. What the seat feels is the change in velocity the tyres made,
+    // which is the total change less the slope's share.
     let accel = (car.velocity - was) / dt.max(1e-4) - heading * climb;
     car.g_force = Vec2::new(accel.dot(right), accel.dot(heading)) / GRAVITY;
+    car.slip_angle = slip;
+    car.grip_used = asking;
     car.rear_slip = if speed > 2.0 {
-        ((slip.abs() - MARK_FROM) / (MARK_FULL - MARK_FROM)).clamp(0.0, 1.0).max(handbrake)
+        ((slip.abs() - MARK_FROM) / (MARK_FULL - MARK_FROM))
+            .clamp(0.0, 1.0)
+            .max(handbrake)
     } else {
         0.0
     };
@@ -301,26 +370,11 @@ pub(crate) fn step(
     yaw
 }
 
-/// Steering lock at `speed`, in radians.
-///
-/// A wheelbase `L` at lock `d` turns a car doing `v` at `v^2 tan(d) / L`. Full
-/// lock is set to ask for a little more than the grip can give, so it always
-/// slides a touch and never spins. The lock shrinks as the square of speed, and
-/// that is the whole reason a fast corner is a wide corner.
-fn lock(speed: f32) -> f32 {
-    let asks = LOCK_MARGIN * grip_at(speed) * WHEELBASE / speed.max(1.0).powi(2);
-    asks.atan().min(MAX_STEER)
-}
-
-/// Sideways grip on tarmac at `speed`, downforce included.
-fn grip_at(speed: f32) -> f32 {
-    GRIP + DOWNFORCE * speed * speed
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const H: &Handling = &Handling::SHOOTING_BRAKE;
     const FLAT: Surface = Surface {
         grip: 1.0,
         slope: 0.0,
@@ -344,7 +398,7 @@ mod tests {
         let dt = 1.0 / 120.0;
         for _ in 0..(seconds / dt) as usize {
             let heading = Quat::from_rotation_y(yaw) * Vec3::NEG_Z;
-            yaw += step(car, heading, heading.cross(Vec3::Y), controls, surface, dt);
+            yaw += step(car, H, heading, heading.cross(Vec3::Y), controls, surface, dt);
         }
         yaw
     }
@@ -364,7 +418,7 @@ mod tests {
         let (mut worst, mut peak) = (0.0f32, 0.0f32);
         for i in 0..(seconds / dt) as usize {
             let heading = Quat::from_rotation_y(yaw) * Vec3::NEG_Z;
-            yaw += step(&mut car, heading, heading.cross(Vec3::Y), controls, surface, dt);
+            yaw += step(&mut car, H, heading, heading.cross(Vec3::Y), controls, surface, dt);
             if car.velocity.length() > 5.0 {
                 worst = worst.max(adrift(&car, yaw));
             }
@@ -373,6 +427,39 @@ mod tests {
             }
         }
         (worst, peak)
+    }
+
+    /// The whole reason `step` is pure: advancing by one big step or by many
+    /// small ones that add up to it must land in the same place, or the car
+    /// handles differently at different frame rates.
+    #[test]
+    fn the_result_depends_only_on_the_time_advanced() {
+        let corner = Controls {
+            steer: 0.8,
+            throttle: 0.6,
+            ..default()
+        };
+        let mut coarse = rolling(14.0);
+        let mut fine = rolling(14.0);
+        let (mut yaw_c, mut yaw_f) = (0.0f32, 0.0f32);
+        for _ in 0..60 {
+            let heading = Quat::from_rotation_y(yaw_c) * Vec3::NEG_Z;
+            yaw_c += step(&mut coarse, H, heading, heading.cross(Vec3::Y), corner, FLAT, 1.0 / 60.0);
+            for _ in 0..4 {
+                let heading = Quat::from_rotation_y(yaw_f) * Vec3::NEG_Z;
+                yaw_f += step(&mut fine, H, heading, heading.cross(Vec3::Y), corner, FLAT, 1.0 / 240.0);
+            }
+        }
+        // Euler integration is not exact, so these will not be identical — but
+        // they must be close, and the game substeps at a fixed rate so that in
+        // play they are identical.
+        assert!(
+            (coarse.velocity - fine.velocity).length() < 0.6,
+            "coarse {:?} against fine {:?}",
+            coarse.velocity,
+            fine.velocity
+        );
+        assert!((yaw_c - yaw_f).abs() < 0.08, "yaw {yaw_c} against {yaw_f}");
     }
 
     #[test]
@@ -384,11 +471,11 @@ mod tests {
         };
         drive(&mut car, gas, FLAT, 4.0);
         let quick = car.velocity.length();
-        assert!((12.0..TOP_SPEED).contains(&quick), "4 s got to {quick} m/s");
+        assert!((12.0..H.top_speed).contains(&quick), "4 s got to {quick} m/s");
         drive(&mut car, gas, FLAT, 20.0);
         let flat_out = car.velocity.length();
         assert!(
-            flat_out > quick && flat_out < TOP_SPEED + 0.5,
+            flat_out > quick && flat_out < H.top_speed + 0.5,
             "topped out at {flat_out}"
         );
     }
@@ -427,7 +514,7 @@ mod tests {
                 2.5,
             );
             assert!(
-                peak > 0.8 * GRIP / GRAVITY,
+                peak > 0.8 * H.grip / GRAVITY,
                 "full lock at {speed} m/s only pulled {peak:.2} g"
             );
             assert!(
@@ -451,7 +538,7 @@ mod tests {
                 FLAT,
                 2.0,
             );
-            let most = grip_at(speed) / GRAVITY;
+            let most = H.grip_at(speed) / GRAVITY;
             assert!(peak <= most + 0.05, "{peak:.2} g from {most:.2} of grip");
         }
     }
@@ -470,6 +557,7 @@ mod tests {
                 let heading = Quat::from_rotation_y(yaw) * Vec3::NEG_Z;
                 yaw += step(
                     &mut car,
+                    H,
                     heading,
                     heading.cross(Vec3::Y),
                     Controls {
@@ -619,7 +707,7 @@ mod tests {
         let dt = 1.0 / 120.0;
         for _ in 0..(1.5 / dt) as usize {
             let heading = Quat::from_rotation_y(yaw) * Vec3::NEG_Z;
-            yaw += step(&mut car, heading, heading.cross(Vec3::Y), Controls::default(), FLAT, dt);
+            yaw += step(&mut car, H, heading, heading.cross(Vec3::Y), Controls::default(), FLAT, dt);
         }
         let after = adrift(&car, yaw);
         assert!(
@@ -673,7 +761,7 @@ mod tests {
         let mut car = rolling(12.0);
         drive(&mut car, Controls::default(), Surface { grip: 1.0, slope: -0.2 }, 25.0);
         let settled = car.velocity.length();
-        let radius = settled * settled / GRIP;
+        let radius = settled * settled / H.grip;
         assert!(radius < 22.0, "coasts to {settled:.1} m/s, wanting {radius:.0} m of corner");
         assert!(settled > 7.0, "the hill gave nothing back: {settled:.1} m/s");
     }
@@ -768,7 +856,7 @@ mod tests {
         drive(&mut car, stop, FLAT, 1.5);
         let backwards = -car.speed(Vec3::NEG_Z);
         assert!(backwards > 1.5, "it only backed up at {backwards} m/s");
-        assert!(backwards < REVERSE_SPEED + 0.1, "reverse ran away to {backwards}");
+        assert!(backwards < H.reverse_speed + 0.1, "reverse ran away to {backwards}");
     }
 
     /// A stopped car with the wheel turned must still pull away.
@@ -792,6 +880,27 @@ mod tests {
         );
     }
 
+    /// The telemetry has to mean what it says.
+    #[test]
+    fn telemetry_reads_the_corner() {
+        let mut car = rolling(14.0);
+        drive(
+            &mut car,
+            Controls {
+                steer: 1.0,
+                throttle: 0.3,
+                ..default()
+            },
+            FLAT,
+            1.5,
+        );
+        assert!(car.slip_angle > 0.0, "a left turn travels right of the nose: {}", car.slip_angle);
+        assert!(car.grip_used > 0.5, "full lock is not using the grip: {}", car.grip_used);
+        let mut straight = rolling(14.0);
+        drive(&mut straight, Controls::default(), FLAT, 0.5);
+        assert!(straight.slip_angle.abs() < 0.01 && straight.grip_used < 0.05);
+    }
+
     /// Nothing may produce a NaN, however hard it is thrown around.
     #[test]
     fn it_stays_finite_under_abuse() {
@@ -810,17 +919,15 @@ mod tests {
                 grip: if i % 7 == 0 { 0.38 } else { 1.0 },
                 slope: ((i as f32) * 0.03).sin() * 0.16,
             };
-            yaw += step(&mut car, heading, heading.cross(Vec3::Y), controls, surface, dt);
+            yaw += step(&mut car, H, heading, heading.cross(Vec3::Y), controls, surface, dt);
             assert!(car.velocity.is_finite(), "velocity blew up at step {i}");
             assert!(car.yaw_rate.is_finite(), "yaw blew up at step {i}");
             assert!(car.g_force.is_finite(), "g-force blew up at step {i}");
             assert!(
-                car.velocity.length() < TOP_SPEED * 1.4,
+                car.velocity.length() < H.top_speed * 1.4,
                 "speed ran away to {} at step {i}",
                 car.velocity.length()
             );
         }
     }
 }
-
-

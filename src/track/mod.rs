@@ -8,21 +8,23 @@
 //!
 //! The sweep itself has no special cases — no clamping, no per-corner fudge. It
 //! can afford that because the cross-section is checked against what the circuit
-//! can actually carry: see [`PROFILE`].
+//! can actually carry: see [`profile`].
+//!
+//! This module is the circuit as the rest of the game sees it: a [`Track`] that
+//! answers where the ground is and what it is made of, holds the car on the
+//! loft, and knows where the start line is. The shape lives in [`ribbon`]; the
+//! cross-section in [`profile`].
 
 mod layout;
+mod profile;
 mod ribbon;
 
-use bevy::{
-    asset::RenderAssetUsages,
-    mesh::Indices,
-    prelude::*,
-    render::render_resource::PrimitiveTopology,
-};
+use bevy::prelude::*;
 
 use crate::car::{level, Car, DriveSet};
 use layout::CENTERLINE;
-use ribbon::{Ribbon, Station};
+use profile::{EDGE, GRASS_GRIP, HALF_WIDTH, KERB_GRIP, KERB_TOP, TARMAC_HALF};
+use ribbon::Ribbon;
 
 /// The car is the ruler: ~2.4 m long, ~1.1 m wide, 1 unit = 1 metre.
 const PLAN_SCALE: f32 = 0.4 / 3.0;
@@ -31,32 +33,6 @@ const PLAN_SCALE: f32 = 0.4 / 3.0;
 /// steeper than real by the ratio of the two: at 0.4 that was three times, and
 /// every descent arrived at its corner too fast to take. This still rolls.
 const HEIGHT_SCALE: f32 = 0.28;
-/// Half of the 8 m road, kerbs and edge lines included.
-///
-/// The brief called for 12 m. [`PROFILE`] explains why the circuit cannot carry
-/// it: at ⅓ plan scale, Spielberg passes within 14.7 m of itself, which caps the
-/// whole cross-section at 7.3 m either side. A 12 m road would spend all of that
-/// on asphalt and leave no verge at all — and at 1.1 m wide, the car reads better
-/// against 8 m than it did against 12.
-const HALF_WIDTH: f32 = 4.0;
-/// Half-width of the asphalt itself: the kerbs and edge lines sit inside
-/// [`HALF_WIDTH`], so this is where a wheel starts rumbling.
-const TARMAC_HALF: f32 = 3.15;
-/// Height of the kerb's outer lip, which the verge hangs off.
-const KERB_TOP: f32 = 0.05;
-/// How far the cross-section reaches either side of the centreline. Bounded by
-/// the circuit — see [`PROFILE`].
-const EDGE: f32 = 7.0;
-/// How much of a corner's radius the outermost rib may use. Leaving headroom
-/// keeps the verge a proper surface instead of a sliver.
-const CORNER_MARGIN: f32 = 0.15;
-/// One kerb stripe and the start/finish paint, in stations. [`ribbon::STEP`] is
-/// the station spacing, so a stripe is two stations long: about a third of the
-/// 2.4 m car.
-const STRIPE: usize = 2;
-/// Fraction of tarmac grip the kerbs and the grass give back.
-const KERB_GRIP: f32 = 0.72;
-const GRASS_GRIP: f32 = 0.38;
 /// The car may run wide onto the verge, but not off the loft into the sky.
 const WALL: f32 = EDGE - 0.6;
 /// Fraction of the impact the wall gives back. Absorbing it all lets a car that
@@ -68,77 +44,6 @@ const BOUNCE: f32 = 0.45;
 /// no barrier at all.
 const RESCUE_AFTER: f32 = 1.6;
 const GOING_NOWHERE: f32 = 1.5;
-
-/// Cross-section of the circuit, left verge to right verge: `(lateral, height,
-/// surface)`. `lateral` is metres right of the centreline, `height` is metres
-/// above the road surface, and `surface` covers the strip from this rib to the
-/// next — so the last rib only contributes its edge.
-///
-/// [`EDGE`], the outermost `lateral`, is what makes the loft safe to sweep
-/// unconditionally, and the circuit sets it. Two things bound it:
-///
-/// - **Curvature.** An offset curve is regular only while
-///   `1 - curvature * lateral > 0`; at the radius of curvature it cusps and past
-///   it folds back through itself. So `EDGE <= (1 - CORNER_MARGIN) * min_radius`,
-///   and [`ribbon::MIN_RADIUS`] is what the corner-opening pass guarantees.
-/// - **Separation.** Where two stretches of circuit run close together, their
-///   verges grow into each other even though nothing is wrong at either station.
-///   So `EDGE <= min_separation / 2`. For Spielberg this is the tighter of the
-///   two: 14.7 m apart at the closest, so 7.3 m.
-///
-/// `profile_fits_the_circuit` checks both against the ribbon that was actually
-/// built, so widening the road or swapping the layout fails loudly rather than
-/// quietly folding the mesh.
-const PROFILE: &[(f32, f32, Surface)] = &[
-    (-EDGE, -0.95, Surface::Skirt),
-    (-6.00, -0.20, Surface::Grass),
-    (-HALF_WIDTH, KERB_TOP, Surface::Kerb),
-    (-3.30, 0.00, Surface::Line),
-    (-TARMAC_HALF, 0.00, Surface::Tarmac),
-    (TARMAC_HALF, 0.00, Surface::Line),
-    (3.30, 0.00, Surface::Kerb),
-    (HALF_WIDTH, KERB_TOP, Surface::Grass),
-    (6.00, -0.20, Surface::Skirt),
-    (EDGE, -0.95, Surface::End),
-];
-
-/// What a strip of the loft is made of. Colour only — every strip is the same
-/// surface geometrically.
-#[derive(Clone, Copy, PartialEq, Debug)]
-enum Surface {
-    Tarmac,
-    Line,
-    Kerb,
-    Grass,
-    Skirt,
-    /// Closes the profile. No strip starts here.
-    End,
-}
-
-impl Surface {
-    /// Colour of the strip at station `i`, linear for the vertex colour
-    /// attribute. Counting stations rather than measuring metres is what keeps
-    /// the paint crisp: a strip is one station long and takes one flat colour, so
-    /// a stripe edge lands exactly on a strip edge instead of smearing across it.
-    /// The ribbon rounds its station count so the pattern meets itself at the
-    /// start/finish line.
-    fn paint(self, i: usize) -> [f32; 4] {
-        match self {
-            Surface::Tarmac if i < STRIPE => paint(0.90, 0.90, 0.88),
-            Surface::Tarmac => paint(0.15, 0.15, 0.17),
-            Surface::Line => paint(0.90, 0.90, 0.88),
-            Surface::Kerb if (i / STRIPE) % 2 == 0 => paint(0.76, 0.13, 0.11),
-            Surface::Kerb => paint(0.93, 0.93, 0.91),
-            Surface::Grass => paint(0.33, 0.52, 0.24),
-            Surface::Skirt | Surface::End => paint(0.25, 0.42, 0.19),
-        }
-    }
-}
-
-fn paint(r: f32, g: f32, b: f32) -> [f32; 4] {
-    let c = Color::srgb(r, g, b).to_linear();
-    [c.red, c.green, c.blue, c.alpha]
-}
 
 pub struct TrackPlugin;
 
@@ -164,20 +69,11 @@ impl Track {
             .map(|p| Vec3::new(p[0] * PLAN_SCALE, p[1] * HEIGHT_SCALE, p[2] * PLAN_SCALE))
             .collect();
         let ribbon = Ribbon::new(&control);
-        // The contract in [`PROFILE`], checked against the circuit that was
+        // The contract in [`profile`], checked against the circuit that was
         // actually built. Swap the layout or widen the road and this is what
-        // says so, rather than the mesh quietly folding.
-        debug_assert!(
-            EDGE <= (1.0 - CORNER_MARGIN) * ribbon.min_radius(),
-            "a {EDGE} m cross-section cusps in this circuit's {} m corners",
-            ribbon.min_radius()
-        );
-        debug_assert!(
-            EDGE <= ribbon.min_separation() / 2.0,
-            "a {EDGE} m cross-section collides with itself where this circuit \
-             passes {} m from itself",
-            ribbon.min_separation()
-        );
+        // says so, rather than the mesh quietly folding. Quadratic in stations,
+        // so debug only.
+        debug_assert_eq!(profile::check(&ribbon), Ok(()));
         Self { ribbon }
     }
 
@@ -260,27 +156,20 @@ impl Track {
     }
 
     /// What the car is standing on. The loft is the only surface in the world,
-    /// so this reads the same [`PROFILE`] the mesh was swept from — the car
+    /// so this reads the same [`profile`] the mesh was swept from — the car
     /// rides the kerb because the kerb is 5 cm proud in the profile, not because
     /// anything says so twice.
     pub(crate) fn ground(&self, pos: Vec3) -> Ground {
         let fix = self.ribbon.locate(pos);
-        let across = fix.lateral.abs();
         Ground {
             centre: fix.point,
-            height: fix.point.y + profile_height(fix.lateral),
+            height: fix.point.y + profile::height(fix.lateral),
             tangent: fix.tangent,
             right: fix.right,
             lateral: fix.lateral,
             slope: fix.slope,
             curvature: fix.curvature,
-            grip: if across <= TARMAC_HALF {
-                1.0
-            } else if across <= HALF_WIDTH {
-                KERB_GRIP
-            } else {
-                GRASS_GRIP
-            },
+            grip: profile::grip(fix.lateral),
         }
     }
 }
@@ -307,18 +196,6 @@ pub(crate) struct Ground {
     pub(crate) grip: f32,
 }
 
-/// Height of the cross-section at `lateral`, above the road surface.
-fn profile_height(lateral: f32) -> f32 {
-    let at = lateral.clamp(PROFILE[0].0, PROFILE[PROFILE.len() - 1].0);
-    for rib in PROFILE.windows(2) {
-        if at <= rib[1].0 {
-            let t = (at - rib[0].0) / (rib[1].0 - rib[0].0);
-            return rib[0].1.lerp(rib[1].1, t);
-        }
-    }
-    0.0
-}
-
 fn setup(
     mut commands: Commands,
     track: Res<Track>,
@@ -326,7 +203,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     commands.spawn((
-        Mesh3d(meshes.add(loft(&track.ribbon))),
+        Mesh3d(meshes.add(profile::loft(&track.ribbon))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::WHITE,
             perceptual_roughness: 0.9,
@@ -335,72 +212,6 @@ fn setup(
     ));
 }
 
-/// Sweep the cross-section along the centreline: one strip per profile band, one
-/// quad per station, closing round to the start.
-///
-/// Each quad carries its own four vertices so it can take one flat colour and the
-/// kerb stripes stay crisp; interpolating colour between shared rings smears a
-/// 0.8 m stripe into a gradient. Shading does not suffer for it, because the
-/// normals are computed from the loft rather than from the triangles: across the
-/// strip they come from the profile, giving a hard crease at every rib, and along
-/// it from the neighbouring stations, so the road still reads as smooth.
-///
-/// The ring-per-station, quad-between-rings shape follows `bevy_more_shapes`'
-/// tube loft, with the frame locked to world up instead of Frenet-Serret — a road
-/// must not roll with the curve's torsion.
-fn loft(ribbon: &Ribbon) -> Mesh {
-    let stations = ribbon.stations();
-    let n = stations.len();
-    let bands = PROFILE.len() - 1;
-    let mut positions = Vec::with_capacity(n * bands * 4);
-    let mut normals = Vec::with_capacity(n * bands * 4);
-    let mut colors = Vec::with_capacity(n * bands * 4);
-    let mut indices = Vec::with_capacity(n * bands * 6);
-
-    for band in 0..bands {
-        let (left, right) = (PROFILE[band], PROFILE[band + 1]);
-        let edge = |station: &Station, rib: (f32, f32, Surface)| {
-            station.pos + station.right * rib.0 + Vec3::Y * rib.1
-        };
-        let rim: Vec<[Vec3; 2]> = stations
-            .iter()
-            .map(|station| [edge(station, left), edge(station, right)])
-            .collect();
-        let rim_normal = |i: usize, side: usize| {
-            let across = rim[i][1] - rim[i][0];
-            let along = rim[(i + 1) % n][side] - rim[(i + n - 1) % n][side];
-            across.cross(along).normalize_or(Vec3::Y).to_array()
-        };
-
-        for i in 0..n {
-            let j = (i + 1) % n;
-            let color = left.2.paint(i);
-            for (station, side) in [(i, 0), (i, 1), (j, 0), (j, 1)] {
-                positions.push(rim[station][side].to_array());
-                normals.push(rim_normal(station, side));
-                colors.push(color);
-            }
-            let base = (positions.len() - 4) as u32;
-            indices.extend_from_slice(&[base, base + 1, base + 2, base + 1, base + 3, base + 2]);
-        }
-    }
-
-    Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-    )
-    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
-    .with_inserted_indices(Indices::U32(indices))
-}
-
-/// Sit the car on the loft, hold it inside the outermost strip, and fetch it
-/// back if it ends up stranded out there.
-///
-/// This is the only thing the circuit does to the car. Everything else the road
-/// asks of it — grip, the pull of a climb, the kerb under a wheel — reaches the
-/// car through [`Track::ground`], so the driving model stays in one place.
 fn confine(time: Res<Time>, track: Res<Track>, mut cars: Query<(&mut Transform, &mut Car)>) {
     let dt = time.delta_secs();
     for (mut transform, mut car) in &mut cars {
@@ -414,78 +225,6 @@ mod tests {
 
     fn track() -> Track {
         Track::new()
-    }
-
-    #[test]
-    fn profile_is_ordered_and_symmetric() {
-        assert_eq!(PROFILE[0].0, -EDGE);
-        assert_eq!(PROFILE[PROFILE.len() - 1].0, EDGE);
-        assert_eq!(PROFILE[PROFILE.len() - 1].2, Surface::End);
-        for pair in PROFILE.windows(2) {
-            assert!(
-                pair[1].0 > pair[0].0,
-                "profile rib {} does not come after {}",
-                pair[1].0,
-                pair[0].0
-            );
-        }
-        for (a, b) in PROFILE.iter().zip(PROFILE.iter().rev()) {
-            assert_eq!(a.0, -b.0, "profile is not symmetric about the centreline");
-            assert_eq!(a.1, b.1);
-        }
-    }
-
-    /// The whole reason the loft needs no clamping. Widen the road, widen the
-    /// verge, or drop in a tighter circuit, and this is what says no.
-    #[test]
-    fn profile_fits_the_circuit() {
-        let track = track();
-        let radius = track.ribbon.min_radius();
-        let separation = track.ribbon.min_separation();
-        assert!(
-            radius > ribbon::MIN_RADIUS * 0.95,
-            "corner opening did not converge: {radius} m against a {} m target",
-            ribbon::MIN_RADIUS
-        );
-        assert!(
-            EDGE <= (1.0 - CORNER_MARGIN) * radius,
-            "a {EDGE} m cross-section cusps in this circuit's {radius} m corners"
-        );
-        assert!(
-            EDGE <= separation / 2.0,
-            "verges collide: the circuit passes within {separation} m of itself, \
-             which leaves room for {} m either side, not {EDGE}",
-            separation / 2.0
-        );
-    }
-
-    /// Stated directly, station by station: no rib of the swept profile ever
-    /// reaches its own centre of curvature, so no strip can fold back on itself.
-    #[test]
-    fn every_offset_stays_regular() {
-        let track = track();
-        for station in track.ribbon.stations() {
-            for rib in PROFILE {
-                let jacobian = 1.0 - station.curvature * rib.0;
-                assert!(
-                    jacobian > CORNER_MARGIN,
-                    "rib {} folds at s={} (jacobian {jacobian})",
-                    rib.0,
-                    station.s
-                );
-            }
-        }
-    }
-
-    /// One stripe is a whole number of stations and the lap is a whole number of
-    /// stripe pairs, so the kerb pattern meets itself at the start/finish line.
-    #[test]
-    fn kerb_stripes_close_at_the_line() {
-        let track = track();
-        let n = track.ribbon.stations().len();
-        assert_eq!(n % (STRIPE * 2), 0, "{n} stations breaks the stripe pattern");
-        assert_eq!(Surface::Kerb.paint(0), Surface::Kerb.paint(n - STRIPE * 2));
-        assert_ne!(Surface::Kerb.paint(0), Surface::Kerb.paint(STRIPE));
     }
 
     #[test]
@@ -505,45 +244,6 @@ mod tests {
             (l.min(s.pos.y), h.max(s.pos.y))
         });
         assert!(high - low > 12.0, "smoothing flattened the circuit away");
-    }
-
-    #[test]
-    fn loft_closes_and_covers_the_lap() {
-        let track = track();
-        let lap = track.ribbon.length();
-        assert!((450.0..650.0).contains(&lap), "lap is {lap} m");
-        let mesh = loft(&track.ribbon);
-        let verts = mesh.count_vertices();
-        assert_eq!(verts, track.ribbon.stations().len() * (PROFILE.len() - 1) * 4);
-        let Some(Indices::U32(indices)) = mesh.indices() else {
-            panic!("loft lost its indices");
-        };
-        assert_eq!(indices.len(), verts / 4 * 6);
-        assert!(indices.iter().all(|&i| (i as usize) < verts));
-    }
-
-    /// Every triangle winds the same way round, so the circuit is not visible
-    /// from below and invisible from above.
-    #[test]
-    fn loft_faces_up() {
-        let track = track();
-        let mesh = loft(&track.ribbon);
-        let Some(positions) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else {
-            panic!("loft lost its positions");
-        };
-        let positions = positions.as_float3().expect("positions are float3");
-        let Some(Indices::U32(indices)) = mesh.indices() else {
-            panic!("loft lost its indices");
-        };
-        for face in indices.chunks_exact(3) {
-            let [a, b, c] = [0, 1, 2].map(|k| Vec3::from(positions[face[k] as usize]));
-            let normal = (b - a).cross(c - a);
-            // The steepest strip in the profile still leans far more up than sideways.
-            assert!(
-                normal.y > 0.0 || normal.length_squared() < 1e-12,
-                "a face at {a} winds the wrong way"
-            );
-        }
     }
 
     /// Walk the whole lap the way the timer sees it: progress climbs from the

@@ -1,6 +1,7 @@
 mod camera;
 mod car;
 mod hud;
+mod input;
 mod lap;
 mod skid;
 mod track;
@@ -33,6 +34,7 @@ impl Plugin for GamePlugin {
         app.add_message::<Reset>().add_plugins((
             world::WorldPlugin,
             track::TrackPlugin,
+            input::InputPlugin,
             car::CarPlugin,
             camera::CameraPlugin,
             lap::LapPlugin,

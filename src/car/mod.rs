@@ -1,33 +1,49 @@
-//! The car: the glTF, the wheels, and the keys that reach [`physics`].
+//! The car as an entity: the glTF, the wheels, the body that leans, and the
+//! systems that carry [`Controls`] into [`physics::step`] and the result back
+//! onto a [`Transform`].
 //!
-//! This module only turns input and the road under the wheels into a [`Controls`]
-//! and a [`Surface`], hands both to one `step`, and puts the result back on the
-//! transform. Nothing here decides how the car behaves.
+//! Two entities. The parent carries the [`Car`], its [`Handling`] and its
+//! [`Controls`], and is what the physics moves. Its child is the [`Body`]: the
+//! model, which rolls and dives with the g the seat feels, and holds the
+//! wheels. Nothing here decides how the car behaves — that is [`physics`] — and
+//! nothing here decides what the driver wants — that is [`crate::input`], or a
+//! [`driver::Driver`].
 
+mod driver;
 mod physics;
 
 use bevy::{prelude::*, world_serialization::WorldInstanceReady};
 
+use crate::input::InputSet;
 use crate::track::Track;
 use crate::Reset;
-use physics::{Controls, Surface};
-pub(crate) use physics::{Car, HALF_TRACK, REAR_AXLE, SCALE, WHEEL_WIDTH};
+pub(crate) use physics::{Car, Controls, Handling, Surface, HALF_TRACK, REAR_AXLE, SCALE, WHEEL_WIDTH};
 
 const MODEL: &str = "models/shooting_brake.glb";
+/// The engine steps at this rate whatever the frame rate, so the car handles
+/// the same at 30 frames a second as at 144. A frame is cut into as many of
+/// these as it needs.
+const SUBSTEP: f32 = 1.0 / 240.0;
 /// A long frame must not let the car tunnel through a corner.
 const MAX_STEP: f32 = 1.0 / 30.0;
+/// Body roll per lateral g and dive per longitudinal g, in radians, and how
+/// quickly the body settles onto its springs.
+const ROLL_PER_G: f32 = 0.07;
+const DIVE_PER_G: f32 = 0.05;
+const LEAN_RATE: f32 = 9.0;
 
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct DriveSet;
 
-pub struct CarPlugin;
+/// The car the player is driving. [`crate::input`] fills its [`Controls`].
+#[derive(Component)]
+pub(crate) struct Player;
 
-impl Plugin for CarPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup)
-            .add_systems(Update, drive.in_set(DriveSet))
-            .add_systems(Update, turn_wheels.after(DriveSet));
-    }
+/// The model, as a child of the car. It leans; the car does not.
+#[derive(Component, Default)]
+struct Body {
+    /// The g the springs have settled onto, which lags what the car is doing.
+    lean: Vec2,
 }
 
 /// A wheel of the glTF, and how it is allowed to move.
@@ -40,15 +56,36 @@ struct Wheel {
     roll: f32,
 }
 
+pub struct CarPlugin;
+
+impl Plugin for CarPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, setup)
+            .add_systems(Update, restart.after(InputSet).before(DriveSet))
+            .add_systems(Update, drive.in_set(DriveSet).after(InputSet))
+            .add_systems(Update, (turn_wheels, lean_body).after(DriveSet));
+    }
+}
+
 fn setup(mut commands: Commands, track: Res<Track>, asset_server: Res<AssetServer>) {
     commands
         .spawn((
             Car::default(),
+            Handling::SHOOTING_BRAKE,
+            Controls::default(),
+            Player,
             track.start_transform().with_scale(Vec3::splat(SCALE)),
             Visibility::default(),
-            WorldAssetRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(MODEL))),
         ))
-        .observe(attach_wheels);
+        .with_children(|car| {
+            car.spawn((
+                Body::default(),
+                Transform::IDENTITY,
+                Visibility::default(),
+                WorldAssetRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(MODEL))),
+            ))
+            .observe(attach_wheels);
+        });
 }
 
 fn attach_wheels(
@@ -75,49 +112,60 @@ fn attach_wheels(
     }
 }
 
-fn drive(
-    time: Res<Time>,
-    keys: Res<ButtonInput<KeyCode>>,
-    track: Res<Track>,
-    mut reset: MessageWriter<Reset>,
-    mut cars: Query<(&mut Transform, &mut Car)>,
+/// Carry the car forward by `dt`, through the engine, in fixed substeps.
+///
+/// The one path from a [`Controls`] to a moved car, shared by the game and by
+/// the drivers' lap harness, so what the tests lap is what the player drives.
+pub(crate) fn advance(
+    track: &Track,
+    handling: &Handling,
+    controls: Controls,
+    transform: &mut Transform,
+    car: &mut Car,
+    dt: f32,
 ) {
-    let dt = time.delta_secs().min(MAX_STEP);
-    let controls = Controls {
-        throttle: axis(&keys, KeyCode::KeyW, KeyCode::ArrowUp),
-        // Shift still brakes, for anyone who learned it that way.
-        brake: axis(&keys, KeyCode::KeyS, KeyCode::ArrowDown)
-            .max(axis(&keys, KeyCode::ShiftLeft, KeyCode::ShiftRight)),
-        steer: axis(&keys, KeyCode::KeyA, KeyCode::ArrowLeft)
-            - axis(&keys, KeyCode::KeyD, KeyCode::ArrowRight),
-        handbrake: keys.pressed(KeyCode::Space),
-    };
-
-    if keys.just_pressed(KeyCode::KeyR) {
-        reset.write(Reset);
-        for (mut transform, mut car) in &mut cars {
-            *transform = track.start_transform().with_scale(transform.scale);
-            *car = Car::default();
-        }
-        return;
-    }
-
-    for (mut transform, mut car) in &mut cars {
+    let mut left = dt.min(MAX_STEP);
+    while left > 1e-6 {
+        let h = left.min(SUBSTEP);
         let heading = level(*transform.forward());
-        let right = heading.cross(Vec3::Y);
         let ground = track.ground(transform.translation);
         let surface = Surface {
             grip: ground.grip,
             // The grade runs along the circuit; the car gets the component of it
             // that lies along its nose. Projecting rather than taking the sign
-            // matters once the car is sideways: at ninety degrees to the road the
-            // sign flips on nothing at all, and gravity would slam back and forth
-            // frame to frame.
+            // matters once the car is sideways: at ninety degrees to the road
+            // the sign flips on nothing at all.
             slope: ground.slope * ground.tangent.dot(heading),
         };
-        let yaw = physics::step(&mut car, heading, right, controls, surface, dt);
+        let yaw = physics::step(car, handling, heading, heading.cross(Vec3::Y), controls, surface, h);
         transform.rotate_y(yaw);
-        transform.translation += car.velocity * dt;
+        transform.translation += car.velocity * h;
+        left -= h;
+    }
+}
+
+fn drive(
+    time: Res<Time>,
+    track: Res<Track>,
+    mut cars: Query<(&mut Transform, &mut Car, &Handling, &Controls)>,
+) {
+    for (mut transform, mut car, handling, controls) in &mut cars {
+        advance(&track, handling, *controls, &mut transform, &mut car, time.delta_secs());
+    }
+}
+
+/// Back to the grid, stopped, on a reset.
+fn restart(
+    mut resets: MessageReader<Reset>,
+    track: Res<Track>,
+    mut cars: Query<(&mut Transform, &mut Car)>,
+) {
+    if resets.read().next().is_none() {
+        return;
+    }
+    for (mut transform, mut car) in &mut cars {
+        *transform = track.start_transform().with_scale(transform.scale);
+        *car = Car::default();
     }
 }
 
@@ -145,298 +193,86 @@ fn turn_wheels(
     }
 }
 
+/// Sit the body on its springs: it rolls away from a corner and dives under the
+/// brakes, lagging the car a little, which is what makes it read as weight.
+fn lean_body(
+    time: Res<Time>,
+    cars: Query<(Entity, &Car)>,
+    children: Query<&Children>,
+    mut bodies: Query<(&mut Transform, &mut Body)>,
+) {
+    let settle = (LEAN_RATE * time.delta_secs()).min(1.0);
+    for (entity, car) in &cars {
+        for descendant in children.iter_descendants(entity) {
+            if let Ok((mut transform, mut body)) = bodies.get_mut(descendant) {
+                body.lean = body.lean.lerp(car.g_force, settle);
+                transform.rotation = lean(body.lean);
+            }
+        }
+    }
+}
+
+/// How the body sits under `g`, in the car's frame: x to the right, y forward.
+fn lean(g: Vec2) -> Quat {
+    Quat::from_rotation_z(g.x * ROLL_PER_G) * Quat::from_rotation_x(g.y * DIVE_PER_G)
+}
+
 /// Flatten a direction into the XZ plane. The car drives on the loft's surface
 /// but its own frame stays level, so gravity is the only thing a slope changes.
 pub(crate) fn level(direction: Vec3) -> Vec3 {
     Vec3::new(direction.x, 0.0, direction.z).normalize_or(Vec3::NEG_Z)
 }
 
-fn axis(keys: &ButtonInput<KeyCode>, a: KeyCode, b: KeyCode) -> f32 {
-    if keys.any_pressed([a, b]) { 1.0 } else { 0.0 }
-}
-
 #[cfg(test)]
 mod tests {
-    //! Can the car get round the circuit? Everything else is a number in
-    //! isolation; this is the one that answers whether the thing is driveable.
-
     use super::*;
-    use crate::track::Track;
 
-    /// Two drivers round the real circuit, through the real physics and the
-    /// real barriers.
-    ///
-    /// The plain one aims at the centreline with proportional steering and
-    /// carries the speed the tyres can hold through the tightest bend it can
-    /// see a long way ahead. If it cannot get round, neither can anyone.
-    ///
-    /// The clumsy one is a person on a keyboard: full lock or nothing, a
-    /// reaction time, a short look up the road, and brakes that go on late. If
-    /// *it* gets round, the car is easy to learn — and that is the test that
-    /// matters, because the plain driver was lapping happily while the person
-    /// holding the keys was not.
-    ///
-    /// Neither is a tuning oracle. Chasing their numbers rewards a slow, dull car.
-    fn drive_one_lap(seconds: f32, clumsy: bool) -> Lap {
-        use std::collections::VecDeque;
+    /// A body leans *out* of a corner and dips its nose under the brakes. Get
+    /// either sign wrong and the car looks like it is being pushed rather than
+    /// driven.
+    #[test]
+    fn the_body_leans_the_right_way() {
+        // Accelerating to the right (a right-hand corner): the roof goes left.
+        let roof = lean(Vec2::new(1.0, 0.0)) * Vec3::Y;
+        assert!(roof.x < -0.01, "roof went {roof:?} in a right-hander");
+        // Braking: the nose goes down.
+        let nose = lean(Vec2::new(0.0, -1.0)) * Vec3::NEG_Z;
+        assert!(nose.y < -0.01, "nose went {nose:?} under the brakes");
+        assert_eq!(lean(Vec2::ZERO), Quat::IDENTITY);
+    }
+
+    /// The engine steps at a fixed rate however the frames come, so a slow
+    /// machine and a fast one drive the same car. One long frame and several
+    /// short ones adding up to it must land in the same place.
+    #[test]
+    fn advancing_is_frame_rate_independent() {
         let track = Track::new();
-        let mut transform = track.start_transform().with_scale(Vec3::splat(SCALE));
-        let mut car = Car::default();
-        let dt = 1.0 / 120.0;
-        let mut lap = Lap::default();
-        let mut travelled = 0.0f32;
-        // What the clumsy driver is reacting to: the world as it was 150 ms ago.
-        let mut seen: VecDeque<(f32, f32, f32)> = VecDeque::new();
-        let reaction = if clumsy { 18 } else { 0 };
-        let lookahead = if clumsy { 6 } else { 16 };
-        let late = if clumsy { 1.15 } else { 1.04 };
-
-        for _ in 0..(seconds / dt) as usize {
-            let heading = level(*transform.forward());
-            let ground = track.ground(transform.translation);
-            let ahead = ground.tangent;
-            let astray = f32::atan2(heading.cross(ahead).y, heading.dot(ahead));
-            let correction = astray * 1.6 + ground.lateral * 0.16;
-
-            let hold = 0.95 * 9.81 * ground.grip;
-            let downhill = (-ground.slope * ground.tangent.dot(heading) * 9.81).max(0.0);
-            let stopping = (hold - downhill).max(hold * 0.4);
-            let mut limit: f32 = 24.0;
-            for step in 0..=lookahead {
-                let reach = step as f32 * 3.0;
-                let probe = track.ground(transform.translation + ahead * reach);
-                let corner = hold / probe.curvature.abs().max(0.002);
-                limit = limit.min((corner + 2.0 * stopping * reach).sqrt());
-            }
-            let speed = car.velocity.length();
-
-            seen.push_back((correction, speed, limit));
-            let (correction, seen_speed, limit) = if seen.len() > reaction {
-                seen.pop_front().unwrap()
-            } else {
-                (correction, speed, limit)
-            };
-
-            let controls = if clumsy {
-                Controls {
-                    throttle: if seen_speed > limit * late { 0.0 } else { 1.0 },
-                    brake: if seen_speed > limit * late { 1.0 } else { 0.0 },
-                    steer: if correction > 0.03 {
-                        1.0
-                    } else if correction < -0.03 {
-                        -1.0
-                    } else {
-                        0.0
-                    },
-                    handbrake: false,
-                }
-            } else {
-                let busy = car.g_force.x.abs() > 0.75 || car.rear_slip > 0.2;
-                Controls {
-                    throttle: if speed < 1.0
-                        || (seen_speed < limit * 0.96 && !busy && astray.abs() < 0.6)
-                    {
-                        1.0
-                    } else {
-                        0.0
-                    },
-                    brake: if seen_speed > limit * late { 1.0 } else { 0.0 },
-                    steer: correction.clamp(-1.0, 1.0),
-                    handbrake: false,
-                }
-            };
-
-            let surface = Surface {
-                grip: ground.grip,
-                slope: ground.slope * ground.tangent.dot(heading),
-            };
-            let yaw = physics::step(&mut car, heading, heading.cross(Vec3::Y), controls, surface, dt);
-            transform.rotate_y(yaw);
-            transform.translation += car.velocity * dt;
-            travelled += speed * dt;
-
-            track.hold(&mut transform, &mut car, dt);
-            let ground = track.ground(transform.translation);
-            if ground.lateral.abs() > 4.0 {
-                lap.off_road += dt;
-            }
-            if ground.lateral.abs() > 5.5 {
-                lap.in_the_weeds += dt;
-            }
-            let heading = level(*transform.forward());
-            if ground.slope * ground.tangent.dot(heading) < -0.04 {
-                lap.descending += dt;
-                if ground.lateral.abs() > 4.0 {
-                    lap.off_road_descending += dt;
-                }
-            }
-            if speed < 1.5 {
-                lap.stopped += dt;
-            }
-            lap.distance = travelled;
-            lap.progress = lap.progress.max(track.progress(transform.translation));
-        }
-        lap
-    }
-
-    #[derive(Default)]
-    struct Lap {
-        distance: f32,
-        progress: f32,
-        off_road: f32,
-        in_the_weeds: f32,
-        stopped: f32,
-        descending: f32,
-        off_road_descending: f32,
-    }
-
-    fn report(who: &str, lap: &Lap) {
-        println!(
-            "{who}: round {:.0}%  {:.0} m  off-road {:.1} s  weeds {:.1} s  stopped {:.1} s  \
-             (descending {:.1} s, {:.0}% of it off-road; elsewhere {:.0}%)",
-            lap.progress * 100.0,
-            lap.distance,
-            lap.off_road,
-            lap.in_the_weeds,
-            lap.stopped,
-            lap.descending,
-            100.0 * lap.off_road_descending / lap.descending.max(0.1),
-            100.0 * (lap.off_road - lap.off_road_descending) / (90.0 - lap.descending).max(0.1)
-        );
-    }
-
-    /// Full lock or nothing, 150 ms behind, brakes late, cannot see far. This is
-    /// the person holding the keys, and the car has to be drivable by them.
-    #[test]
-    fn a_clumsy_driver_still_gets_round() {
-        let lap = drive_one_lap(90.0, true);
-        report("clumsy", &lap);
-        assert!(lap.progress > 0.9, "90 s only got {:.0}% round", lap.progress * 100.0);
-        // Loose: the grass is a gravel trap now, so every excursion this driver
-        // makes is a slow one, and it makes plenty. What matters is that it is
-        // never stuck out there.
-        assert!(lap.off_road < 45.0, "off the road {:.0} s of 90", lap.off_road);
-        assert!(lap.stopped < 20.0, "going nowhere {:.0} s of 90", lap.stopped);
-    }
-
-    #[test]
-    fn a_plain_driver_gets_round() {
-        let lap = drive_one_lap(90.0, false);
-        report("plain", &lap);
-        assert!(
-            lap.progress > 0.9,
-            "90 s only got {:.0}% round, {:.0} m",
-            lap.progress * 100.0,
-            lap.distance
-        );
-        // Loose on purpose: these are the bounds of "a plain driver can get
-        // round", not a target to tune against.
-        assert!(
-            lap.off_road < 30.0,
-            "spent {:.0} s of 90 off the road",
-            lap.off_road
-        );
-        assert!(
-            lap.stopped < 15.0,
-            "spent {:.0} s of 90 going nowhere",
-            lap.stopped
-        );
-    }
-}
-
-#[cfg(test)]
-mod analysis {
-    use super::*;
-    use crate::track::Track;
-
-    /// What kind of lap the physics makes of this circuit, for picking grip and
-    /// top speed by something other than taste.
-    ///
-    /// Walks the centreline and solves the fastest lap the tyres allow, the way
-    /// a racing-line solver does: corner speeds from the radii, a forward pass
-    /// for what the engine can add, a backward pass for what the brakes must take
-    /// away. Then it reports what that lap feels like —
-    ///
-    /// - **flat out**: how much of it is spent at top speed. Near zero and the
-    ///   engine is wasted; near half and there is nothing to brake for.
-    /// - **braking**: how much of it is spent slowing down. This is the part a
-    ///   driver can be good or bad at.
-    /// - **spread**: fastest corner over slowest. Variety.
-    /// - **90% loss**: what a driver using nine tenths of the grip gives up over
-    ///   a lap. Small and there is nothing left to master; huge and one mistake
-    ///   ends the lap.
-    ///
-    /// `cargo test --lib speed_profile -- --ignored --nocapture`
-    #[test]
-    #[ignore]
-    fn speed_profile() {
-        let track = Track::new();
-        let step = 0.5f32;
-        let mut here = track.start_transform().translation;
-        let mut radii = Vec::new();
-        for _ in 0..4000 {
-            let g = track.ground(here);
-            radii.push((1.0 / g.curvature.abs().max(1e-4)).min(1e4));
-            here = g.centre + g.tangent * step;
-            if radii.len() > 40 && track.progress(here) < 0.01 {
-                break;
+        let handling = Handling::SHOOTING_BRAKE;
+        let corner = Controls {
+            throttle: 0.7,
+            steer: 0.6,
+            ..default()
+        };
+        let start = track.start_transform().with_scale(Vec3::splat(SCALE));
+        let (mut slow_t, mut slow_car) = (start, Car::default());
+        let (mut fast_t, mut fast_car) = (start, Car::default());
+        for _ in 0..90 {
+            advance(&track, &handling, corner, &mut slow_t, &mut slow_car, 1.0 / 30.0);
+            for _ in 0..4 {
+                advance(&track, &handling, corner, &mut fast_t, &mut fast_car, 1.0 / 120.0);
             }
         }
-        let n = radii.len();
-
-        println!("{:>5} {:>5} {:>6} {:>7} {:>7} {:>8} {:>7} {:>8}",
-            "grip", "top", "lap s", "flatout", "braking", "spread", "slowest", "90%loss");
-        for grip in [1.00f32, physics::GRIP / 9.81, 1.7] {
-        for top in [18.0f32, 21.0, 24.0, 28.0] {
-        let engine = 5.0f32;
-            let lat = grip * 9.81;
-            let mut v: Vec<f32> = radii.iter().map(|r| (lat * r).sqrt().min(top)).collect();
-            for _ in 0..3 {
-                for i in 0..n {
-                    let j = (i + 1) % n;
-                    v[j] = v[j].min((v[i] * v[i] + 2.0 * engine * step).sqrt());
-                }
-                for i in (0..n).rev() {
-                    let j = (i + 1) % n;
-                    v[i] = v[i].min((v[j] * v[j] + 2.0 * lat * step).sqrt());
-                }
-            }
-            let time: f32 = v.iter().map(|s| step / s).sum();
-            let flat_out = v.iter().filter(|s| **s >= top - 0.2).count();
-            let corner = (0..n)
-                .filter(|&i| v[i] <= (lat * radii[i]).sqrt() + 0.2 && v[i] < top - 0.2)
-                .count();
-            let braking = (0..n)
-                .filter(|&i| v[(i + 1) % n] < v[i] - 0.05)
-                .count();
-            let mut sorted = v.clone();
-            sorted.sort_by(f32::total_cmp);
-            // What a driver using only 90% of the grip loses over a lap. Small
-            // and there is nothing to master; huge and a mistake ends the lap.
-            let sloppy: f32 = {
-                let lat = 0.9 * grip * 9.81;
-                let mut w: Vec<f32> = radii.iter().map(|r| (lat * r).sqrt().min(top)).collect();
-                for _ in 0..3 {
-                    for i in 0..n {
-                        let j = (i + 1) % n;
-                        w[j] = w[j].min((w[i] * w[i] + 2.0 * engine * step).sqrt());
-                    }
-                    for i in (0..n).rev() {
-                        let j = (i + 1) % n;
-                        w[i] = w[i].min((w[j] * w[j] + 2.0 * lat * step).sqrt());
-                    }
-                }
-                w.iter().map(|s| step / s).sum()
-            };
-            let _ = corner;
-            println!(
-                "{grip:5.2} {top:5.0} {time:6.1} {:6.0}% {:6.0}% {:7.1}x {:7.1} {:+7.2}s",
-                100.0 * flat_out as f32 / n as f32,
-                100.0 * braking as f32 / n as f32,
-                sorted[n - 1] / sorted[0],
-                sorted[0],
-                sloppy - time,
-            );
-        }}
+        assert!(
+            (slow_car.velocity - fast_car.velocity).length() < 1e-3,
+            "30 fps {:?} against 120 fps {:?}",
+            slow_car.velocity,
+            fast_car.velocity
+        );
+        assert!(
+            slow_t.translation.distance(fast_t.translation) < 1e-2,
+            "30 fps at {:?}, 120 fps at {:?}",
+            slow_t.translation,
+            fast_t.translation
+        );
     }
 }
