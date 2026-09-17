@@ -44,7 +44,12 @@ fn asset_folder() -> String {
         .ok()
         .and_then(|exe| exe.to_str().map(|s| s.contains(".app/Contents/MacOS/")))
         .unwrap_or(false);
-    if bundled { "../Resources/assets" } else { "assets" }.to_string()
+    if bundled {
+        "../Resources/assets"
+    } else {
+        "assets"
+    }
+    .to_string()
 }
 
 pub struct GamePlugin;

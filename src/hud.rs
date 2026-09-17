@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::car::{Car, Setup};
 use crate::ghost::Ghost;
-use crate::lap::{format_time, LapTimer};
+use crate::lap::{LapTimer, format_time};
 
 const AMBER: Color = Color::srgb(1.0, 0.72, 0.12);
 const AMBER_DIM: Color = Color::srgb(0.72, 0.48, 0.08);
@@ -27,8 +27,10 @@ pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup)
-            .add_systems(Update, (draw_clock, draw_g_meter, draw_setup, draw_delta));
+        app.add_systems(Startup, setup).add_systems(
+            Update,
+            (draw_clock, draw_g_meter, draw_setup, draw_delta).after(crate::ghost::GhostSet),
+        );
     }
 }
 
@@ -277,7 +279,10 @@ fn draw_setup(
 
 /// The gap to the ghost, keyed to where the car is on the circuit: how many
 /// seconds ahead or behind this lap is against the best, right now.
-fn draw_delta(ghost: Res<Ghost>, mut readout: Query<(&mut Text, &mut TextColor), With<DeltaReadout>>) {
+fn draw_delta(
+    ghost: Res<Ghost>,
+    mut readout: Query<(&mut Text, &mut TextColor), With<DeltaReadout>>,
+) {
     let Ok((mut text, mut color)) = readout.single_mut() else {
         return;
     };
@@ -333,8 +338,14 @@ fn draw_g_meter(
 }
 
 fn clock_text(timer: &LapTimer) -> String {
-    let last = timer.last.map(format_time).unwrap_or_else(|| "--:--.--".into());
-    let best = timer.best.map(format_time).unwrap_or_else(|| "--:--.--".into());
+    let last = timer
+        .last
+        .map(format_time)
+        .unwrap_or_else(|| "--:--.--".into());
+    let best = timer
+        .best
+        .map(format_time)
+        .unwrap_or_else(|| "--:--.--".into());
     format!(
         "LAP  {}\n{}\nLAST {}\nBEST {}",
         timer.completed,

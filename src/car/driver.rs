@@ -19,7 +19,7 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 
 use super::level;
-use super::physics::{Car, Controls, Handling, GRAVITY};
+use super::physics::{Car, Controls, GRAVITY, Handling};
 use crate::track::Track;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -160,7 +160,7 @@ mod tests {
     //! dull car; what they guard is that the car stays drivable.
 
     use super::*;
-    use crate::car::{advance, Setup, SCALE};
+    use crate::car::{SCALE, Setup, advance};
 
     #[derive(Default)]
     struct Lap {
@@ -180,12 +180,12 @@ mod tests {
         let mut car = Car::default();
         let dt = 1.0 / 120.0;
         let mut lap = Lap::default();
+        let mut previous = track.progress(transform.translation);
 
         for _ in 0..(seconds / dt) as usize {
             let controls = driver.decide(&track, &handling, &transform, &car);
             let speed = car.velocity.length();
             advance(&track, &handling, controls, &mut transform, &mut car, dt);
-            track.hold(&mut transform, &mut car, dt);
 
             lap.distance += speed * dt;
             let ground = track.ground(transform.translation);
@@ -205,7 +205,9 @@ mod tests {
             if speed < 1.5 {
                 lap.stopped += dt;
             }
-            lap.progress = lap.progress.max(track.progress(transform.translation));
+            let progress = track.progress(transform.translation);
+            lap.progress += (progress - previous + 0.5).rem_euclid(1.0) - 0.5;
+            previous = progress;
         }
         lap
     }
@@ -229,10 +231,22 @@ mod tests {
     fn a_plain_driver_gets_round() {
         let lap = lap(Style::Plain, Handling::SHOOTING_BRAKE, 90.0);
         report("plain", &lap);
-        assert!(lap.progress > 0.9, "90 s only got {:.0}% round", lap.progress * 100.0);
+        assert!(
+            lap.progress > 0.9,
+            "90 s only got {:.0}% round",
+            lap.progress * 100.0
+        );
         // Loose on purpose: these are the bounds of "can get round", not a target.
-        assert!(lap.off_road < 30.0, "off the road {:.0} s of 90", lap.off_road);
-        assert!(lap.stopped < 15.0, "going nowhere {:.0} s of 90", lap.stopped);
+        assert!(
+            lap.off_road < 30.0,
+            "off the road {:.0} s of 90",
+            lap.off_road
+        );
+        assert!(
+            lap.stopped < 15.0,
+            "going nowhere {:.0} s of 90",
+            lap.stopped
+        );
     }
 
     /// Full lock or nothing, 150 ms behind, brakes late, cannot see far. This is
@@ -241,12 +255,24 @@ mod tests {
     fn a_clumsy_driver_still_gets_round() {
         let lap = lap(Style::Clumsy, Handling::SHOOTING_BRAKE, 90.0);
         report("clumsy", &lap);
-        assert!(lap.progress > 0.9, "90 s only got {:.0}% round", lap.progress * 100.0);
+        assert!(
+            lap.progress > 0.9,
+            "90 s only got {:.0}% round",
+            lap.progress * 100.0
+        );
         // Loose: the grass is a gravel trap, so every excursion this driver
         // makes is a slow one, and it makes plenty. What matters is that it is
         // never stuck out there.
-        assert!(lap.off_road < 45.0, "off the road {:.0} s of 90", lap.off_road);
-        assert!(lap.stopped < 20.0, "going nowhere {:.0} s of 90", lap.stopped);
+        assert!(
+            lap.off_road < 45.0,
+            "off the road {:.0} s of 90",
+            lap.off_road
+        );
+        assert!(
+            lap.stopped < 20.0,
+            "going nowhere {:.0} s of 90",
+            lap.stopped
+        );
     }
 
     /// Every notch of the setup slider has to be lappable by the person holding
@@ -267,7 +293,12 @@ mod tests {
                 notch,
                 lap.progress * 100.0
             );
-            assert!(lap.stopped < 12.0, "{:?}: going nowhere {:.0} s of 45", notch, lap.stopped);
+            assert!(
+                lap.stopped < 12.0,
+                "{:?}: going nowhere {:.0} s of 45",
+                notch,
+                lap.stopped
+            );
         }
     }
 
@@ -278,15 +309,27 @@ mod tests {
     /// when the tyres are busy, and covers the same ground on every notch.
     #[test]
     fn a_driver_who_lifts_is_not_punished_for_oversteer() {
-        let balanced = lap(Style::Plain, Setup::Balanced.applied_to(Handling::SHOOTING_BRAKE), 45.0);
-        let loose = lap(Style::Plain, Setup::Oversteer.applied_to(Handling::SHOOTING_BRAKE), 45.0);
+        let balanced = lap(
+            Style::Plain,
+            Setup::Balanced.applied_to(Handling::SHOOTING_BRAKE),
+            45.0,
+        );
+        let loose = lap(
+            Style::Plain,
+            Setup::Oversteer.applied_to(Handling::SHOOTING_BRAKE),
+            45.0,
+        );
         assert!(
             loose.distance > balanced.distance * 0.94,
             "the loose setup cost a competent driver {:.0} m against {:.0}",
             loose.distance,
             balanced.distance
         );
-        assert!(loose.off_road < 3.0, "off the road {:.1} s on the loose setup", loose.off_road);
+        assert!(
+            loose.off_road < 3.0,
+            "off the road {:.1} s on the loose setup",
+            loose.off_road
+        );
     }
 
     /// Which notch is quickest depends on who is driving — that is the whole

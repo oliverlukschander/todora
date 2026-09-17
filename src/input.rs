@@ -8,8 +8,8 @@
 
 use bevy::prelude::*;
 
-use crate::car::{Controls, Player, Setup};
 use crate::Reset;
+use crate::car::{Controls, Player, Setup};
 
 /// Everything that reads the player runs in here, ahead of the car.
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
@@ -19,7 +19,10 @@ pub struct InputPlugin;
 
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, read.in_set(InputSet));
+        app.add_systems(
+            PreUpdate,
+            read.in_set(InputSet).after(bevy::input::InputSystems),
+        );
     }
 }
 

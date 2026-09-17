@@ -3,7 +3,7 @@ use bevy::{
     prelude::*,
 };
 
-use crate::car::{level, Car, DriveSet};
+use crate::car::{Car, level};
 use crate::track::Track;
 use crate::world::SKY;
 
@@ -23,8 +23,7 @@ pub struct CameraPlugin;
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup)
-            .add_systems(Update, zoom)
-            .add_systems(Update, follow.after(DriveSet));
+            .add_systems(Update, (zoom, follow).chain());
     }
 }
 

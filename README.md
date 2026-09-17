@@ -4,7 +4,7 @@ A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy
 
 The car is the ruler (~2.4 m long, ~1.1 m wide). Spielberg is scaled to about a third of the previous game length, with an 8 m road.
 
-The circuit is one closed spline plus one cross-section profile. Tarmac, edge lines, kerbs and grass are strips of a single loft over the same stations, so they share their edges exactly — there is no second surface to z-fight with. How wide that cross-section may be is set by the circuit itself, not by taste: see `PROFILE` in `src/track/mod.rs`.
+The circuit is one closed spline plus one cross-section profile. Tarmac, edge lines, kerbs and grass are strips of a single loft over the same stations, so they share their edges exactly — there is no second surface to z-fight with. How wide that cross-section may be is set by the circuit itself, not by taste: see `PROFILE` in `src/track/profile.rs`.
 
 ```sh
 cargo run
@@ -34,6 +34,26 @@ Needs a recent stable Rust (`rustup` on macOS). First Bevy compile is slow; late
 | `tools/` | Generators and one-off scripts. |
 
 New gameplay goes in its own `src` module with a plugin, then gets added to `GamePlugin`. New runtime files go in `assets/`. Source meshes stay in `art/`.
+
+Input and resets run in `PreUpdate`, after Bevy reads the devices. Driving runs in `FixedUpdate` at 240 Hz; each step includes track confinement and recovery. The lap clock follows the car on that same clock, then the ghost finishes and records the step. Camera, body animation, ghost replay and HUD run in `Update`, before Bevy propagates transforms for rendering. Keep that order when adding systems. Bevy carries fractional steps between frames and caps a stall at its default 250 ms of virtual time; driving and lap timing share that cap.
+
+## Checks
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --all-targets
+```
+
+Tests cover acceleration, braking, reverse, slopes, grass, drift recovery, all three setups, wall impacts, lap validation and ghost recording. The schedule tests compare equal driving time across different frame rates and stalls, and check that resets and setup changes reach the next physics step. Mixed-input stress tests check finite values and bounded speeds and forces. AI drivers exercise the real circuit through the same movement path as the game.
+
+Run the optional handling reports with:
+
+```sh
+cargo test --locked --lib -- --ignored --nocapture
+```
+
+Automated checks do not replace a drive with a keyboard and gamepad when judging steering feel, camera motion and analogue controls.
 
 ## A Mac app
 

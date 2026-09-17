@@ -1,8 +1,9 @@
 use bevy::prelude::*;
 
-use crate::car::{Car, DriveSet};
-use crate::track::Track;
 use crate::Reset;
+use crate::car::{Car, DriveSet, Player};
+use crate::input::InputSet;
+use crate::track::Track;
 
 /// Everything that judges the lap runs in here, after the car has moved.
 /// Anything that wants to hear a lap finish in the same frame runs after it.
@@ -23,9 +24,11 @@ impl Plugin for LapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LapTimer>()
             .add_message::<LapFinished>()
-            .add_systems(Update, tick)
-            .add_systems(Update, gate.in_set(LapSet).after(DriveSet))
-            .add_systems(Update, start_again.after(DriveSet));
+            .add_systems(
+                FixedUpdate,
+                (tick, gate).chain().in_set(LapSet).after(DriveSet),
+            )
+            .add_systems(PreUpdate, start_again.after(InputSet));
     }
 }
 
@@ -37,13 +40,19 @@ pub struct LapTimer {
     pub completed: u32,
     running: bool,
     prev_along: Option<f32>,
-    max_progress: f32,
+    prev_progress: Option<f32>,
+    net_progress: f32,
 }
 
 impl LapTimer {
     /// Whether the clock is going: the car has moved off, and a lap is on.
     pub fn running(&self) -> bool {
         self.running
+    }
+
+    /// Signed travel since the lap began, clamped for the ghost's lookup.
+    pub(crate) fn progress(&self) -> f32 {
+        self.net_progress.clamp(0.0, 1.0)
     }
 }
 
@@ -56,12 +65,13 @@ impl Default for LapTimer {
             completed: 0,
             running: false,
             prev_along: None,
-            max_progress: 0.0,
+            prev_progress: None,
+            net_progress: 0.0,
         }
     }
 }
 
-fn tick(time: Res<Time>, mut timer: ResMut<LapTimer>, cars: Query<&Car>) {
+fn tick(time: Res<Time>, mut timer: ResMut<LapTimer>, cars: Query<&Car, With<Player>>) {
     if timer.running {
         timer.current += time.delta_secs();
         return;
@@ -75,7 +85,7 @@ fn gate(
     track: Res<Track>,
     mut timer: ResMut<LapTimer>,
     mut finished: MessageWriter<LapFinished>,
-    cars: Query<&Transform, With<Car>>,
+    cars: Query<&Transform, With<Player>>,
 ) {
     let Ok(car) = cars.single() else {
         return;
@@ -83,14 +93,17 @@ fn gate(
     let pos = car.translation;
     let along = track.start_along(pos);
     let progress = track.progress(pos);
-    if progress > timer.max_progress && progress < 0.97 {
-        timer.max_progress = progress;
+    if let Some(previous) = timer.prev_progress {
+        // Unwrap the closed circuit, retaining direction. Reversing across the
+        // line spends progress rather than instantly qualifying most of a lap.
+        timer.net_progress += (progress - previous + 0.5).rem_euclid(1.0) - 0.5;
     }
+    timer.prev_progress = Some(progress);
     let Some(prev) = timer.prev_along else {
         timer.prev_along = Some(along);
         return;
     };
-    if prev <= 0.0 && along > 0.0 && track.on_start_gate(pos) && timer.max_progress > 0.55 {
+    if prev <= 0.0 && along > 0.0 && track.on_start_gate(pos) && timer.net_progress > 0.95 {
         let time = timer.current;
         finished.write(LapFinished {
             time,
@@ -104,7 +117,7 @@ fn gate(
         );
         timer.completed += 1;
         timer.current = 0.0;
-        timer.max_progress = 0.0;
+        timer.net_progress = 0.0;
         timer.running = true;
     }
     timer.prev_along = Some(along);
@@ -117,10 +130,11 @@ fn start_again(mut resets: MessageReader<Reset>, mut timer: ResMut<LapTimer>) {
 }
 
 pub fn format_time(secs: f32) -> String {
-    let t = secs.max(0.0);
-    let m = (t / 60.0) as u32;
-    let s = t % 60.0;
-    format!("{m}:{s:05.2}")
+    let hundredths = (secs.max(0.0) * 100.0).round() as u64;
+    let m = hundredths / 6000;
+    let s = (hundredths / 100) % 60;
+    let fraction = hundredths % 100;
+    format!("{m}:{s:02}.{fraction:02}")
 }
 
 #[cfg(test)]
@@ -139,12 +153,17 @@ mod tests {
                 completed: 3,
                 running: true,
                 prev_along: Some(2.0),
-                max_progress: 0.8,
+                prev_progress: Some(0.8),
+                net_progress: 0.8,
             })
             .add_systems(Update, start_again);
 
         app.update();
-        assert_eq!(app.world().resource::<LapTimer>().completed, 3, "reset by itself");
+        assert_eq!(
+            app.world().resource::<LapTimer>().completed,
+            3,
+            "reset by itself"
+        );
 
         app.world_mut().write_message(Reset);
         app.update();
@@ -174,7 +193,7 @@ mod tests {
             .insert_resource(Track::new())
             .add_systems(Update, (gate, collect).chain());
         let start = track.start_transform();
-        let car = app.world_mut().spawn((Car::default(), start)).id();
+        let car = app.world_mut().spawn((Car::default(), Player, start)).id();
         app.update();
 
         // Twice round, on the centreline, with the clock ticking.
@@ -182,7 +201,11 @@ mod tests {
         for _ in 0..2200 {
             let ground = track.ground(here);
             here = ground.centre + ground.tangent * 0.5;
-            app.world_mut().entity_mut(car).get_mut::<Transform>().unwrap().translation = here;
+            app.world_mut()
+                .entity_mut(car)
+                .get_mut::<Transform>()
+                .unwrap()
+                .translation = here;
             app.world_mut().resource_mut::<LapTimer>().current += 0.02;
             app.update();
         }
@@ -208,5 +231,44 @@ mod tests {
         assert_eq!(format_time(0.0), "0:00.00");
         assert_eq!(format_time(5.3), "0:05.30");
         assert_eq!(format_time(83.456), "1:23.46");
+        assert_eq!(format_time(59.999), "1:00.00");
+    }
+
+    #[test]
+    fn backing_up_then_recrossing_the_line_is_not_a_lap() {
+        let track = Track::new();
+        let start = track.start_transform();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<LapFinished>()
+            .init_resource::<LapTimer>()
+            .insert_resource(track)
+            .add_systems(Update, gate);
+        let car = app.world_mut().spawn((Car::default(), Player, start)).id();
+        app.update();
+        let mut here = start.translation;
+        let mut backwards = Vec::new();
+        for _ in 0..100 {
+            let ground = app.world().resource::<Track>().ground(here);
+            here = ground.centre - ground.tangent * 0.5;
+            backwards.push(here);
+            app.world_mut()
+                .get_mut::<Transform>(car)
+                .unwrap()
+                .translation = here;
+            app.update();
+        }
+        for here in backwards
+            .into_iter()
+            .rev()
+            .chain([start.translation + *start.forward()])
+        {
+            app.world_mut()
+                .get_mut::<Transform>(car)
+                .unwrap()
+                .translation = here;
+            app.update();
+        }
+        assert_eq!(app.world().resource::<LapTimer>().completed, 0);
     }
 }

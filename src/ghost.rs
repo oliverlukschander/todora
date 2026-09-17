@@ -1,6 +1,6 @@
 //! Your fastest lap, driven again alongside you, and the gap to it.
 //!
-//! While a lap is running the player's pose is recorded every frame, against
+//! While a lap is running the player's pose is recorded every physics step, against
 //! the clock and against how far round the circuit it is. When a lap finishes
 //! faster than any before, that recording becomes the ghost: a translucent copy
 //! of the car that replays it in step with the current lap's clock, and a delta
@@ -15,10 +15,10 @@
 
 use bevy::{light::NotShadowCaster, prelude::*, world_serialization::WorldInstanceReady};
 
-use crate::car::{Player, MODEL, SCALE};
-use crate::lap::{LapFinished, LapSet, LapTimer};
-use crate::track::Track;
 use crate::Reset;
+use crate::car::{MODEL, Player, SCALE};
+use crate::input::InputSet;
+use crate::lap::{LapFinished, LapSet, LapTimer};
 
 /// How much of the car is left in the ghost.
 const FADE: f32 = 0.38;
@@ -26,19 +26,23 @@ const FADE: f32 = 0.38;
 /// car in the shadows.
 const GLOW: LinearRgba = LinearRgba::new(0.22, 0.14, 0.02, 1.0);
 /// Recordings longer than this are abandoned — nobody is chasing that lap.
-const LONGEST: usize = 60_000;
+const LONGEST: usize = 240 * 10 * 60;
+
+#[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
+pub(crate) struct GhostSet;
 
 pub struct GhostPlugin;
 
 impl Plugin for GhostPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup)
-            .add_systems(Update, (toggle, finish.after(LapSet)))
-            .add_systems(PostUpdate, (record, replay).chain());
+            .add_systems(PreUpdate, reset.after(InputSet))
+            .add_systems(FixedUpdate, (finish, record).chain().after(LapSet))
+            .add_systems(Update, (toggle, replay).chain().in_set(GhostSet));
     }
 }
 
-/// One frame of a lap.
+/// One physics step of a lap.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Sample {
     /// Seconds into the lap.
@@ -53,11 +57,13 @@ struct Sample {
 #[derive(Default, Debug)]
 struct Recording {
     samples: Vec<Sample>,
+    full: bool,
 }
 
 impl Recording {
     fn push(&mut self, time: f32, progress: f32, transform: &Transform) {
         if self.samples.len() >= LONGEST {
+            self.full = true;
             return;
         }
         // Progress is held from going backwards so it can be searched. A car
@@ -97,7 +103,10 @@ impl Recording {
             i => {
                 let (a, b) = (self.samples[i - 1], self.samples[i]);
                 let t = ((time - a.time) / (b.time - a.time).max(1e-6)).clamp(0.0, 1.0);
-                (a.translation.lerp(b.translation, t), a.rotation.slerp(b.rotation, t))
+                (
+                    a.translation.lerp(b.translation, t),
+                    a.rotation.slerp(b.rotation, t),
+                )
             }
         })
     }
@@ -111,7 +120,8 @@ impl Recording {
             i if i >= self.samples.len() => last.time,
             i => {
                 let (a, b) = (self.samples[i - 1], self.samples[i]);
-                let t = ((progress - a.progress) / (b.progress - a.progress).max(1e-6)).clamp(0.0, 1.0);
+                let t =
+                    ((progress - a.progress) / (b.progress - a.progress).max(1e-6)).clamp(0.0, 1.0);
                 a.time.lerp(b.time, t)
             }
         })
@@ -179,20 +189,15 @@ fn fade(
     }
 }
 
-/// Write down where the car is, every frame the clock is running.
-fn record(
-    timer: Res<LapTimer>,
-    track: Res<Track>,
-    player: Query<&Transform, With<Player>>,
-    mut ghost: ResMut<Ghost>,
-) {
+/// Write down where the car is, every physics step the clock is running.
+fn record(timer: Res<LapTimer>, player: Query<&Transform, With<Player>>, mut ghost: ResMut<Ghost>) {
     if !timer.running() {
         return;
     }
     let Ok(transform) = player.single() else {
         return;
     };
-    let progress = track.progress(transform.translation);
+    let progress = timer.progress();
     ghost.recording.push(timer.current, progress, transform);
 }
 
@@ -200,20 +205,25 @@ fn record(
 /// next lap starts on a clean sheet. A restart throws everything away.
 fn finish(
     mut laps: MessageReader<LapFinished>,
-    mut resets: MessageReader<Reset>,
+    player: Query<&Transform, With<Player>>,
     mut ghost: ResMut<Ghost>,
 ) {
+    for lap in laps.read() {
+        let mut recording = std::mem::take(&mut ghost.recording);
+        if let Ok(transform) = player.single() {
+            recording.push(lap.time, 1.0, transform);
+        }
+        if lap.best {
+            ghost.best = (recording.samples.len() > 1 && !recording.full).then_some(recording);
+        }
+    }
+}
+
+fn reset(mut resets: MessageReader<Reset>, mut ghost: ResMut<Ghost>) {
     if resets.read().next().is_some() {
         ghost.best = None;
         ghost.recording = Recording::default();
         ghost.delta = None;
-        return;
-    }
-    for lap in laps.read() {
-        let recording = std::mem::take(&mut ghost.recording);
-        if lap.best && recording.samples.len() > 1 {
-            ghost.best = Some(recording);
-        }
     }
 }
 
@@ -221,9 +231,7 @@ fn finish(
 /// the gap where the player is on the circuit.
 fn replay(
     timer: Res<LapTimer>,
-    track: Res<Track>,
     mut ghost: ResMut<Ghost>,
-    player: Query<&Transform, With<Player>>,
     mut ghosts: Query<(&mut Transform, &mut Visibility), Without<Player>>,
 ) {
     let Ok((mut transform, mut visibility)) = ghosts.get_mut(ghost.car) else {
@@ -233,10 +241,8 @@ fn replay(
         None => (None, None),
         Some(best) => {
             let pose = best.pose_at(timer.current);
-            let delta = player
-                .single()
-                .ok()
-                .and_then(|me| best.time_at(track.progress(me.translation)))
+            let delta = best
+                .time_at(timer.progress())
                 .map(|then| timer.current - then);
             (pose, delta)
         }
@@ -256,7 +262,9 @@ fn replay(
 /// `G`, or the pad's north button, shows and hides the ghost.
 fn toggle(keys: Res<ButtonInput<KeyCode>>, pads: Query<&Gamepad>, mut ghost: ResMut<Ghost>) {
     let pressed = keys.just_pressed(KeyCode::KeyG)
-        || pads.iter().any(|pad| pad.just_pressed(GamepadButton::North));
+        || pads
+            .iter()
+            .any(|pad| pad.just_pressed(GamepadButton::North));
     if pressed {
         ghost.on = !ghost.on;
     }
@@ -282,11 +290,73 @@ mod tests {
     }
 
     #[test]
+    fn a_finished_ghost_includes_the_finish_time_and_pose() {
+        let mut app = App::new();
+        app.add_message::<LapFinished>().add_systems(Update, finish);
+        let pose = Transform::from_xyz(20.0, 1.0, 3.0);
+        let player = app.world_mut().spawn((Player, pose)).id();
+        app.insert_resource(Ghost {
+            on: true,
+            delta: None,
+            best: None,
+            recording: lap_of(10),
+            car: player,
+        });
+        app.world_mut().write_message(LapFinished {
+            time: 1.0,
+            best: true,
+        });
+        app.update();
+        let ghost = app.world().resource::<Ghost>();
+        let best = ghost.best.as_ref().unwrap();
+        assert_eq!(best.duration(), 1.0);
+        let last = best.samples.last().unwrap();
+        assert_eq!(last.translation, pose.translation);
+        assert_eq!(last.progress, 1.0);
+        assert!(ghost.recording.samples.is_empty());
+    }
+
+    #[test]
+    fn a_recording_that_exceeds_the_limit_is_discarded() {
+        let sample = Sample {
+            time: 0.0,
+            progress: 0.0,
+            translation: Vec3::ZERO,
+            rotation: Quat::IDENTITY,
+        };
+        let mut recording = Recording {
+            samples: vec![sample; LONGEST],
+            full: false,
+        };
+        recording.push(10.0, 1.0, &Transform::IDENTITY);
+        assert!(recording.full);
+        let mut app = App::new();
+        app.add_message::<LapFinished>().add_systems(Update, finish);
+        let player = app.world_mut().spawn((Player, Transform::IDENTITY)).id();
+        app.insert_resource(Ghost {
+            on: true,
+            delta: None,
+            best: Some(lap_of(10)),
+            recording,
+            car: player,
+        });
+        app.world_mut().write_message(LapFinished {
+            time: 10.0,
+            best: true,
+        });
+        app.update();
+        assert!(app.world().resource::<Ghost>().best.is_none());
+    }
+
+    #[test]
     fn the_pose_is_interpolated_and_wraps_round() {
         let lap = lap_of(11);
         assert_eq!(lap.duration(), 1.0);
         let (at, _) = lap.pose_at(0.15).unwrap();
-        assert!((at.x - 1.5).abs() < 1e-4, "quarter way between frames: {at}");
+        assert!(
+            (at.x - 1.5).abs() < 1e-4,
+            "quarter way between frames: {at}"
+        );
         // A ghost that finished keeps going: past the end it is back at the start.
         let (again, _) = lap.pose_at(1.15).unwrap();
         assert!((again.x - 1.5).abs() < 1e-3, "did not wrap: {again}");
@@ -299,7 +369,11 @@ mod tests {
         let lap = lap_of(11);
         let halfway = lap.time_at(0.5).unwrap();
         assert!((halfway - 0.5).abs() < 1e-4, "halfway round took {halfway}");
-        assert_eq!(lap.time_at(-1.0), Some(0.0), "before the start is the start");
+        assert_eq!(
+            lap.time_at(-1.0),
+            Some(0.0),
+            "before the start is the start"
+        );
         assert_eq!(lap.time_at(2.0), Some(1.0), "past the end is the end");
     }
 
@@ -326,7 +400,11 @@ mod tests {
         lap.push(1.0, 0.5, &Transform::IDENTITY);
         lap.push(2.0, 0.4, &Transform::IDENTITY);
         lap.push(3.0, 0.6, &Transform::IDENTITY);
-        assert!(lap.samples.windows(2).all(|w| w[1].progress >= w[0].progress));
+        assert!(
+            lap.samples
+                .windows(2)
+                .all(|w| w[1].progress >= w[0].progress)
+        );
         assert_eq!(lap.time_at(0.5), Some(1.0), "first reached halfway at 1 s");
     }
 

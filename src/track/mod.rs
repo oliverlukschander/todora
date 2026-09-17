@@ -21,7 +21,7 @@ mod ribbon;
 
 use bevy::prelude::*;
 
-use crate::car::{level, Car, DriveSet};
+use crate::car::{Car, level};
 use layout::CENTERLINE;
 use profile::{EDGE, HALF_WIDTH};
 use ribbon::Ribbon;
@@ -52,8 +52,7 @@ impl Plugin for TrackPlugin {
         // Built here rather than in a startup system so the car and the camera
         // can read the grid slot the moment they spawn.
         app.insert_resource(Track::new())
-            .add_systems(Startup, setup)
-            .add_systems(Update, confine.after(DriveSet));
+            .add_systems(Startup, setup);
     }
 }
 
@@ -91,7 +90,11 @@ impl Track {
 
     pub(crate) fn on_start_gate(&self, pos: Vec3) -> bool {
         let start = self.ribbon.start();
-        (pos - start.pos).reject_from(Vec3::Y).dot(start.right).abs() < HALF_WIDTH + 1.5
+        (pos - start.pos)
+            .reject_from(Vec3::Y)
+            .dot(start.right)
+            .abs()
+            < HALF_WIDTH + 1.5
     }
 
     /// 0 at start/finish, approaching 1 at the end of the lap.
@@ -107,15 +110,7 @@ impl Track {
     /// reaches the car through [`Track::ground`], so the driving model stays in
     /// one place.
     pub(crate) fn hold(&self, transform: &mut Transform, car: &mut Car, dt: f32) {
-        let ground = self.ground(transform.translation);
-        transform.translation.y = ground.height;
-        // Sit the car on the slope rather than level on top of it. On the steep
-        // parts that is nine degrees, which is the nose buried in the road — and
-        // a hill you cannot see coming is a hill you arrive at far too fast.
-        let heading = level(*transform.forward());
-        let grade = ground.slope * ground.tangent.dot(heading);
-        transform.look_to(heading + Vec3::Y * grade, Vec3::Y);
-
+        let mut ground = self.ground(transform.translation);
         // Off the road and going nowhere: a spin into the barrier leaves the car
         // nose-first against it, where everything it does is outward and
         // everything outward is taken away.
@@ -129,24 +124,31 @@ impl Track {
             return;
         }
 
-        if ground.lateral.abs() <= WALL {
-            return;
+        if ground.lateral.abs() > WALL {
+            let held = ground.lateral.clamp(-WALL, WALL);
+            let correction = ground.right * (held - ground.lateral);
+            transform.translation += Vec3::new(correction.x, 0.0, correction.z);
+            // Absorb the outward impact, retaining motion along the circuit.
+            let side = ground.lateral.signum();
+            let outward = car.velocity.dot(ground.right) * side;
+            if outward > 0.0 {
+                car.velocity -= ground.right * (outward * (1.0 + BOUNCE) * side);
+            }
+            ground = self.ground(transform.translation);
         }
-        let held = ground.lateral.clamp(-WALL, WALL);
-        let correction = ground.right * (held - ground.lateral);
-        transform.translation += Vec3::new(correction.x, 0.0, correction.z);
-        // Take out whatever was carrying it outward and push a little of it back,
-        // leaving the speed along the circuit alone.
-        let side = ground.lateral.signum();
-        let outward = car.velocity.dot(ground.right) * side;
-        if outward > 0.0 {
-            car.velocity -= ground.right * (outward * (1.0 + BOUNCE) * side);
-        }
+
+        transform.translation.y = ground.height;
+        // Sit the car on the slope rather than level on top of it. On the steep
+        // parts that is nine degrees, which is the nose buried in the road — and
+        // a hill you cannot see coming is a hill you arrive at far too fast.
+        let heading = level(*transform.forward());
+        let grade = ground.slope * ground.tangent.dot(heading);
+        transform.look_to(heading + Vec3::Y * grade, Vec3::Y);
     }
 
     /// Put the car back on the racing line at the nearest point, stopped and
     /// pointing the way the lap runs. What the driver gets from the reset key,
-    /// and what [`confine`] does for a car that has stranded itself.
+    /// and what [`Track::hold`] does for a car that has stranded itself.
     pub(crate) fn rescue(&self, transform: &mut Transform, car: &mut Car) {
         let ground = self.ground(transform.translation);
         *transform = Transform::from_translation(ground.centre)
@@ -212,13 +214,6 @@ fn setup(
     ));
 }
 
-fn confine(time: Res<Time>, track: Res<Track>, mut cars: Query<(&mut Transform, &mut Car)>) {
-    let dt = time.delta_secs();
-    for (mut transform, mut car) in &mut cars {
-        track.hold(&mut transform, &mut car, dt);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::profile::{GRASS_GRIP, KERB_GRIP, KERB_TOP, TARMAC_HALF};
@@ -240,7 +235,10 @@ mod tests {
             let run = Vec3::new(b.x - a.x, 0.0, b.z - a.z).length().max(1e-4);
             steepest = steepest.max((b.y - a.y).abs() / run);
         }
-        assert!(steepest < 0.2, "max grade {steepest} is a cliff, not a roll");
+        assert!(
+            steepest < 0.2,
+            "max grade {steepest} is a cliff, not a roll"
+        );
         let (low, high) = stations.iter().fold((f32::MAX, f32::MIN), |(l, h), s| {
             (l.min(s.pos.y), h.max(s.pos.y))
         });
@@ -325,7 +323,10 @@ mod tests {
             track.rescue(&mut transform, &mut car);
 
             let ground = track.ground(transform.translation);
-            assert!(ground.lateral.abs() < 0.01, "rescue {stuck} m out landed off-line");
+            assert!(
+                ground.lateral.abs() < 0.01,
+                "rescue {stuck} m out landed off-line"
+            );
             assert!(car.velocity.length() < 1e-4, "rescue left the car moving");
             assert_eq!(car.yaw_rate, 0.0);
             assert_eq!(car.stranded, 0.0);
@@ -335,6 +336,52 @@ mod tests {
                 "rescue {stuck} m out left the car facing the wrong way"
             );
         }
+    }
+
+    #[test]
+    fn a_wall_hit_stays_on_the_ground_and_does_not_add_energy() {
+        let track = track();
+        for station in track.ribbon.stations().iter().step_by(20) {
+            for side in [-1.0, 1.0] {
+                let mut transform =
+                    Transform::from_translation(station.pos + station.right * side * (WALL + 0.4));
+                let mut car = Car {
+                    velocity: station.right * side * 20.0 + station.tangent * 10.0,
+                    ..default()
+                };
+                let speed = car.velocity.length();
+                track.hold(&mut transform, &mut car, 1.0 / 240.0);
+                let ground = track.ground(transform.translation);
+                assert!(
+                    (transform.translation.y - ground.height).abs() < 0.01,
+                    "wall left the car above/below the loft: {} vs {}",
+                    transform.translation.y,
+                    ground.height
+                );
+                assert!(ground.lateral.abs() <= WALL + 0.01);
+                assert!(car.velocity.length() <= speed);
+                assert!(car.velocity.dot(ground.right) * side < 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn a_stranded_car_is_rescued_after_simulated_time() {
+        let track = track();
+        let start = track.start_transform();
+        let mut transform = start;
+        transform.translation += *start.right() * (HALF_WIDTH + 1.0);
+        let mut car = Car::default();
+        for _ in 0..380 {
+            track.hold(&mut transform, &mut car, 1.0 / 240.0);
+        }
+        assert!(track.ground(transform.translation).lateral.abs() > HALF_WIDTH);
+        for _ in 0..10 {
+            track.hold(&mut transform, &mut car, 1.0 / 240.0);
+        }
+        assert!(track.ground(transform.translation).lateral.abs() < 0.01);
+        assert_eq!(car.stranded, 0.0);
+        assert_eq!(car.velocity, Vec3::ZERO);
     }
 
     /// On the steep parts the car has to follow the road, not stay level on top
@@ -366,7 +413,10 @@ mod tests {
             );
             // And it is still pointing the way it was, in plan.
             let heading = crate::car::level(*transform.forward());
-            assert!(heading.dot(steepest.tangent * facing) > 0.999, "the pitch turned it");
+            assert!(
+                heading.dot(steepest.tangent * facing) > 0.999,
+                "the pitch turned it"
+            );
         }
     }
 
@@ -383,4 +433,3 @@ mod tests {
         assert!(track.start_along(ahead) > 2.9);
     }
 }
-

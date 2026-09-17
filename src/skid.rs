@@ -8,15 +8,12 @@
 use std::collections::VecDeque;
 
 use bevy::{
-    asset::RenderAssetUsages,
-    mesh::Indices,
-    prelude::*,
-    render::render_resource::PrimitiveTopology,
+    asset::RenderAssetUsages, mesh::Indices, prelude::*, render::render_resource::PrimitiveTopology,
 };
 
-use crate::car::{level, Car, DriveSet, HALF_TRACK, REAR_AXLE, WHEEL_WIDTH};
-use crate::track::Track;
 use crate::Reset;
+use crate::car::{Car, HALF_TRACK, REAR_AXLE, WHEEL_WIDTH, level};
+use crate::track::Track;
 
 /// How far past its grip the rear axle has to be before it scrubs rubber off.
 const LETS_GO: f32 = 0.3;
@@ -34,7 +31,7 @@ pub struct SkidPlugin;
 impl Plugin for SkidPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup)
-            .add_systems(Update, (wipe, lay, redraw).chain().after(DriveSet));
+            .add_systems(Update, (wipe, lay, redraw).chain());
     }
 }
 
@@ -140,7 +137,10 @@ fn redraw(mut commands: Commands, mut marks: ResMut<Marks>, mut meshes: ResMut<A
         None => {
             let handle = meshes.add(rebuilt);
             let entity = commands
-                .spawn((Mesh3d(handle.clone()), MeshMaterial3d(marks.material.clone())))
+                .spawn((
+                    Mesh3d(handle.clone()),
+                    MeshMaterial3d(marks.material.clone()),
+                ))
                 .id();
             marks.mesh = Some(handle);
             marks.entity = Some(entity);
@@ -281,7 +281,10 @@ mod tests {
         assert!(marks.quads.is_empty(), "marks survived the reset");
         assert!(marks.mesh.is_none() && marks.entity.is_none());
         assert_eq!(marks.drawing, [None, None]);
-        assert!(app.world().get_entity(drawn.unwrap()).is_err(), "entity survived");
+        assert!(
+            app.world().get_entity(drawn.unwrap()).is_err(),
+            "entity survived"
+        );
     }
 
     /// The oldest marks have to be on their way out, or the trail ends in a
@@ -290,12 +293,14 @@ mod tests {
     fn the_trail_fades_at_its_tail() {
         let quads: VecDeque<_> = (0..100).map(|i| quad(i as f32)).collect();
         let mesh = build(&quads);
-        let Some(VertexAttributeValues::Float32x4(colors)) =
-            mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+        let Some(VertexAttributeValues::Float32x4(colors)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR)
         else {
             panic!("marks lost their vertex colours");
         };
         assert_eq!(colors[0][3], 0.0, "the oldest mark is not faded out");
-        assert!(colors[colors.len() - 1][3] > 0.5, "the newest mark is faint");
+        assert!(
+            colors[colors.len() - 1][3] > 0.5,
+            "the newest mark is faint"
+        );
     }
 }

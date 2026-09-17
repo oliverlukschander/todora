@@ -199,7 +199,7 @@ pub(crate) struct Controls {
     pub throttle: f32,
     /// 0 to 1. The brake while rolling, reverse once stopped.
     pub brake: f32,
-    /// -1 to 1. Positive steers left, matching Bevy's left-handed yaw about +Y.
+    /// -1 to 1. Positive steers left, yawing about +Y.
     pub steer: f32,
     pub handbrake: bool,
 }
@@ -224,6 +224,9 @@ pub(crate) struct Car {
     pub yaw_rate: f32,
     /// Where the front wheels actually point, which lags the driver.
     pub steer_angle: f32,
+    /// Reverse is engaged only from a stop, and held until the pedal is released.
+    /// Backward motion in a spin must still get the brakes.
+    pub reversing: bool,
     /// Seconds spent off the circuit getting nowhere. The track uses it to
     /// decide when to fetch the car back.
     pub stranded: f32,
@@ -250,9 +253,9 @@ impl Car {
 
 /// Advance the car by `dt` and report the yaw to apply, in radians.
 ///
-/// `heading` and `right` are the car's own axes, level in XZ. Pure: call it as
-/// often as you like with as small a `dt` as you like, and the result depends
-/// only on the sum.
+/// `heading` and `right` are the car's own axes, level in XZ. Call this pure step
+/// with a small positive `dt`. The game uses a fixed timestep; this numerical
+/// integration is only approximately equivalent at other step sizes.
 pub(crate) fn step(
     car: &mut Car,
     h: &Handling,
@@ -283,10 +286,11 @@ pub(crate) fn step(
     // slide drops the forward component to nothing while the car is still
     // travelling at speed; what tells the two apart is whether it is going
     // sideways.
-    let reversing = controls.brake > 0.0
-        && forward < STOPPED
-        && speed < h.reverse_speed
-        && lateral.abs() < SIDEWAYS;
+    car.reversing = controls.brake > 0.0
+        && controls.throttle == 0.0
+        && lateral.abs() < SIDEWAYS
+        && (speed < STOPPED || (car.reversing && forward < STOPPED));
+    let reversing = car.reversing;
     let base = h.grip_at(speed) * surface.grip;
     let asking = (forward * car.yaw_rate).abs() / base.max(0.1);
     let power_slide = if rolling && !reversing {
@@ -322,8 +326,10 @@ pub(crate) fn step(
     // caught. The car turns toward the sum, with the lag that gives it weight.
     let bite = (speed / 2.0).min(1.0);
     let kinematic = forward * car.steer_angle.tan() / h.wheelbase;
-    let align = -slip * h.align * hold * bite;
-    let kick = slip * h.kick * loose * bite;
+    // When backing up it is the tail, not the nose, that follows travel.
+    let direction = if forward < 0.0 { -1.0 } else { 1.0 };
+    let align = -slip * direction * h.align * hold * bite;
+    let kick = slip * direction * h.kick * loose * bite;
     let target = kinematic * bite + align + kick;
     car.yaw_rate += (target - car.yaw_rate) * (h.yaw_response * dt).min(1.0);
     let yaw = car.yaw_rate * dt;
@@ -344,30 +350,39 @@ pub(crate) fn step(
     // Along the nose: engine, brakes, and everything that slows a car down.
     let forward = car.velocity.dot(heading);
     let mut push = 0.0;
+    let mut resistance = 0.0;
     if controls.throttle > 0.0 {
         // Off the road the wheels spin, and a rear that has let go spins too:
         // the engine gets the surface's grip, less what the slide is spending.
         let fade = 1.0 - (forward / h.top_speed).clamp(0.0, 1.0).powi(2);
         push += h.accel * controls.throttle * fade * surface.grip * (1.0 - loose);
-    } else if rolling {
+    } else if speed > 0.0 && !reversing {
         let revs = (forward.abs() / h.top_speed).clamp(h.engine_braking_floor, 1.0);
-        push -= h.engine_braking * revs * forward.signum();
+        resistance += h.engine_braking * revs;
     }
     if reversing {
-        if forward > -h.reverse_speed {
-            push -= h.reverse_accel * controls.brake;
-        }
-    } else if controls.brake > 0.0 && rolling {
+        let fade = 1.0 - (-forward / h.reverse_speed).clamp(0.0, 1.0).powi(2);
+        push -= h.reverse_accel * controls.brake * fade * surface.grip;
+    } else if controls.brake > 0.0 {
         // Independent of the corner. See `Handling::brake`.
-        push -= h.brake * surface.grip * controls.brake * forward.signum();
+        resistance += h.brake * surface.grip * controls.brake;
     }
     let soft = (1.0 - surface.grip).clamp(0.0, 1.0);
-    if rolling {
+    if speed > 0.0 {
         let rolling_drag = h.rolling * (1.0 + h.soft_ground * soft);
-        push -= h.drag * speed * forward + rolling_drag * forward.signum();
+        resistance += h.drag * speed * forward.abs() + rolling_drag;
     }
     let climb = -GRAVITY * surface.slope / (1.0 + surface.slope * surface.slope).sqrt();
     car.velocity += heading * ((push + climb) * dt);
+    // Resistance can stop motion, never reverse it or kick it across zero.
+    let driven = car.velocity.dot(heading);
+    car.velocity -= heading * driven.clamp(-resistance * dt, resistance * dt);
+    if reversing {
+        // Holding reverse also controls a descent. Cancel only the excess speed
+        // with the brakes, instead of alternating full reverse and full brake.
+        let excess = (-car.velocity.dot(heading) - h.reverse_speed).max(0.0);
+        car.velocity += heading * excess.min(h.brake * surface.grip * dt);
+    }
 
     // Two drags against travel rather than against the nose, so a car going
     // sideways is slowed as hard as one going straight. The gravel trap:
@@ -421,6 +436,234 @@ mod tests {
         slope: 0.0,
     };
 
+    #[test]
+    fn a_crawl_coasts_to_rest() {
+        for speed in [-0.49, -0.35, 0.35, 0.49, 1.0] {
+            let mut car = rolling(speed);
+            drive(&mut car, Controls::default(), FLAT, 3.0);
+            assert_eq!(car.velocity, Vec3::ZERO, "kept creeping from {speed} m/s");
+        }
+    }
+
+    #[test]
+    fn a_light_reverse_pedal_does_not_chatter_at_walking_pace() {
+        let mut car = Car::default();
+        drive(
+            &mut car,
+            Controls {
+                brake: 0.2,
+                ..default()
+            },
+            FLAT,
+            4.0,
+        );
+        let before = car.speed(Vec3::NEG_Z);
+        drive(
+            &mut car,
+            Controls {
+                brake: 0.2,
+                ..default()
+            },
+            FLAT,
+            1.0,
+        );
+        assert!(
+            car.speed(Vec3::NEG_Z) < before - 0.1,
+            "reverse stuck at {before}"
+        );
+    }
+
+    #[test]
+    fn reversing_at_the_limit_does_not_pulse_the_brakes() {
+        let mut car = Car::default();
+        drive(
+            &mut car,
+            Controls {
+                brake: 1.0,
+                ..default()
+            },
+            FLAT,
+            12.0,
+        );
+        for _ in 0..240 {
+            step(
+                &mut car,
+                H,
+                Vec3::NEG_Z,
+                Vec3::X,
+                Controls {
+                    brake: 1.0,
+                    ..default()
+                },
+                FLAT,
+                1.0 / 240.0,
+            );
+            assert!(
+                car.g_force.y.abs() < 0.6,
+                "reverse jolted: {:?}",
+                car.g_force
+            );
+        }
+    }
+
+    #[test]
+    fn a_backward_spin_does_not_engage_reverse_until_stopped() {
+        let mut car = rolling(-4.0);
+        step(
+            &mut car,
+            H,
+            Vec3::NEG_Z,
+            Vec3::X,
+            Controls {
+                brake: 1.0,
+                ..default()
+            },
+            FLAT,
+            1.0 / 240.0,
+        );
+        assert!(!car.reversing);
+        assert!(car.speed(Vec3::NEG_Z) > -4.0);
+    }
+
+    #[test]
+    fn alignment_follows_the_tail_when_moving_backwards() {
+        let mut car = Car {
+            velocity: Vec3::new(1.0, 0.0, 6.0),
+            ..default()
+        };
+        let yaw = step(
+            &mut car,
+            H,
+            Vec3::NEG_Z,
+            Vec3::X,
+            Controls::default(),
+            FLAT,
+            1.0 / 240.0,
+        );
+        // Travel is to the right of the tail: positive yaw turns the tail right.
+        assert!(yaw > 0.0, "alignment amplified the backward slide");
+    }
+
+    #[test]
+    fn both_pedals_hold_the_car_still_without_engaging_reverse() {
+        let mut car = Car::default();
+        drive(
+            &mut car,
+            Controls {
+                throttle: 1.0,
+                brake: 1.0,
+                ..default()
+            },
+            FLAT,
+            3.0,
+        );
+        assert_eq!(car.velocity, Vec3::ZERO);
+        assert!(!car.reversing);
+    }
+
+    #[test]
+    fn reverse_stays_limited_on_a_descent() {
+        let mut car = Car::default();
+        drive(
+            &mut car,
+            Controls {
+                brake: 1.0,
+                ..default()
+            },
+            Surface {
+                slope: 0.12,
+                ..FLAT
+            },
+            60.0,
+        );
+        assert!(
+            car.velocity.length() <= H.reverse_speed + 0.05,
+            "reverse ran downhill at {} m/s",
+            car.velocity.length()
+        );
+    }
+
+    #[test]
+    fn steering_is_mirrored_in_forward_and_reverse_on_every_setup() {
+        for setup in super::super::Setup::ALL {
+            let h = setup.applied_to(*H);
+            for reverse in [false, true] {
+                let mut left = Car::default();
+                let mut right = Car::default();
+                let (mut yaw_l, mut yaw_r) = (0.0_f32, 0.0_f32);
+                for _ in 0..2400 {
+                    for (car, yaw, steer) in
+                        [(&mut left, &mut yaw_l, 0.7), (&mut right, &mut yaw_r, -0.7)]
+                    {
+                        let heading = Quat::from_rotation_y(*yaw) * Vec3::NEG_Z;
+                        *yaw += step(
+                            car,
+                            &h,
+                            heading,
+                            heading.cross(Vec3::Y),
+                            Controls {
+                                throttle: if reverse { 0.0 } else { 0.7 },
+                                brake: if reverse { 0.7 } else { 0.0 },
+                                steer,
+                                handbrake: false,
+                            },
+                            FLAT,
+                            1.0 / 240.0,
+                        );
+                    }
+                    assert!((yaw_l + yaw_r).abs() < 1e-5);
+                    assert!(
+                        (left.velocity - right.velocity * Vec3::new(-1.0, 1.0, 1.0)).length()
+                            < 1e-5
+                    );
+                }
+                assert!(if reverse { yaw_l < -0.1 } else { yaw_l > 0.1 });
+            }
+        }
+    }
+
+    #[test]
+    fn mixed_inputs_stay_bounded_across_setups_and_surfaces() {
+        let mut seed = 42_u32;
+        for setup in super::super::Setup::ALL {
+            let h = setup.applied_to(*H);
+            let mut car = Car::default();
+            let mut yaw = 0.0;
+            let mut controls = Controls::default();
+            for i in 0..24_000 {
+                if i % 60 == 0 {
+                    let mut sample = || {
+                        seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                        (seed >> 8) as f32 / 16_777_215.0
+                    };
+                    controls = Controls {
+                        throttle: sample(),
+                        brake: sample(),
+                        steer: sample() * 2.0 - 1.0,
+                        handbrake: sample() > 0.7,
+                    };
+                }
+                let heading = Quat::from_rotation_y(yaw) * Vec3::NEG_Z;
+                yaw += step(
+                    &mut car,
+                    &h,
+                    heading,
+                    heading.cross(Vec3::Y),
+                    controls,
+                    Surface {
+                        grip: [1.0, 0.85, 0.38][(i / 240) % 3],
+                        slope: (i as f32 * 0.001).sin() * 0.12,
+                    },
+                    1.0 / 240.0,
+                );
+                assert!(car.velocity.is_finite() && car.g_force.is_finite() && yaw.is_finite());
+                assert!(car.velocity.length() < h.top_speed * 1.4);
+                assert!(car.g_force.length() < 5.0);
+                assert!((0.0..=1.0).contains(&car.rear_slip));
+            }
+        }
+    }
+
     fn rolling(speed: f32) -> Car {
         Car {
             velocity: Vec3::NEG_Z * speed,
@@ -435,7 +678,15 @@ mod tests {
         let dt = 1.0 / 120.0;
         for _ in 0..(seconds / dt) as usize {
             let heading = Quat::from_rotation_y(yaw) * Vec3::NEG_Z;
-            yaw += step(car, H, heading, heading.cross(Vec3::Y), controls, surface, dt);
+            yaw += step(
+                car,
+                H,
+                heading,
+                heading.cross(Vec3::Y),
+                controls,
+                surface,
+                dt,
+            );
         }
         yaw
     }
@@ -455,7 +706,15 @@ mod tests {
         let (mut worst, mut peak) = (0.0f32, 0.0f32);
         for i in 0..(seconds / dt) as usize {
             let heading = Quat::from_rotation_y(yaw) * Vec3::NEG_Z;
-            yaw += step(&mut car, H, heading, heading.cross(Vec3::Y), controls, surface, dt);
+            yaw += step(
+                &mut car,
+                H,
+                heading,
+                heading.cross(Vec3::Y),
+                controls,
+                surface,
+                dt,
+            );
             if car.velocity.length() > 5.0 {
                 worst = worst.max(adrift(&car, yaw));
             }
@@ -481,10 +740,26 @@ mod tests {
         let (mut yaw_c, mut yaw_f) = (0.0f32, 0.0f32);
         for _ in 0..60 {
             let heading = Quat::from_rotation_y(yaw_c) * Vec3::NEG_Z;
-            yaw_c += step(&mut coarse, H, heading, heading.cross(Vec3::Y), corner, FLAT, 1.0 / 60.0);
+            yaw_c += step(
+                &mut coarse,
+                H,
+                heading,
+                heading.cross(Vec3::Y),
+                corner,
+                FLAT,
+                1.0 / 60.0,
+            );
             for _ in 0..4 {
                 let heading = Quat::from_rotation_y(yaw_f) * Vec3::NEG_Z;
-                yaw_f += step(&mut fine, H, heading, heading.cross(Vec3::Y), corner, FLAT, 1.0 / 240.0);
+                yaw_f += step(
+                    &mut fine,
+                    H,
+                    heading,
+                    heading.cross(Vec3::Y),
+                    corner,
+                    FLAT,
+                    1.0 / 240.0,
+                );
             }
         }
         // Euler integration is not exact, so these will not be identical — but
@@ -508,7 +783,10 @@ mod tests {
         };
         drive(&mut car, gas, FLAT, 4.0);
         let quick = car.velocity.length();
-        assert!((12.0..H.top_speed).contains(&quick), "4 s got to {quick} m/s");
+        assert!(
+            (12.0..H.top_speed).contains(&quick),
+            "4 s got to {quick} m/s"
+        );
         drive(&mut car, gas, FLAT, 20.0);
         let flat_out = car.velocity.length();
         assert!(
@@ -746,7 +1024,15 @@ mod tests {
         let dt = 1.0 / 120.0;
         for _ in 0..(1.5 / dt) as usize {
             let heading = Quat::from_rotation_y(yaw) * Vec3::NEG_Z;
-            yaw += step(&mut car, H, heading, heading.cross(Vec3::Y), Controls::default(), FLAT, dt);
+            yaw += step(
+                &mut car,
+                H,
+                heading,
+                heading.cross(Vec3::Y),
+                Controls::default(),
+                FLAT,
+                dt,
+            );
         }
         let after = adrift(&car, yaw);
         assert!(
@@ -780,9 +1066,25 @@ mod tests {
     #[test]
     fn gravity_works_both_ways() {
         let mut uphill = rolling(14.0);
-        drive(&mut uphill, Controls::default(), Surface { grip: 1.0, slope: 0.15 }, 2.0);
+        drive(
+            &mut uphill,
+            Controls::default(),
+            Surface {
+                grip: 1.0,
+                slope: 0.15,
+            },
+            2.0,
+        );
         let mut downhill = rolling(14.0);
-        drive(&mut downhill, Controls::default(), Surface { grip: 1.0, slope: -0.15 }, 2.0);
+        drive(
+            &mut downhill,
+            Controls::default(),
+            Surface {
+                grip: 1.0,
+                slope: -0.15,
+            },
+            2.0,
+        );
         assert!(
             downhill.velocity.length() > uphill.velocity.length() + 2.0,
             "slope did nothing: {} against {}",
@@ -798,13 +1100,27 @@ mod tests {
         // Steeper than anything the circuit has: `hills_roll_instead_of_stepping`
         // holds its grade under 20%.
         let mut car = rolling(12.0);
-        drive(&mut car, Controls::default(), Surface { grip: 1.0, slope: -0.2 }, 25.0);
+        drive(
+            &mut car,
+            Controls::default(),
+            Surface {
+                grip: 1.0,
+                slope: -0.2,
+            },
+            25.0,
+        );
         let settled = car.velocity.length();
         let radius = settled * settled / H.grip;
-        assert!(radius < 22.0, "coasts to {settled:.1} m/s, wanting {radius:.0} m of corner");
+        assert!(
+            radius < 22.0,
+            "coasts to {settled:.1} m/s, wanting {radius:.0} m of corner"
+        );
         // Off the throttle the engine is meant to hold the car on a hill; it is
         // the throttle that turns a descent into speed. So only: still rolling.
-        assert!(settled > 3.0, "the engine stopped the car on a hill: {settled:.1} m/s");
+        assert!(
+            settled > 3.0,
+            "the engine stopped the car on a hill: {settled:.1} m/s"
+        );
     }
 
     /// Pointing one way and travelling sixty degrees off it, which is what
@@ -830,7 +1146,14 @@ mod tests {
             brake: 1.0,
             ..default()
         };
-        for surface in [FLAT, GRASS, Surface { grip: 0.38, slope: -0.16 }] {
+        for surface in [
+            FLAT,
+            GRASS,
+            Surface {
+                grip: 0.38,
+                slope: -0.16,
+            },
+        ] {
             let (coasted, still_adrift) = slide(4.0, Controls::default(), surface);
             assert!(
                 still_adrift < 0.15,
@@ -856,7 +1179,10 @@ mod tests {
         );
         // In the grass the surface stops a sliding car on its own.
         let (in_the_grass, _) = slide(2.0, Controls::default(), GRASS);
-        assert!(in_the_grass < 8.0, "sliding through the grass still held {in_the_grass:.1} m/s");
+        assert!(
+            in_the_grass < 8.0,
+            "sliding through the grass still held {in_the_grass:.1} m/s"
+        );
     }
 
     /// The brake key must not turn into the throttle just because the car has
@@ -897,7 +1223,10 @@ mod tests {
         drive(&mut car, stop, FLAT, 1.5);
         let backwards = -car.speed(Vec3::NEG_Z);
         assert!(backwards > 1.5, "it only backed up at {backwards} m/s");
-        assert!(backwards < H.reverse_speed + 0.1, "reverse ran away to {backwards}");
+        assert!(
+            backwards < H.reverse_speed + 0.1,
+            "reverse ran away to {backwards}"
+        );
     }
 
     /// A stopped car with the wheel turned must still pull away.
@@ -935,8 +1264,16 @@ mod tests {
             FLAT,
             1.5,
         );
-        assert!(car.slip_angle > 0.0, "a left turn travels right of the nose: {}", car.slip_angle);
-        assert!(car.grip_used > 0.5, "full lock is not using the grip: {}", car.grip_used);
+        assert!(
+            car.slip_angle > 0.0,
+            "a left turn travels right of the nose: {}",
+            car.slip_angle
+        );
+        assert!(
+            car.grip_used > 0.5,
+            "full lock is not using the grip: {}",
+            car.grip_used
+        );
         let mut straight = rolling(14.0);
         drive(&mut straight, Controls::default(), FLAT, 0.5);
         assert!(straight.slip_angle.abs() < 0.01 && straight.grip_used < 0.05);
@@ -960,7 +1297,15 @@ mod tests {
                 grip: if i % 7 == 0 { 0.38 } else { 1.0 },
                 slope: ((i as f32) * 0.03).sin() * 0.16,
             };
-            yaw += step(&mut car, H, heading, heading.cross(Vec3::Y), controls, surface, dt);
+            yaw += step(
+                &mut car,
+                H,
+                heading,
+                heading.cross(Vec3::Y),
+                controls,
+                surface,
+                dt,
+            );
             assert!(car.velocity.is_finite(), "velocity blew up at step {i}");
             assert!(car.yaw_rate.is_finite(), "yaw blew up at step {i}");
             assert!(car.g_force.is_finite(), "g-force blew up at step {i}");
@@ -972,6 +1317,3 @@ mod tests {
         }
     }
 }
-
-
-

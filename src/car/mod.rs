@@ -15,19 +15,19 @@ mod setup;
 
 use bevy::{prelude::*, world_serialization::WorldInstanceReady};
 
+use crate::Reset;
 use crate::input::InputSet;
 use crate::track::Track;
-use crate::Reset;
-pub(crate) use physics::{Car, Controls, Handling, Surface, HALF_TRACK, REAR_AXLE, SCALE, WHEEL_WIDTH};
+pub(crate) use physics::{
+    Car, Controls, HALF_TRACK, Handling, REAR_AXLE, SCALE, Surface, WHEEL_WIDTH,
+};
 pub(crate) use setup::Setup;
 
 pub(crate) const MODEL: &str = "models/shooting_brake.glb";
 /// The engine steps at this rate whatever the frame rate, so the car handles
-/// the same at 30 frames a second as at 144. A frame is cut into as many of
-/// these as it needs.
+/// the same at 30 frames a second as at 144. Bevy carries leftover frame time
+/// into the next frame instead of using a shorter final step.
 const SUBSTEP: f32 = 1.0 / 240.0;
-/// A long frame must not let the car tunnel through a corner.
-const MAX_STEP: f32 = 1.0 / 30.0;
 /// Body roll per lateral g and dive per longitudinal g, in radians, and how
 /// quickly the body settles onto its springs.
 const ROLL_PER_G: f32 = 0.07;
@@ -63,11 +63,11 @@ pub struct CarPlugin;
 impl Plugin for CarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Setup>()
+            .insert_resource(Time::<Fixed>::from_hz(240.0))
             .add_systems(Startup, setup)
-            .add_systems(Update, apply_setup.before(DriveSet))
-            .add_systems(Update, restart.after(InputSet).before(DriveSet))
-            .add_systems(Update, drive.in_set(DriveSet).after(InputSet))
-            .add_systems(Update, (turn_wheels, lean_body).after(DriveSet));
+            .add_systems(PreUpdate, (apply_setup, restart).after(InputSet))
+            .add_systems(FixedUpdate, drive.in_set(DriveSet))
+            .add_systems(Update, (turn_wheels, lean_body));
     }
 }
 
@@ -107,7 +107,10 @@ fn attach_wheels(
         let Some(corner) = name.as_str().strip_prefix("Wheel") else {
             continue;
         };
-        let rest = transforms.get(entity).map(|t| t.rotation).unwrap_or_default();
+        let rest = transforms
+            .get(entity)
+            .map(|t| t.rotation)
+            .unwrap_or_default();
         commands.entity(entity).insert(Wheel {
             steers: corner.starts_with('F'),
             rest,
@@ -128,7 +131,7 @@ pub(crate) fn advance(
     car: &mut Car,
     dt: f32,
 ) {
-    let mut left = dt.min(MAX_STEP);
+    let mut left = dt;
     while left > 1e-6 {
         let h = left.min(SUBSTEP);
         let heading = level(*transform.forward());
@@ -141,9 +144,18 @@ pub(crate) fn advance(
             // the sign flips on nothing at all.
             slope: ground.slope * ground.tangent.dot(heading),
         };
-        let yaw = physics::step(car, handling, heading, heading.cross(Vec3::Y), controls, surface, h);
+        let yaw = physics::step(
+            car,
+            handling,
+            heading,
+            heading.cross(Vec3::Y),
+            controls,
+            surface,
+            h,
+        );
         transform.rotate_y(yaw);
         transform.translation += car.velocity * h;
+        track.hold(transform, car, h);
         left -= h;
     }
 }
@@ -154,7 +166,14 @@ fn drive(
     mut cars: Query<(&mut Transform, &mut Car, &Handling, &Controls)>,
 ) {
     for (mut transform, mut car, handling, controls) in &mut cars {
-        advance(&track, handling, *controls, &mut transform, &mut car, time.delta_secs());
+        advance(
+            &track,
+            handling,
+            *controls,
+            &mut transform,
+            &mut car,
+            time.delta_secs(),
+        );
     }
 }
 
@@ -200,7 +219,7 @@ fn turn_wheels(
             let Ok((mut transform, mut wheel)) = wheels.get_mut(descendant) else {
                 continue;
             };
-            wheel.roll += roll;
+            wheel.roll = (wheel.roll + roll).rem_euclid(std::f32::consts::TAU);
             let steer = if wheel.steers { car.steer_angle } else { 0.0 };
             transform.rotation =
                 wheel.rest * Quat::from_rotation_y(steer) * Quat::from_rotation_x(wheel.roll);
@@ -241,6 +260,94 @@ pub(crate) fn level(direction: Vec3) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::time::TimeUpdateStrategy;
+    use std::time::Duration;
+
+    fn simulation() -> (App, Entity) {
+        let track = Track::new();
+        let start = track.start_transform();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<Reset>()
+            .insert_resource(track)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_plugins((crate::input::InputPlugin, CarPlugin, crate::lap::LapPlugin));
+        // Exercise the production schedules without spawning the rendered model.
+        app.world_mut().resource_mut::<Schedules>().remove(Startup);
+        let car = app
+            .world_mut()
+            .spawn((
+                Player,
+                Car::default(),
+                Controls::default(),
+                Handling::SHOOTING_BRAKE,
+                start,
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyW);
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+        app.update();
+        (app, car)
+    }
+
+    #[test]
+    fn driving_and_the_lap_clock_share_fixed_time_at_all_frame_rates() {
+        let run = |frames: &[u64]| {
+            let (mut app, car) = simulation();
+            for &nanos in frames {
+                app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_nanos(
+                    nanos,
+                )));
+                app.update();
+            }
+            let position = app.world().get::<Transform>(car).unwrap().translation;
+            let velocity = app.world().get::<Car>(car).unwrap().velocity;
+            (
+                position,
+                velocity,
+                app.world().resource::<crate::lap::LapTimer>().current,
+            )
+        };
+        // Equal elapsed time, including a frame stall and rates that do not
+        // divide 240 Hz. Remainders must carry across frame boundaries.
+        let reference = run(&[10_000_000; 200]);
+        for frames in [
+            vec![100_000_000; 20],
+            vec![20_000_000; 100],
+            [vec![7_000_000; 250], vec![250_000_000]].concat(),
+        ] {
+            let actual = run(&frames);
+            assert!(reference.0.distance(actual.0) < 1e-4);
+            assert!((reference.1 - actual.1).length() < 1e-4);
+            assert_eq!(reference.2, actual.2);
+        }
+    }
+
+    #[test]
+    fn setup_and_restart_apply_before_the_next_physics_step() {
+        let (mut app, entity) = simulation();
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+            20,
+        )));
+        for _ in 0..20 {
+            app.update();
+        }
+        assert!(app.world().get::<Car>(entity).unwrap().velocity.length() > 1.0);
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.release(KeyCode::KeyW);
+        keys.press(KeyCode::Digit3);
+        keys.press(KeyCode::KeyR);
+        app.update();
+        assert_eq!(
+            *app.world().get::<Handling>(entity).unwrap(),
+            Setup::Oversteer.applied_to(Handling::SHOOTING_BRAKE)
+        );
+        assert_eq!(app.world().get::<Car>(entity).unwrap().velocity, Vec3::ZERO);
+        assert_eq!(app.world().resource::<crate::lap::LapTimer>().current, 0.0);
+        assert_eq!(app.world().resource::<crate::lap::LapTimer>().completed, 0);
+    }
 
     /// A body leans *out* of a corner and dips its nose under the brakes. Get
     /// either sign wrong and the car looks like it is being pushed rather than
@@ -254,6 +361,41 @@ mod tests {
         let nose = lean(Vec2::new(0.0, -1.0)) * Vec3::NEG_Z;
         assert!(nose.y < -0.01, "nose went {nose:?} under the brakes");
         assert_eq!(lean(Vec2::ZERO), Quat::IDENTITY);
+    }
+
+    #[test]
+    fn a_long_frame_preserves_driving_time() {
+        let track = Track::new();
+        let controls = Controls {
+            throttle: 1.0,
+            ..default()
+        };
+        let start = track.start_transform();
+        let (mut a, mut ca) = (start, Car::default());
+        let (mut b, mut cb) = (start, Car::default());
+        advance(
+            &track,
+            &Handling::SHOOTING_BRAKE,
+            controls,
+            &mut a,
+            &mut ca,
+            0.1,
+        );
+        for _ in 0..24 {
+            advance(
+                &track,
+                &Handling::SHOOTING_BRAKE,
+                controls,
+                &mut b,
+                &mut cb,
+                SUBSTEP,
+            );
+        }
+        assert!(
+            a.translation.distance(b.translation) < 1e-4,
+            "long frame lost driving time"
+        );
+        assert!((ca.velocity - cb.velocity).length() < 1e-4);
     }
 
     /// The engine steps at a fixed rate however the frames come, so a slow
@@ -272,9 +414,23 @@ mod tests {
         let (mut slow_t, mut slow_car) = (start, Car::default());
         let (mut fast_t, mut fast_car) = (start, Car::default());
         for _ in 0..90 {
-            advance(&track, &handling, corner, &mut slow_t, &mut slow_car, 1.0 / 30.0);
+            advance(
+                &track,
+                &handling,
+                corner,
+                &mut slow_t,
+                &mut slow_car,
+                1.0 / 30.0,
+            );
             for _ in 0..4 {
-                advance(&track, &handling, corner, &mut fast_t, &mut fast_car, 1.0 / 120.0);
+                advance(
+                    &track,
+                    &handling,
+                    corner,
+                    &mut fast_t,
+                    &mut fast_car,
+                    1.0 / 120.0,
+                );
             }
         }
         assert!(

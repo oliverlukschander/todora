@@ -8,10 +8,7 @@
 //! said twice.
 
 use bevy::{
-    asset::RenderAssetUsages,
-    mesh::Indices,
-    prelude::*,
-    render::render_resource::PrimitiveTopology,
+    asset::RenderAssetUsages, mesh::Indices, prelude::*, render::render_resource::PrimitiveTopology,
 };
 
 use super::ribbon::{Ribbon, Station};
@@ -101,7 +98,7 @@ impl Band {
             Band::Tarmac if i < STRIPE => paint(0.90, 0.90, 0.88),
             Band::Tarmac => paint(0.15, 0.15, 0.17),
             Band::Line => paint(0.90, 0.90, 0.88),
-            Band::Kerb if (i / STRIPE) % 2 == 0 => paint(0.76, 0.13, 0.11),
+            Band::Kerb if (i / STRIPE).is_multiple_of(2) => paint(0.76, 0.13, 0.11),
             Band::Kerb => paint(0.93, 0.93, 0.91),
             Band::Grass => paint(0.33, 0.52, 0.24),
             Band::Skirt | Band::End => paint(0.25, 0.42, 0.19),
@@ -188,13 +185,6 @@ pub(super) fn loft(ribbon: &Ribbon) -> Mesh {
     .with_inserted_indices(Indices::U32(indices))
 }
 
-/// Sit the car on the loft, hold it inside the outermost strip, and fetch it
-/// back if it ends up stranded out there.
-///
-/// This is the only thing the circuit does to the car. Everything else the road
-/// asks of it — grip, the pull of a climb, the kerb under a wheel — reaches the
-/// car through [`Track::ground`], so the driving model stays in one place.
-
 /// Fraction of tarmac grip at `lateral` metres off the centreline.
 pub(super) fn grip(lateral: f32) -> f32 {
     let across = lateral.abs();
@@ -237,7 +227,7 @@ pub(super) fn check(ribbon: &Ribbon) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::track::{ribbon, Track};
+    use crate::track::{Track, ribbon};
 
     #[test]
     fn profile_is_ordered_and_symmetric() {
@@ -258,7 +248,6 @@ mod tests {
         }
     }
 
-
     /// The whole reason the loft needs no clamping. Widen the road, widen the
     /// verge, or drop in a tighter circuit, and this is what says no.
     #[test]
@@ -272,7 +261,6 @@ mod tests {
         );
         assert_eq!(check(&track.ribbon), Ok(()));
     }
-
 
     /// Stated directly, station by station: no rib of the swept profile ever
     /// reaches its own centre of curvature, so no strip can fold back on itself.
@@ -292,18 +280,20 @@ mod tests {
         }
     }
 
-
     /// One stripe is a whole number of stations and the lap is a whole number of
     /// stripe pairs, so the kerb pattern meets itself at the start/finish line.
     #[test]
     fn kerb_stripes_close_at_the_line() {
         let track = Track::new();
         let n = track.ribbon.stations().len();
-        assert_eq!(n % (STRIPE * 2), 0, "{n} stations breaks the stripe pattern");
+        assert_eq!(
+            n % (STRIPE * 2),
+            0,
+            "{n} stations breaks the stripe pattern"
+        );
         assert_eq!(Band::Kerb.paint(0), Band::Kerb.paint(n - STRIPE * 2));
         assert_ne!(Band::Kerb.paint(0), Band::Kerb.paint(STRIPE));
     }
-
 
     #[test]
     fn loft_closes_and_covers_the_lap() {
@@ -312,14 +302,16 @@ mod tests {
         assert!((450.0..650.0).contains(&lap), "lap is {lap} m");
         let mesh = loft(&track.ribbon);
         let verts = mesh.count_vertices();
-        assert_eq!(verts, track.ribbon.stations().len() * (PROFILE.len() - 1) * 4);
+        assert_eq!(
+            verts,
+            track.ribbon.stations().len() * (PROFILE.len() - 1) * 4
+        );
         let Some(Indices::U32(indices)) = mesh.indices() else {
             panic!("loft lost its indices");
         };
         assert_eq!(indices.len(), verts / 4 * 6);
         assert!(indices.iter().all(|&i| (i as usize) < verts));
     }
-
 
     /// Every triangle winds the same way round, so the circuit is not visible
     /// from below and invisible from above.
@@ -344,5 +336,4 @@ mod tests {
             );
         }
     }
-
 }

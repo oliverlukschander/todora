@@ -93,7 +93,7 @@ impl Setup {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::car::physics::{step, Car, Controls, Surface, GRAVITY};
+    use crate::car::physics::{Car, Controls, GRAVITY, Surface, step};
 
     const FLAT: Surface = Surface {
         grip: 1.0,
@@ -143,7 +143,13 @@ mod tests {
 
     /// Drive `first` for `hold` seconds and then `then` for `release` seconds.
     /// Returns the worst slide while on `first`, and the slide left at the end.
-    fn then_lift(setup: Setup, first: Controls, hold: f32, then: Controls, release: f32) -> (f32, f32) {
+    fn then_lift(
+        setup: Setup,
+        first: Controls,
+        hold: f32,
+        then: Controls,
+        release: f32,
+    ) -> (f32, f32) {
         let h = tuned(setup);
         let mut car = Car {
             velocity: Vec3::NEG_Z * 14.0,
@@ -159,7 +165,15 @@ mod tests {
         for (controls, seconds, measure) in [(first, hold, true), (then, release, false)] {
             for _ in 0..(seconds / dt) as usize {
                 let heading = Quat::from_rotation_y(yaw) * Vec3::NEG_Z;
-                yaw += step(&mut car, &h, heading, heading.cross(Vec3::Y), controls, FLAT, dt);
+                yaw += step(
+                    &mut car,
+                    &h,
+                    heading,
+                    heading.cross(Vec3::Y),
+                    controls,
+                    FLAT,
+                    dt,
+                );
                 if measure && car.velocity.length() > 3.0 {
                     worst = worst.max(slide(&car, yaw));
                 }
@@ -187,8 +201,16 @@ mod tests {
             "oversteer only came round {:.0} degrees on full throttle",
             loose.to_degrees()
         );
-        assert!(loose < 1.4, "oversteer spun: {:.0} degrees", loose.to_degrees());
-        assert!(caught < 0.1, "lifting off left it {:.0} degrees sideways", caught.to_degrees());
+        assert!(
+            loose < 1.4,
+            "oversteer spun: {:.0} degrees",
+            loose.to_degrees()
+        );
+        assert!(
+            caught < 0.1,
+            "lifting off left it {:.0} degrees sideways",
+            caught.to_degrees()
+        );
 
         let (planted, _) = then_lift(Setup::Understeer, boot, 1.0, Controls::default(), 0.5);
         assert!(
