@@ -1,11 +1,15 @@
 use bevy::prelude::*;
 
 use crate::car::{Car, Setup};
+use crate::ghost::Ghost;
 use crate::lap::{format_time, LapTimer};
 
 const AMBER: Color = Color::srgb(1.0, 0.72, 0.12);
 const AMBER_DIM: Color = Color::srgb(0.72, 0.48, 0.08);
 const PANEL: Color = Color::srgba(0.04, 0.03, 0.02, 0.82);
+/// The delta to the ghost: green when this lap is ahead of it, red when behind.
+const AHEAD: Color = Color::srgb(0.38, 0.86, 0.42);
+const BEHIND: Color = Color::srgb(0.96, 0.32, 0.26);
 
 /// Side of the g-meter's square, in pixels, and the reading that reaches its
 /// edge. Tyres give up somewhere near 1.2 g, so a needle on the rim means the
@@ -24,7 +28,7 @@ pub struct HudPlugin;
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup)
-            .add_systems(Update, (draw_clock, draw_g_meter, draw_setup));
+            .add_systems(Update, (draw_clock, draw_g_meter, draw_setup, draw_delta));
     }
 }
 
@@ -46,10 +50,13 @@ struct SetupKnob;
 #[derive(Component)]
 struct SetupName;
 
+#[derive(Component)]
+struct DeltaReadout;
+
 fn setup(mut commands: Commands) {
     commands.spawn((
         Text::new(
-            "W — throttle\nS — brake, reverse at a stop\nA / D — steer\nSpace — handbrake\n1 / 2 / 3 — setup\nR — restart\nScroll — zoom",
+            "W — throttle\nS — brake, reverse at a stop\nA / D — steer\nSpace — handbrake\n1 / 2 / 3 — setup\nG — ghost\nR — restart\nScroll — zoom",
         ),
         TextFont {
             font_size: FontSize::Px(16.0),
@@ -204,15 +211,30 @@ fn setup(mut commands: Commands) {
         },
         BackgroundColor(PANEL),
         BorderColor::all(AMBER_DIM),
-        children![(
-            ClockReadout,
-            Text::new(clock_text(&LapTimer::default())),
-            TextFont {
-                font_size: FontSize::Px(22.0),
-                ..default()
-            },
-            TextColor(AMBER),
-        )],
+        children![
+            (
+                ClockReadout,
+                Text::new(clock_text(&LapTimer::default())),
+                TextFont {
+                    font_size: FontSize::Px(22.0),
+                    ..default()
+                },
+                TextColor(AMBER),
+            ),
+            (
+                DeltaReadout,
+                Text::new("GHOST  --"),
+                TextFont {
+                    font_size: FontSize::Px(26.0),
+                    ..default()
+                },
+                TextColor(AMBER_DIM),
+                Node {
+                    margin: UiRect::top(px(6)),
+                    ..default()
+                },
+            ),
+        ],
     ));
 }
 
@@ -251,6 +273,26 @@ fn draw_setup(
     if let Ok(mut text) = name.single_mut() {
         text.0 = chosen.name().into();
     }
+}
+
+/// The gap to the ghost, keyed to where the car is on the circuit: how many
+/// seconds ahead or behind this lap is against the best, right now.
+fn draw_delta(ghost: Res<Ghost>, mut readout: Query<(&mut Text, &mut TextColor), With<DeltaReadout>>) {
+    let Ok((mut text, mut color)) = readout.single_mut() else {
+        return;
+    };
+    let (shown, tint) = match (ghost.on, ghost.delta) {
+        (false, _) => ("GHOST OFF".to_string(), AMBER_DIM),
+        (true, None) => ("GHOST  --".to_string(), AMBER_DIM),
+        (true, Some(delta)) => (
+            format!("{delta:+.2}"),
+            if delta <= 0.0 { AHEAD } else { BEHIND },
+        ),
+    };
+    if text.0 != shown {
+        text.0 = shown;
+    }
+    color.0 = tint;
 }
 
 fn draw_clock(timer: Res<LapTimer>, mut readout: Query<&mut Text, With<ClockReadout>>) {

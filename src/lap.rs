@@ -4,13 +4,27 @@ use crate::car::{Car, DriveSet};
 use crate::track::Track;
 use crate::Reset;
 
+/// Everything that judges the lap runs in here, after the car has moved.
+/// Anything that wants to hear a lap finish in the same frame runs after it.
+#[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
+pub(crate) struct LapSet;
+
+/// A lap has just been completed: its time, and whether it beat every lap
+/// before it.
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub(crate) struct LapFinished {
+    pub time: f32,
+    pub best: bool,
+}
+
 pub struct LapPlugin;
 
 impl Plugin for LapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<LapTimer>()
+            .add_message::<LapFinished>()
             .add_systems(Update, tick)
-            .add_systems(Update, gate.after(DriveSet))
+            .add_systems(Update, gate.in_set(LapSet).after(DriveSet))
             .add_systems(Update, start_again.after(DriveSet));
     }
 }
@@ -24,6 +38,13 @@ pub struct LapTimer {
     running: bool,
     prev_along: Option<f32>,
     max_progress: f32,
+}
+
+impl LapTimer {
+    /// Whether the clock is going: the car has moved off, and a lap is on.
+    pub fn running(&self) -> bool {
+        self.running
+    }
 }
 
 impl Default for LapTimer {
@@ -50,7 +71,12 @@ fn tick(time: Res<Time>, mut timer: ResMut<LapTimer>, cars: Query<&Car>) {
     }
 }
 
-fn gate(track: Res<Track>, mut timer: ResMut<LapTimer>, cars: Query<&Transform, With<Car>>) {
+fn gate(
+    track: Res<Track>,
+    mut timer: ResMut<LapTimer>,
+    mut finished: MessageWriter<LapFinished>,
+    cars: Query<&Transform, With<Car>>,
+) {
     let Ok(car) = cars.single() else {
         return;
     };
@@ -65,6 +91,11 @@ fn gate(track: Res<Track>, mut timer: ResMut<LapTimer>, cars: Query<&Transform, 
         return;
     };
     if prev <= 0.0 && along > 0.0 && track.on_start_gate(pos) && timer.max_progress > 0.55 {
+        let time = timer.current;
+        finished.write(LapFinished {
+            time,
+            best: timer.best.is_none_or(|best| time < best),
+        });
         timer.last = Some(timer.current);
         timer.best = Some(
             timer
@@ -122,6 +153,54 @@ mod tests {
         assert_eq!(timer.current, 0.0);
         assert!(timer.last.is_none() && timer.best.is_none());
         assert!(!timer.running);
+    }
+
+    /// A finished lap has to announce itself, and say whether it was the best:
+    /// the ghost is built on hearing it.
+    #[test]
+    fn a_finished_lap_is_announced() {
+        #[derive(Resource, Default)]
+        struct Heard(Vec<LapFinished>);
+        fn collect(mut laps: MessageReader<LapFinished>, mut heard: ResMut<Heard>) {
+            heard.0.extend(laps.read().copied());
+        }
+
+        let track = Track::new();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<LapFinished>()
+            .init_resource::<Heard>()
+            .init_resource::<LapTimer>()
+            .insert_resource(Track::new())
+            .add_systems(Update, (gate, collect).chain());
+        let start = track.start_transform();
+        let car = app.world_mut().spawn((Car::default(), start)).id();
+        app.update();
+
+        // Twice round, on the centreline, with the clock ticking.
+        let mut here = start.translation;
+        for _ in 0..2200 {
+            let ground = track.ground(here);
+            here = ground.centre + ground.tangent * 0.5;
+            app.world_mut().entity_mut(car).get_mut::<Transform>().unwrap().translation = here;
+            app.world_mut().resource_mut::<LapTimer>().current += 0.02;
+            app.update();
+        }
+
+        let heard = &app.world().resource::<Heard>().0;
+        assert_eq!(heard.len(), 2, "heard {} laps of 2", heard.len());
+        assert!(heard[0].best, "the first lap is always the best so far");
+        assert!(heard[0].time > 15.0, "lap time {}", heard[0].time);
+        // The second is a best exactly when it was quicker than the first —
+        // whichever way the half-metre steps happened to land.
+        assert_eq!(
+            heard[1].best,
+            heard[1].time < heard[0].time,
+            "lap two took {} against {} and was called best={}",
+            heard[1].time,
+            heard[0].time,
+            heard[1].best
+        );
     }
 
     #[test]

@@ -1,5 +1,6 @@
 mod camera;
 mod car;
+mod ghost;
 mod hud;
 mod input;
 mod lap;
@@ -57,6 +58,7 @@ impl Plugin for GamePlugin {
             car::CarPlugin,
             camera::CameraPlugin,
             lap::LapPlugin,
+            ghost::GhostPlugin,
             skid::SkidPlugin,
             hud::HudPlugin,
         ));

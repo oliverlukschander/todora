@@ -21,7 +21,7 @@ use crate::Reset;
 pub(crate) use physics::{Car, Controls, Handling, Surface, HALF_TRACK, REAR_AXLE, SCALE, WHEEL_WIDTH};
 pub(crate) use setup::Setup;
 
-const MODEL: &str = "models/shooting_brake.glb";
+pub(crate) const MODEL: &str = "models/shooting_brake.glb";
 /// The engine steps at this rate whatever the frame rate, so the car handles
 /// the same at 30 frames a second as at 144. A frame is cut into as many of
 /// these as it needs.
