@@ -11,10 +11,13 @@
 //! - **`align`**, how hard the nose is pulled back into line with travel. High
 //!   and a slide dies the moment you stop asking for it; low and it carries on.
 //! - **`power_lets_go`**, how much grip the throttle spends at the limit.
+//! - **`kick`**, how hard a rear the driver has let go throws the tail round.
+//!   This is the one that makes oversteer *oversteer*: the car turning more
+//!   than the wheel asked, rather than running wide with its nose tucked in.
 //! - **`yaw_response`**, how eagerly the car rotates toward where the wheels
 //!   point.
 //!
-//! The slider moves all four together, and only so far: every notch still has to
+//! The slider moves all five together, and only so far: every notch still has to
 //! turn at full lock and still has to refuse to spin from steering alone, which
 //! is what the tests here hold it to. A setup should change how the car feels,
 //! not whether it is drivable.
@@ -61,7 +64,7 @@ impl Setup {
         }
     }
 
-    /// `base` leaned this way. Only the four dials that make a slide move; the
+    /// `base` leaned this way. Only the five dials that make a slide move; the
     /// `..base` says so, and everything else — grip, brakes, engine — is the
     /// same car on every notch.
     pub fn applied_to(self, base: Handling) -> Handling {
@@ -70,6 +73,7 @@ impl Setup {
                 lock_margin: 0.98,
                 align: 4.2,
                 power_lets_go: 0.32,
+                kick: 0.8,
                 yaw_response: 9.8,
                 ..base
             },
@@ -78,6 +82,7 @@ impl Setup {
                 lock_margin: 1.26,
                 align: 2.4,
                 power_lets_go: 0.60,
+                kick: 3.0,
                 yaw_response: 12.4,
                 ..base
             },
@@ -136,6 +141,63 @@ mod tests {
         (worst, peak)
     }
 
+    /// Drive `first` for `hold` seconds and then `then` for `release` seconds.
+    /// Returns the worst slide while on `first`, and the slide left at the end.
+    fn then_lift(setup: Setup, first: Controls, hold: f32, then: Controls, release: f32) -> (f32, f32) {
+        let h = tuned(setup);
+        let mut car = Car {
+            velocity: Vec3::NEG_Z * 14.0,
+            ..default()
+        };
+        let mut yaw = 0.0f32;
+        let dt = 1.0 / 240.0;
+        let slide = |car: &Car, yaw: f32| {
+            let heading = Quat::from_rotation_y(yaw) * Vec3::NEG_Z;
+            car.velocity.normalize_or(heading).angle_between(heading)
+        };
+        let mut worst = 0.0f32;
+        for (controls, seconds, measure) in [(first, hold, true), (then, release, false)] {
+            for _ in 0..(seconds / dt) as usize {
+                let heading = Quat::from_rotation_y(yaw) * Vec3::NEG_Z;
+                yaw += step(&mut car, &h, heading, heading.cross(Vec3::Y), controls, FLAT, dt);
+                if measure && car.velocity.length() > 3.0 {
+                    worst = worst.max(slide(&car, yaw));
+                }
+            }
+        }
+        (worst, slide(&car, yaw))
+    }
+
+    /// Oversteer has to *be* oversteer: full lock and full throttle bring the
+    /// tail round, so the car turns more than the wheel asked. It must not go
+    /// all the way round — a spin is not a drift — and lifting off must catch
+    /// it. Understeer, given the same, stays planted. Without a rear that can
+    /// feed the rotation, a loose rear only ever ran the car wide with its nose
+    /// tucked in, which is a slide that reads as understeer.
+    #[test]
+    fn full_throttle_on_oversteer_brings_the_tail_round_and_lifting_catches_it() {
+        let boot = Controls {
+            steer: 1.0,
+            throttle: 1.0,
+            ..default()
+        };
+        let (loose, caught) = then_lift(Setup::Oversteer, boot, 1.0, Controls::default(), 1.5);
+        assert!(
+            loose > 0.6,
+            "oversteer only came round {:.0} degrees on full throttle",
+            loose.to_degrees()
+        );
+        assert!(loose < 1.4, "oversteer spun: {:.0} degrees", loose.to_degrees());
+        assert!(caught < 0.1, "lifting off left it {:.0} degrees sideways", caught.to_degrees());
+
+        let (planted, _) = then_lift(Setup::Understeer, boot, 1.0, Controls::default(), 0.5);
+        assert!(
+            planted < 0.2,
+            "understeer stepped out {:.0} degrees on full throttle",
+            planted.to_degrees()
+        );
+    }
+
     /// The slider has to be a slider: balanced in the middle of both leans, on
     /// every dial it moves. Retune the car and this is what catches the notches
     /// crossing over.
@@ -146,6 +208,7 @@ mod tests {
         // Higher align pulls the nose back harder, so it runs the other way.
         assert!(u.align > b.align && b.align > o.align);
         assert!(u.power_lets_go < b.power_lets_go && b.power_lets_go < o.power_lets_go);
+        assert!(u.kick < b.kick && b.kick < o.kick);
         assert!(u.yaw_response < b.yaw_response && b.yaw_response < o.yaw_response);
         assert_eq!(Setup::ALL.map(Setup::notch), [0, 1, 2]);
     }

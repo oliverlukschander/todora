@@ -93,6 +93,14 @@ pub(crate) struct Handling {
     /// How hard a slide pulls the nose back into line with travel. What ends a
     /// drift when the inputs let it, and keeps a lift-off from becoming a spin.
     pub align: f32,
+    /// How hard a rear that has let go throws the tail round instead. While the
+    /// rear grips, a slide is damped by `align`; once the throttle or the
+    /// handbrake has taken its grip away, the same slide feeds the rotation, and
+    /// the car turns more than the wheel asked. That is the oversteer: without
+    /// it a loose rear only ever ran the car wide with its nose tucked in, which
+    /// is a slide that reads as understeer. It is scaled by how much the driver
+    /// has let the rear go, so steering alone never gets any of it.
+    pub kick: f32,
 
     pub top_speed: f32,
     /// Pull off the line. It fades as the square of speed, so the car gets out
@@ -145,6 +153,7 @@ impl Handling {
         steer_rate: 10.0,
         yaw_response: 11.0,
         align: 3.2,
+        kick: 2.0,
         top_speed: 24.0,
         accel: 9.5,
         brake: 12.8,
@@ -287,6 +296,9 @@ pub(crate) fn step(
     let already_sliding =
         ((slip.abs() - MARK_FROM) / (MARK_FULL - MARK_FROM)).clamp(0.0, 1.0) * h.sliding_costs;
     let hold = (1.0 - handbrake) * (1.0 - power_slide) * (1.0 - already_sliding);
+    // How far the driver has let the rear go — the throttle and the handbrake,
+    // not the slide itself, or a slide would feed on itself with no way out.
+    let loose = (handbrake + power_slide).min(1.0);
     let nose_bite = if rolling && !reversing {
         1.0 + h.brake_bite * controls.brake
     } else {
@@ -295,14 +307,18 @@ pub(crate) fn step(
     let grip = base * hold * nose_bite;
 
     // Yaw. The wheels ask for the rate that would carry the car round the arc
-    // they point along; the slide asks the nose to come back toward travel. The
-    // car turns toward the sum, with the lag that gives it weight. A rear that
-    // has let go pulls the nose back weakly, and that is the drift: the nose
-    // runs on ahead of where the car is going.
+    // they point along. A slide asks two opposite things of the nose, and which
+    // wins is what understeer and oversteer are here: a rear that grips pulls
+    // the nose back toward travel and damps the slide; a rear the driver has let
+    // go throws the tail round and feeds it, so the car turns more than it was
+    // asked to. Lift, or wind the wheel back, and `loose` falls, `align` takes
+    // over, and the car straightens — which is how a drift is held and how it is
+    // caught. The car turns toward the sum, with the lag that gives it weight.
     let bite = (speed / 2.0).min(1.0);
     let kinematic = forward * car.steer_angle.tan() / h.wheelbase;
     let align = -slip * h.align * hold * bite;
-    let target = kinematic * bite + align;
+    let kick = slip * h.kick * loose * bite;
+    let target = kinematic * bite + align + kick;
     car.yaw_rate += (target - car.yaw_rate) * (h.yaw_response * dt).min(1.0);
     let yaw = car.yaw_rate * dt;
 
@@ -944,4 +960,5 @@ mod tests {
         }
     }
 }
+
 
