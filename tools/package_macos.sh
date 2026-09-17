@@ -64,8 +64,8 @@ cp -R "$APP" dist/dmg/
 ln -s /Applications dist/dmg/Applications
 # macOS 26 moved disk images under diskutil and deprecated hdiutil create;
 # older systems only have the latter.
-if diskutil image create from >/dev/null 2>&1 || [ "$(diskutil image create from 2>&1 | head -1)" != "" ] && diskutil image 2>&1 | /usr/bin/grep -q create; then
-  diskutil image create from --format UDZO --volumeName "$NAME" dist/dmg "dist/$NAME.dmg" >/dev/null
+if diskutil image create from 2>&1 | /usr/bin/grep -q 'USAGE: diskutil image'; then
+  diskutil image create from --format UDZO --volumeName "$NAME" dist/dmg "dist/$NAME.dmg" >/dev/null 2>&1
 else
   hdiutil create -volname "$NAME" -srcfolder dist/dmg -ov -format UDZO "dist/$NAME.dmg" >/dev/null
 fi
