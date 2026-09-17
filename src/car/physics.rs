@@ -103,9 +103,16 @@ pub(crate) struct Handling {
     /// one place this model refuses to be a simulation, because a simulation is
     /// what spins a keyboard driver under braking.
     pub brake: f32,
-    /// Off the throttle the engine holds the car back, rising with speed. It is
-    /// what keeps a descent from running away.
+    /// Off the throttle the engine holds the car back, rising with speed to
+    /// this at top speed. Strong, deliberately — about half the brakes — so the
+    /// throttle is the speed control and the brakes are for the big stops.
+    /// Lift for a corner and the car settles into it; that is most of what
+    /// makes it fun to drive on one pedal, and it is what keeps a descent from
+    /// running away.
     pub engine_braking: f32,
+    /// Engine braking never falls below this fraction of itself, so it still
+    /// bites in the slow corners, where the lift is used most.
+    pub engine_braking_floor: f32,
     pub drag: f32,
     pub rolling: f32,
     /// Soft ground rolls badly: rolling resistance climbs as grip falls.
@@ -141,7 +148,8 @@ impl Handling {
         top_speed: 24.0,
         accel: 9.5,
         brake: 12.8,
-        engine_braking: 1.9,
+        engine_braking: 4.5,
+        engine_braking_floor: 0.3,
         drag: 0.0022,
         rolling: 0.3,
         soft_ground: 4.0,
@@ -319,7 +327,8 @@ pub(crate) fn step(
         let fade = 1.0 - (forward / h.top_speed).clamp(0.0, 1.0).powi(2);
         push += h.accel * controls.throttle * fade * surface.grip;
     } else if rolling {
-        push -= h.engine_braking * (forward / h.top_speed).clamp(-1.0, 1.0);
+        let revs = (forward.abs() / h.top_speed).clamp(h.engine_braking_floor, 1.0);
+        push -= h.engine_braking * revs * forward.signum();
     }
     if reversing {
         if forward > -h.reverse_speed {
@@ -620,9 +629,11 @@ mod tests {
             "a second in the grass only shed {:.2} g",
             lost_in_grass / GRAVITY
         );
+        // Over and above what lifting off costs on tarmac, which is itself a lot.
         assert!(
-            lost_in_grass > 3.0 * lost_on_road,
-            "grass barely slower than tarmac: {lost_in_grass:.1} against {lost_on_road:.1} m/s"
+            lost_in_grass - lost_on_road > 0.4 * GRAVITY,
+            "the grass adds only {:.2} g over tarmac",
+            (lost_in_grass - lost_on_road) / GRAVITY
         );
         // Over and above what the engine and the air take on any surface.
         let kerb_extra = lost_on_kerb - lost_on_road;
@@ -763,7 +774,9 @@ mod tests {
         let settled = car.velocity.length();
         let radius = settled * settled / H.grip;
         assert!(radius < 22.0, "coasts to {settled:.1} m/s, wanting {radius:.0} m of corner");
-        assert!(settled > 7.0, "the hill gave nothing back: {settled:.1} m/s");
+        // Off the throttle the engine is meant to hold the car on a hill; it is
+        // the throttle that turns a descent into speed. So only: still rolling.
+        assert!(settled > 3.0, "the engine stopped the car on a hill: {settled:.1} m/s");
     }
 
     /// Pointing one way and travelling sixty degrees off it, which is what
@@ -931,3 +944,4 @@ mod tests {
         }
     }
 }
+
