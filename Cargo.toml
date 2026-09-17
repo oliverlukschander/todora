@@ -2,7 +2,7 @@
 name = "todora"
 version = "0.1.0"
 edition = "2024"
-description = "A 2.5D top-down racer"
+description = "A 3rd-person arcade racer around a scaled Red Bull Ring"
 license = "MIT"
 repository = "https://github.com/oliverlukschander/todora"
 
@@ -15,3 +15,9 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# What ships. Thin LTO buys a good deal of speed for a modest build-time cost;
+# stripping symbols halves the binary.
+[profile.release]
+lto = "thin"
+strip = true

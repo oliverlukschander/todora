@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Todora app icon. Artwork sits in the 824 px squircle macOS expects, on a
+       transparent canvas; the system draws the shadow. -->
+  <defs>
+    <linearGradient id="asphalt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a3d45"/>
+      <stop offset="1" stop-color="#15161a"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#262a33"/>
+      <stop offset="1" stop-color="#181b21"/>
+    </linearGradient>
+    <clipPath id="tile"><rect x="100" y="100" width="824" height="824" rx="186"/></clipPath>
+  </defs>
+
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#asphalt)"/>
+
+  <g clip-path="url(#tile)">
+    <!-- grass, just enough to say "circuit" -->
+    <path d="M 100 100 L 924 100 L 924 330 Q 700 300 520 420 Q 300 560 100 500 Z" fill="#4f7d3a"/>
+    <!-- kerb: white arc with red blocks laid along it -->
+    <path d="M 40 720 Q 440 620 800 240" stroke="#ecebe6" stroke-width="104" fill="none"/>
+    <path d="M 40 720 Q 440 620 800 240" stroke="#c9231d" stroke-width="104" fill="none" stroke-dasharray="92 92"/>
+    <!-- tyre marks trailing from the rear wheels -->
+    <path d="M 300 1040 Q 390 830 545 705" stroke="#07080a" stroke-opacity="0.72" stroke-width="42" fill="none" stroke-linecap="round"/>
+    <path d="M 405 1050 Q 495 840 650 715" stroke="#07080a" stroke-opacity="0.72" stroke-width="42" fill="none" stroke-linecap="round"/>
+
+    <!-- the shooting brake, mid-drift: nose tucked in, fronts steered -->
+    <g transform="translate(600 540) rotate(-28)">
+      <g fill="#0a0b0d">
+        <rect x="-170" y="-196" width="66" height="122" rx="22" transform="rotate(-16 -137 -135)"/>
+        <rect x="104" y="-196" width="66" height="122" rx="22" transform="rotate(-16 137 -135)"/>
+        <rect x="-170" y="96" width="66" height="122" rx="22"/>
+        <rect x="104" y="96" width="66" height="122" rx="22"/>
+      </g>
+      <rect x="-138" y="-256" width="276" height="512" rx="80" fill="url(#body)" stroke="#090a0d" stroke-width="10"/>
+      <rect x="-106" y="-166" width="212" height="200" rx="46" fill="#2f3543"/>
+      <rect x="-96" y="-156" width="192" height="74" rx="26" fill="#0f1218"/>
+      <rect x="-96" y="-36" width="192" height="56" rx="22" fill="#0f1218"/>
+      <rect x="-16" y="-246" width="32" height="492" rx="10" fill="#ffb01f" opacity="0.92"/>
+      <rect x="-118" y="-250" width="60" height="26" rx="12" fill="#f6f2e4"/>
+      <rect x="58" y="-250" width="60" height="26" rx="12" fill="#f6f2e4"/>
+      <rect x="-118" y="222" width="60" height="26" rx="12" fill="#ff4a3a"/>
+      <rect x="58" y="222" width="60" height="26" rx="12" fill="#ff4a3a"/>
+    </g>
+  </g>
+</svg>

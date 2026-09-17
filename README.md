@@ -31,6 +31,14 @@ Needs a recent stable Rust (`rustup` on macOS). First Bevy compile is slow; late
 
 New gameplay goes in its own `src` module with a plugin, then gets added to `GamePlugin`. New runtime files go in `assets/`. Source meshes stay in `art/`.
 
+## A Mac app
+
+```sh
+tools/package_macos.sh
+```
+
+Builds a release binary, wraps it in `dist/Todora.app` with its icon, and puts that in `dist/Todora.dmg` next to an Applications shortcut. It uses only what macOS ships with: QuickLook renders the icon from `art/icon/todora.svg`, `iconutil` packs it, `hdiutil` makes the disk image. The app is signed ad hoc, which is all this Mac needs; another Mac will ask for right-click → Open the first time, because there is no Developer ID behind it.
+
 Rebuild the shooting-brake from Blender:
 
 ```sh
