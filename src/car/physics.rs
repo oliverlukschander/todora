@@ -104,7 +104,10 @@ pub(crate) struct Handling {
 
     pub top_speed: f32,
     /// Pull off the line. It fades as the square of speed, so the car gets out
-    /// of a hairpin hard and then eases into its top speed.
+    /// of a hairpin hard and then eases into its top speed. A rear the driver
+    /// has let go delivers less of it: the friction it is spending sideways is
+    /// not there to drive with. That is wheelspin, and it is why booting it in a
+    /// slide does not make the slide faster.
     pub accel: f32,
     /// Stopping power on tarmac. Always on offer, however hard the car is
     /// turning: the brakes never spend the grip the corner is using. That is the
@@ -125,6 +128,12 @@ pub(crate) struct Handling {
     pub rolling: f32,
     /// Soft ground rolls badly: rolling resistance climbs as grip falls.
     pub soft_ground: f32,
+    /// A sliding tyre drags. Beyond the slip a clean corner carries, the rubber
+    /// is scrubbing across the road rather than rolling along it, and that costs
+    /// speed in the direction of travel as well as sideways — this much of it,
+    /// at a full slide. It is what makes tyre marks on the road and speed coming
+    /// off the car the same event, however hard the throttle is down.
+    pub scrub_drag: f32,
     /// Off the road the ground ploughs, against whichever way the car is going.
     /// The drag rises with speed and with the cube of how little grip there is,
     /// so a kerb costs next to nothing and the grass at pace costs most of a g.
@@ -133,9 +142,6 @@ pub(crate) struct Handling {
     /// Reverse: from a standstill, up to a crawl.
     pub reverse_accel: f32,
     pub reverse_speed: f32,
-    /// Part of a scrubbed-off slide comes back as forward speed. Not physics —
-    /// the arcade convention that a drift held well should not cost the exit.
-    pub slide_recovery: f32,
 }
 
 impl Handling {
@@ -162,10 +168,10 @@ impl Handling {
         drag: 0.0022,
         rolling: 0.3,
         soft_ground: 4.0,
+        scrub_drag: 3.0,
         off_road_drag: 1.8,
         reverse_accel: 4.5,
         reverse_speed: 8.0,
-        slide_recovery: 0.2,
     };
 
     /// Sideways grip on tarmac at `speed`, downforce included.
@@ -324,24 +330,25 @@ pub(crate) fn step(
 
     // The car has turned; its velocity has not. In the new frame some of what
     // was forward speed is now sideways, and the tyres scrub off as much of that
-    // as grip allows. What they cannot is the slide.
+    // as grip allows. What they cannot is the slide. What they scrub is gone —
+    // a sliding tyre turns speed into heat, which is why a slide slows the car,
+    // and why it must: an earlier version handed part of it back as forward
+    // speed, and a sliding car accelerated.
     let turned = Quat::from_rotation_y(yaw);
     let heading = turned * heading;
     let right = turned * right;
     let sideways = car.velocity.dot(right);
     let scrub = sideways.clamp(-grip * dt, grip * dt);
     car.velocity -= right * scrub;
-    if forward.abs() > STOPPED {
-        car.velocity += heading * (scrub.abs() * h.slide_recovery * forward.signum());
-    }
 
     // Along the nose: engine, brakes, and everything that slows a car down.
     let forward = car.velocity.dot(heading);
     let mut push = 0.0;
     if controls.throttle > 0.0 {
-        // Off the road the wheels spin: the engine gets the surface's grip.
+        // Off the road the wheels spin, and a rear that has let go spins too:
+        // the engine gets the surface's grip, less what the slide is spending.
         let fade = 1.0 - (forward / h.top_speed).clamp(0.0, 1.0).powi(2);
-        push += h.accel * controls.throttle * fade * surface.grip;
+        push += h.accel * controls.throttle * fade * surface.grip * (1.0 - loose);
     } else if rolling {
         let revs = (forward.abs() / h.top_speed).clamp(h.engine_braking_floor, 1.0);
         push -= h.engine_braking * revs * forward.signum();
@@ -362,12 +369,17 @@ pub(crate) fn step(
     let climb = -GRAVITY * surface.slope / (1.0 + surface.slope * surface.slope).sqrt();
     car.velocity += heading * ((push + climb) * dt);
 
-    // The gravel trap. It drags against travel, not against the nose, so a car
-    // sliding sideways through the grass is slowed just as hard as one driving
-    // through it.
+    // Two drags against travel rather than against the nose, so a car going
+    // sideways is slowed as hard as one going straight. The gravel trap:
+    // ploughing through soft ground. And the slide itself: rubber scrubbing
+    // across the road instead of rolling along it, from the slip where the
+    // tyres start to mark.
     let ploughing = h.off_road_drag * soft.powi(3) * speed;
-    if rolling && ploughing > 0.0 {
-        let slow = (ploughing * dt).min(car.velocity.length());
+    let scrubbing =
+        h.scrub_drag * ((slip.abs() - MARK_FROM) / (MARK_FULL - MARK_FROM)).clamp(0.0, 1.0);
+    let dragging = ploughing + scrubbing;
+    if rolling && dragging > 0.0 {
+        let slow = (dragging * dt).min(car.velocity.length());
         car.velocity -= car.velocity.normalize_or_zero() * slow;
     }
 
@@ -960,5 +972,6 @@ mod tests {
         }
     }
 }
+
 
 

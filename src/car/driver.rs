@@ -258,14 +258,35 @@ mod tests {
             let handling = notch.applied_to(Handling::SHOOTING_BRAKE);
             let lap = lap(Style::Clumsy, handling, 45.0);
             report(notch.name(), &lap);
+            // Low, because Oversteer is meant to be slow for a driver who holds
+            // the throttle through a slide — sliding costs speed, and that
+            // setup slides. What is guarded is getting round and never stopping.
             assert!(
-                lap.progress > 0.35,
+                lap.progress > 0.3,
                 "{:?}: 45 s only got {:.0}% round",
                 notch,
                 lap.progress * 100.0
             );
             assert!(lap.stopped < 12.0, "{:?}: going nowhere {:.0} s of 45", notch, lap.stopped);
         }
+    }
+
+    /// Sliding costs speed, and the loose setup slides — so a driver who does
+    /// not manage the throttle pays for it. A driver who does must not: the
+    /// setup slider trades forgiveness for pace, and if the pace were missing
+    /// on the loose end it would be a penalty slider. The plain driver lifts
+    /// when the tyres are busy, and covers the same ground on every notch.
+    #[test]
+    fn a_driver_who_lifts_is_not_punished_for_oversteer() {
+        let balanced = lap(Style::Plain, Setup::Balanced.applied_to(Handling::SHOOTING_BRAKE), 45.0);
+        let loose = lap(Style::Plain, Setup::Oversteer.applied_to(Handling::SHOOTING_BRAKE), 45.0);
+        assert!(
+            loose.distance > balanced.distance * 0.94,
+            "the loose setup cost a competent driver {:.0} m against {:.0}",
+            loose.distance,
+            balanced.distance
+        );
+        assert!(loose.off_road < 3.0, "off the road {:.1} s on the loose setup", loose.off_road);
     }
 
     /// Which notch is quickest depends on who is driving — that is the whole
