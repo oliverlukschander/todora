@@ -11,6 +11,7 @@
 
 mod monza;
 mod red_bull_ring;
+mod silverstone;
 mod spa_francorchamps;
 
 pub(crate) struct Circuit {
@@ -35,6 +36,7 @@ const ALL: &[Circuit] = &[
     red_bull_ring::CIRCUIT,
     spa_francorchamps::CIRCUIT,
     monza::CIRCUIT,
+    silverstone::CIRCUIT,
 ];
 
 /// The circuit the game opens on.
@@ -42,16 +44,13 @@ pub(crate) fn first() -> &'static Circuit {
     &ALL[0]
 }
 
-/// The one after `circuit`, wrapping round at the end of the list.
-pub(crate) fn after(circuit: &Circuit) -> &'static Circuit {
-    let at = ALL
-        .iter()
+/// Where `circuit` sits in the list, which is where the menu opens its cursor.
+pub(crate) fn at(circuit: &Circuit) -> usize {
+    ALL.iter()
         .position(|c| c.id == circuit.id)
-        .expect("every circuit in play came from this list");
-    &ALL[(at + 1) % ALL.len()]
+        .expect("every circuit in play came from this list")
 }
 
-#[cfg(test)]
 pub(crate) fn all() -> &'static [Circuit] {
     ALL
 }

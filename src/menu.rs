@@ -13,57 +13,85 @@
 //! the menu's — `Enter` takes what is under the cursor and `Esc` backs out
 //! having changed nothing.
 //!
-//! Choosing a car gives up the lap in progress, because half a lap in one car
-//! and half in another is not a lap in either. It gives up nothing else: the
-//! laps already driven, the best of them and the ghost belong to the circuit,
-//! and the circuit has not moved.
+//! Two pages, and the difference between them is what is given up. Choosing a
+//! car gives up the lap in progress, because half a lap in one car and half in
+//! another is not a lap in either; it gives up nothing else, because the laps
+//! already driven, the best of them and the ghost belong to the circuit, and the
+//! circuit has not moved. Choosing a circuit gives up all of it, because none of
+//! it means anything about the circuit you have arrived at.
+//!
+//! Neither page does either of those itself. Choosing a car moves the car
+//! resource and writes a [`Reset`]; choosing a circuit writes a [`GoTo`] and
+//! lets [`crate::track`] build it. A menu knows what was chosen and nothing
+//! about what choosing it costs.
 
 use bevy::prelude::*;
 
 use crate::Reset;
 use crate::car::{Spec, Stars};
 use crate::hud::{AMBER, AMBER_DIM, FRONT};
+use crate::input::InputSet;
 use crate::pause::{Halt, HaltSet};
+use crate::track::{GoTo, Track, all_circuits, circuit_at};
 
-/// Opening, moving and choosing all run in here, after the pause has had its
-/// look at the keys and before anything that acts on what was chosen.
+/// Opening, moving and choosing all run in here: after the pause, which decides
+/// whether a menu may open at all, and after the driver's own input, which is
+/// not being read while one is up. Everything that acts on what was chosen —
+/// building the circuit, putting the car back — runs after this.
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct MenuSet;
 
-/// Which menu is up. One so far.
+/// Which menu is up.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Page {
     /// `C`, or the pad's west button.
     Car,
+    /// `T`, or the pad's select button.
+    Circuit,
 }
 
 impl Page {
     /// Every page, so the panel can be built once with all of them in it.
-    const ALL: [Page; 1] = [Page::Car];
+    const ALL: [Page; 2] = [Page::Car, Page::Circuit];
+
+    /// The key and the pad button that open it.
+    fn opened_by(self) -> (KeyCode, GamepadButton) {
+        match self {
+            Page::Car => (KeyCode::KeyC, GamepadButton::West),
+            Page::Circuit => (KeyCode::KeyT, GamepadButton::Select),
+        }
+    }
 
     /// What the panel is headed with.
     fn title(self) -> &'static str {
         match self {
             Page::Car => "CAR",
+            Page::Circuit => "CIRCUIT",
         }
     }
 
     /// The rows of this page: what each one is called, and what it is good at
-    /// where that is worth showing.
+    /// where that is worth showing. A circuit is not good at things — it is a
+    /// place — so its rows carry no rating and its page shows no headings.
     fn entries(self) -> Vec<(&'static str, Option<Stars>)> {
         match self {
             Page::Car => Spec::ALL
                 .iter()
                 .map(|spec| (spec.name(), Some(spec.sheet().stars)))
                 .collect(),
+            Page::Circuit => all_circuits()
+                .iter()
+                .map(|circuit| (circuit.name, None))
+                .collect(),
         }
     }
 
-    /// Which row is under the cursor when it opens: whatever is already chosen,
-    /// so opening a menu and taking what it offers changes nothing.
-    fn chosen(self, spec: &Spec) -> usize {
+    /// Which row is under the cursor when it opens: whatever is already being
+    /// driven, so opening a menu and taking what it offers changes nothing.
+    fn chosen(self, spec: &Spec, track: &Track) -> usize {
         match self {
             Page::Car => spec.at(),
+            Page::Circuit => circuit_at(track.circuit()),
         }
     }
 }
@@ -81,7 +109,14 @@ impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Menu>()
             .add_systems(Startup, setup)
-            .add_systems(PreUpdate, walk.in_set(MenuSet).after(HaltSet))
+            .add_systems(
+                PreUpdate,
+                (open, walk)
+                    .chain()
+                    .in_set(MenuSet)
+                    .after(HaltSet)
+                    .after(InputSet),
+            )
             .add_systems(Update, draw);
     }
 }
@@ -132,6 +167,9 @@ fn setup(mut commands: Commands) {
                 top: percent(26),
                 left: percent(50),
                 margin: UiRect::left(px(-(CURSOR * 2.0 + NAME + 3.0 * RATING) / 2.0)),
+                // One width whichever page is up: a panel that changed size
+                // under the cursor would move the row the cursor is on.
+                min_width: px(CURSOR * 2.0 + NAME + 3.0 * RATING),
                 padding: UiRect::axes(px(18), px(14)),
                 border: UiRect::all(px(2)),
                 flex_direction: FlexDirection::Column,
@@ -258,7 +296,43 @@ fn setup(mut commands: Commands) {
         });
 }
 
-/// Open a menu, move down it, take what is under the cursor, or back out.
+/// Whether a key or the pad button that stands in for it has just been pressed.
+fn pressed(
+    keys: &ButtonInput<KeyCode>,
+    pads: &Query<&Gamepad>,
+    key: KeyCode,
+    button: GamepadButton,
+) -> bool {
+    keys.just_pressed(key) || pads.iter().any(|pad| pad.just_pressed(button))
+}
+
+/// Put a menu up, with its cursor on whatever is already being driven.
+///
+/// Only from a running game. Over a pause it would be a second thing standing
+/// in front of the game, and `Enter` would have two jobs at once.
+fn open(
+    keys: Res<ButtonInput<KeyCode>>,
+    pads: Query<&Gamepad>,
+    track: Res<Track>,
+    spec: Res<Spec>,
+    mut menu: ResMut<Menu>,
+    mut halt: ResMut<Halt>,
+) {
+    if menu.page.is_some() || *halt != Halt::Nothing {
+        return;
+    }
+    let Some(wanted) = Page::ALL.into_iter().find(|page| {
+        let (key, button) = page.opened_by();
+        pressed(&keys, &pads, key, button)
+    }) else {
+        return;
+    };
+    menu.at = wanted.chosen(&spec, &track);
+    menu.page = Some(wanted);
+    *halt = Halt::Menu;
+}
+
+/// Move down the menu that is up, take what is under the cursor, or back out.
 ///
 /// `Esc` and `Enter` are the menu's while one is up, which is why [`Halt`] is
 /// only ever moved to and from [`Halt::Menu`] here: the pause key takes `Esc`
@@ -271,39 +345,43 @@ fn walk(
     mut halt: ResMut<Halt>,
     mut spec: ResMut<Spec>,
     mut reset: MessageWriter<Reset>,
+    mut go: MessageWriter<GoTo>,
 ) {
-    let pressed = |key: KeyCode, button: GamepadButton| {
-        keys.just_pressed(key) || pads.iter().any(|pad| pad.just_pressed(button))
-    };
     let Some(page) = menu.page else {
-        // A menu may only be opened from a running game. From a pause it would
-        // be a second thing standing in front of the game, and `Enter` would
-        // have two jobs at once.
-        if *halt == Halt::Nothing && pressed(KeyCode::KeyC, GamepadButton::West) {
-            menu.at = Page::Car.chosen(&spec);
-            menu.page = Some(Page::Car);
-            *halt = Halt::Menu;
-        }
         return;
     };
-
-    let step = i32::from(pressed(KeyCode::ArrowDown, GamepadButton::DPadDown))
-        - i32::from(pressed(KeyCode::ArrowUp, GamepadButton::DPadUp));
+    let step = i32::from(pressed(
+        &keys,
+        &pads,
+        KeyCode::ArrowDown,
+        GamepadButton::DPadDown,
+    )) - i32::from(pressed(
+        &keys,
+        &pads,
+        KeyCode::ArrowUp,
+        GamepadButton::DPadUp,
+    ));
     if step != 0 {
         let last = page.entries().len() as i32 - 1;
         menu.at = (menu.at as i32 + step).clamp(0, last) as usize;
     }
 
-    if pressed(KeyCode::Enter, GamepadButton::South) {
-        take(page, menu.at, &mut spec, &mut reset);
+    if pressed(&keys, &pads, KeyCode::Enter, GamepadButton::South) {
+        take(page, menu.at, &mut spec, &mut reset, &mut go);
         close(&mut menu, &mut halt);
-    } else if pressed(KeyCode::Escape, GamepadButton::East) {
+    } else if pressed(&keys, &pads, KeyCode::Escape, GamepadButton::East) {
         close(&mut menu, &mut halt);
     }
 }
 
 /// What the row under the cursor means.
-fn take(page: Page, at: usize, spec: &mut Spec, reset: &mut MessageWriter<Reset>) {
+fn take(
+    page: Page,
+    at: usize,
+    spec: &mut Spec,
+    reset: &mut MessageWriter<Reset>,
+    go: &mut MessageWriter<GoTo>,
+) {
     match page {
         Page::Car => {
             let Some(&wanted) = Spec::ALL.get(at) else {
@@ -314,6 +392,15 @@ fn take(page: Page, at: usize, spec: &mut Spec, reset: &mut MessageWriter<Reset>
                 // The lap so far was driven in the other car.
                 reset.write(Reset);
             }
+        }
+        Page::Circuit => {
+            let Some(wanted) = all_circuits().get(at) else {
+                return;
+            };
+            // Whether this is a change, and what it costs, is the track's
+            // business: it writes the reset that clears the board, because it is
+            // the one that knows the board belonged to the circuit being left.
+            go.write(GoTo(wanted));
         }
     }
 }
@@ -339,7 +426,10 @@ fn draw(
     for (piece, children, mut node) in &mut pieces {
         let shown = match (piece, menu.page) {
             (_, None) => false,
-            (Piece::Panel | Piece::Heading, Some(_)) => true,
+            (Piece::Panel, Some(_)) => true,
+            // The headings name the three ratings, so they belong to a page
+            // whose rows carry them.
+            (Piece::Heading, Some(up)) => up.entries().iter().any(|(_, rated)| rated.is_some()),
             (Piece::Row { page, .. }, Some(up)) => *page == up,
         };
         node.display = if shown { Display::Flex } else { Display::None };
@@ -368,9 +458,12 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<Reset>()
+            .add_message::<GoTo>()
             .init_resource::<ButtonInput<KeyCode>>()
-            // The garage's own resource, which `CarPlugin` owns in the game.
+            // The two resources the pages read, which `CarPlugin` and
+            // `TrackPlugin` own in the game.
             .init_resource::<Spec>()
+            .insert_resource(Track::any())
             .add_plugins((PausePlugin, MenuPlugin));
         app.world_mut().resource_mut::<Schedules>().remove(Startup);
         app
@@ -476,6 +569,51 @@ mod tests {
             0,
             "taking the car already being driven threw the lap away"
         );
+    }
+
+    /// The circuit page is the same menu with different rows in it, and it
+    /// hands the choice on rather than acting on it: a circuit is built by the
+    /// module that knows how, and what a switch costs is that module's to say.
+    #[test]
+    fn the_circuit_page_asks_for_the_circuit_under_the_cursor() {
+        let mut app = game();
+        app.update();
+        press(&mut app, KeyCode::KeyT);
+        assert_eq!(app.world().resource::<Menu>().page, Some(Page::Circuit));
+        assert_eq!(
+            app.world().resource::<Menu>().at,
+            0,
+            "the cursor did not open on the circuit being driven"
+        );
+
+        press(&mut app, KeyCode::ArrowDown);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(*app.world().resource::<Halt>(), Halt::Nothing);
+        let asked: Vec<&str> = app
+            .world()
+            .resource::<Messages<GoTo>>()
+            .iter_current_update_messages()
+            .map(|GoTo(circuit)| circuit.id)
+            .collect();
+        assert_eq!(asked, vec![all_circuits()[1].id]);
+        assert_eq!(
+            app.world().resource::<Messages<Reset>>().len(),
+            0,
+            "the menu threw the lap away itself instead of leaving it to the track"
+        );
+    }
+
+    /// Two pages, two keys, and each opens its own.
+    #[test]
+    fn each_key_opens_its_own_page() {
+        let mut app = game();
+        app.update();
+        for (key, page) in [(KeyCode::KeyC, Page::Car), (KeyCode::KeyT, Page::Circuit)] {
+            press(&mut app, key);
+            assert_eq!(app.world().resource::<Menu>().page, Some(page));
+            press(&mut app, KeyCode::Escape);
+            assert!(app.world().resource::<Menu>().page.is_none());
+        }
     }
 
     /// Backing out changes nothing, which is the whole of what `Esc` promises.

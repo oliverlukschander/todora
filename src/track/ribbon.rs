@@ -150,13 +150,21 @@ impl Ribbon {
     /// How much of the circuit came through opening its corners, as a fraction
     /// of the spline it was built from.
     ///
-    /// Opening a corner cuts it, so every circuit loses a little — the two in
-    /// the game keep about nine tenths. A circuit whose corners are nearly all
-    /// tighter than [`MIN_RADIUS`] at this scale loses far more than that: there
-    /// is nothing left to relax against, and pass after pass pulls the whole lap
-    /// toward its own centre until it is a loop with no corners in it. Monaco
-    /// shrinks from 3.3 km to a hundred metres that way. Every station on it is
-    /// perfectly well formed, so nothing else notices; this does.
+    /// Opening a corner cuts it, so every circuit loses a little — the four in
+    /// the game keep between four fifths and all of it. A circuit whose corners
+    /// are nearly all tighter than [`MIN_RADIUS`] at this scale loses far more
+    /// than that: there is nothing left to relax against, and pass after pass
+    /// pulls the whole lap toward its own centre until it is a loop with no
+    /// corners in it. Monaco shrinks from 3.3 km to a hundred-metre ring that
+    /// way, keeping a quarter of itself. Every station on it is perfectly well
+    /// formed, so nothing else notices; this does.
+    ///
+    /// Lowering [`MIN_RADIUS`] for such a circuit does not rescue it, which is
+    /// worth knowing before anyone tries: at a 5 m target Monaco keeps 82% and
+    /// laps 340 m, and then passes within 3.95 m of itself, which leaves 1.98 m
+    /// either side of the centreline for a road that is 8 m wide. The circuit is
+    /// not too tight in its corners so much as too tight in its land, and this
+    /// game's road is five times too wide for that land already.
     pub fn kept(&self) -> f32 {
         self.kept
     }

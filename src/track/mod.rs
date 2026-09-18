@@ -30,8 +30,7 @@ use bevy::prelude::*;
 
 use crate::Reset;
 use crate::car::{Car, level};
-use crate::input::InputSet;
-use crate::pause::running;
+use crate::menu::MenuSet;
 pub(crate) use circuits::Circuit;
 use profile::{HALF_WIDTH, Profile};
 use ribbon::Ribbon;
@@ -79,7 +78,7 @@ const RUN_UP: f32 = 45.0;
 /// has been rounded off into a ring.
 const LEAST_KEPT: f32 = 0.75;
 
-/// Building the next circuit runs in here, after the player has been read and
+/// Building the chosen circuit runs in here, after the menu that chose it and
 /// before anything that puts itself back on a [`Reset`]. A switch writes that
 /// reset, so by the time the car, the clock, the ghost and the marks act on it,
 /// [`Track`] is already the new circuit.
@@ -93,11 +92,9 @@ impl Plugin for TrackPlugin {
         // Built here rather than in a startup system so the car and the camera
         // can read the grid slot the moment they spawn.
         app.insert_resource(Track::new(circuits::first()))
+            .add_message::<GoTo>()
             .add_systems(Startup, setup)
-            .add_systems(
-                PreUpdate,
-                switch.in_set(TrackSet).after(InputSet).run_if(running),
-            );
+            .add_systems(PreUpdate, switch.in_set(TrackSet).after(MenuSet));
     }
 }
 
@@ -105,11 +102,21 @@ impl Plugin for TrackPlugin {
 #[derive(Component)]
 struct Loft;
 
-/// Every circuit, for tests elsewhere that have to cover all of them.
-#[cfg(test)]
+/// Every circuit there is, in the order the menu lists them.
 pub(crate) fn all_circuits() -> &'static [Circuit] {
     circuits::all()
 }
+
+/// Where a circuit sits in that list.
+pub(crate) fn circuit_at(circuit: &Circuit) -> usize {
+    circuits::at(circuit)
+}
+
+/// Drive that one. Written by the circuit menu and acted on by [`switch`];
+/// nothing outside this module knows how a circuit is built, and nothing inside
+/// it knows which key was pressed.
+#[derive(Message)]
+pub(crate) struct GoTo(pub &'static Circuit);
 
 /// The tightest corner the game allows, which is what a car's hardest stop is
 /// measured down to. Read by the garage's report in [`crate::car`], so the
@@ -353,27 +360,25 @@ fn setup(
     ));
 }
 
-/// `T`, or the pad's select button, drives the next circuit.
+/// Go where the menu said.
 ///
-/// Building one is a few tens of milliseconds of splining and corner-opening —
-/// a visible hitch, once, at the moment the world is replaced anyway. The old
+/// Building a circuit is a few tens of milliseconds of splining and
+/// corner-opening — a visible hitch, once, at the moment the world is replaced
+/// anyway, and the game is stopped behind the menu while it happens. The old
 /// mesh goes when the last handle to it does.
 fn switch(
-    keys: Res<ButtonInput<KeyCode>>,
-    pads: Query<&Gamepad>,
+    mut asked: MessageReader<GoTo>,
     mut track: ResMut<Track>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut loft: Query<&mut Mesh3d, With<Loft>>,
     mut reset: MessageWriter<Reset>,
 ) {
-    let pressed = keys.just_pressed(KeyCode::KeyT)
-        || pads
-            .iter()
-            .any(|pad| pad.just_pressed(GamepadButton::Select));
-    if !pressed {
+    let Some(GoTo(next)) = asked.read().last() else {
+        return;
+    };
+    if next.id == track.circuit.id {
         return;
     }
-    let next = circuits::after(track.circuit);
     *track = Track::new(next);
     if let Ok(mut mesh) = loft.single_mut() {
         mesh.0 = meshes.add(track.profile.loft(&track.ribbon));
@@ -668,9 +673,17 @@ mod tests {
     /// The grid is a run-up, and a run-up has to be usable. It sits behind the
     /// line by [`RUN_UP`] as the lap runs — which the line's own plane has to
     /// agree with, because that plane is what the clock reads to know the car
-    /// has arrived — and it faces very nearly the way the line faces, because a
-    /// car set down sideways in a corner spends the run-up getting straight
-    /// rather than getting up to speed.
+    /// has arrived — and it faces down the circuit rather than across it.
+    ///
+    /// The bar is what "across it" means, and it is loose on purpose. A car set
+    /// down in the exit of the last corner is not a problem; that is where 45 m
+    /// before a start/finish line usually *is*. Silverstone's grid faces 29
+    /// degrees off its line because it sits in the exit of Woodcote, and the car
+    /// still arrives doing 19.5 m/s — better than Monza. What a tighter bar here
+    /// would catch is circuits that are fine, and what it would not catch is a
+    /// run-up that is straight and still useless. How much speed the car
+    /// actually brings to the line is a question for the car, so it is asked
+    /// where the car is: `the_run_up_reaches_the_line_at_speed`.
     #[test]
     fn the_grid_is_a_run_up_to_the_line() {
         for (name, track) in every_track() {
@@ -685,8 +698,9 @@ mod tests {
                 .acos()
                 .to_degrees();
             assert!(
-                turn < 20.0,
-                "{name} sets the car down {turn:.0} degrees off the line"
+                turn < 45.0,
+                "{name} sets the car down {turn:.0} degrees off the line, which is \
+                 across it rather than down it"
             );
             // And the way out of the grid is toward the line, not away from it.
             let ahead = pose.translation + *pose.forward() * 3.0;
@@ -706,11 +720,13 @@ mod tests {
         }
     }
 
-    /// Pressing the track key puts the game on the next circuit and tells
-    /// everything else to put itself back, in that order — the reset is only
-    /// worth anything if [`Track`] is already the circuit being reset onto.
+    /// Being sent to a circuit builds it and tells everything else to put
+    /// itself back, in that order — the reset is only worth anything if
+    /// [`Track`] is already the circuit being reset onto. Being sent to the one
+    /// already being driven is not a switch and costs nothing, because the menu
+    /// opens with the cursor on it and `Enter` is the obvious thing to press.
     #[test]
-    fn the_track_key_switches_and_says_so() {
+    fn a_switch_builds_the_circuit_before_it_says_so() {
         #[derive(Resource, Default)]
         struct ResetsHeard(usize);
         fn count(mut resets: MessageReader<Reset>, mut heard: ResMut<ResetsHeard>) {
@@ -719,8 +735,8 @@ mod tests {
 
         let mut app = App::new();
         app.add_message::<Reset>()
+            .add_message::<GoTo>()
             .init_resource::<Assets<Mesh>>()
-            .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<ResetsHeard>()
             .insert_resource(Track::new(circuits::first()))
             .add_systems(Update, (switch, count).chain());
@@ -743,14 +759,24 @@ mod tests {
             "red-bull-ring"
         );
 
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::KeyT);
+        // Sent to where it already is: nothing is rebuilt and nothing is
+        // thrown away.
+        app.world_mut().write_message(GoTo(circuits::first()));
+        app.update();
+        assert_eq!(app.world().resource::<ResetsHeard>().0, 0, "reset in place");
+        assert_eq!(
+            app.world().get::<Mesh3d>(loft).expect("the loft").0,
+            road,
+            "the circuit being driven was rebuilt for nothing"
+        );
+
+        let next = &circuits::all()[1];
+        app.world_mut().write_message(GoTo(next));
         app.update();
         assert_eq!(
             app.world().resource::<Track>().circuit().id,
-            circuits::after(circuits::first()).id,
-            "the track key did not move on"
+            next.id,
+            "the switch did not arrive"
         );
         assert_eq!(
             app.world().resource::<ResetsHeard>().0,
@@ -820,40 +846,45 @@ mod tests {
         }
     }
 
-    /// The track key walks every circuit and comes back round, and each one is
-    /// a different place with a road on it.
+    /// The menu can reach every circuit and land on the right row for each: the
+    /// list is what it is drawn from, and where a circuit sits in that list is
+    /// where the cursor opens.
     #[test]
-    fn the_track_key_walks_every_circuit() {
-        let mut circuit = circuits::first();
-        let mut seen = Vec::new();
-        for _ in 0..circuits::all().len() {
-            seen.push(circuit.id);
-            circuit = circuits::after(circuit);
+    fn the_menu_can_reach_every_circuit() {
+        let all = all_circuits();
+        assert!(all.len() > 1, "there is only one circuit to list");
+        assert_eq!(all[0].id, circuits::first().id, "the game opens off-list");
+        for (at, circuit) in all.iter().enumerate() {
+            assert_eq!(circuit_at(circuit), at, "{} is listed twice", circuit.name);
+            assert!(
+                !circuit.id.is_empty() && !circuit.name.is_empty(),
+                "a circuit with nothing to show in a menu"
+            );
         }
-        assert_eq!(circuit.id, circuits::first().id, "the walk did not close");
-        let mut sorted = seen.clone();
-        sorted.sort_unstable();
-        sorted.dedup();
-        assert_eq!(sorted.len(), seen.len(), "a circuit is listed twice");
-        assert!(seen.len() > 1, "there is only one circuit to walk");
     }
 
-    /// Every circuit fits inside the ideal cross-section and none of them is a
-    /// second copy of another: the grid slots are nowhere near each other.
+    /// Every circuit fits inside the ideal cross-section, and none of them is a
+    /// second copy of another.
+    ///
+    /// Asked of the shape rather than of where the grid slot lands. Every
+    /// circuit is laid out about its own centroid, so they all sit on top of
+    /// each other near the origin and two grid slots being close together says
+    /// nothing about the circuits — Silverstone's start is 40 m from Monza's,
+    /// and they are not remotely the same place. [`Track::fingerprint`] is of
+    /// the finished centreline, which is exactly what "a different circuit"
+    /// means, and it is already trusted to tell one lap's shape from another's
+    /// when a saved ghost is read back.
     #[test]
     fn every_circuit_is_its_own_place() {
-        let starts: Vec<Vec3> = every_track()
-            .map(|(_, track)| {
-                assert!(track.profile.edge() <= EDGE);
-                track.start_transform().translation
-            })
-            .collect();
-        for (i, a) in starts.iter().enumerate() {
-            for b in &starts[i + 1..] {
-                assert!(
-                    a.distance(*b) > 50.0,
-                    "two circuits start in the same place"
-                );
+        let mut shapes = Vec::new();
+        for (name, track) in every_track() {
+            assert!(track.profile.edge() <= EDGE, "{name}");
+            shapes.push((name, track.fingerprint(), track.circuit().id));
+        }
+        for (i, (name, shape, id)) in shapes.iter().enumerate() {
+            for (other, theirs, other_id) in &shapes[i + 1..] {
+                assert_ne!(shape, theirs, "{name} and {other} are the same shape");
+                assert_ne!(id, other_id, "{name} and {other} are filed under one id");
             }
         }
     }

@@ -81,7 +81,7 @@ struct CircuitName;
 fn setup(mut commands: Commands) {
     commands.spawn((
         Text::new(
-            "W — throttle\nS — brake, reverse at a stop\nA / D — steer\nSpace — handbrake\n1 / 2 / 3 — setup\nC — car\nG — ghost\nT — track\nR — restart\nEsc / Enter — pause\nScroll — zoom",
+            "W — throttle\nS — brake, reverse at a stop\nA / D — steer\nSpace — handbrake\n1 / 2 / 3 — setup\nC — car\nG — ghost\nT — circuit\nR — restart\nEsc / Enter — pause\nScroll — zoom",
         ),
         TextFont {
             font_size: FontSize::Px(16.0),
