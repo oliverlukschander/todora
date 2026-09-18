@@ -34,6 +34,9 @@ pub(crate) enum Halt {
     Nothing,
     /// `Esc`. `Enter` lets the game go again.
     Pause,
+    /// A menu is up over the game. It owns both keys while it is, and closes
+    /// itself — see [`crate::menu`].
+    Menu,
 }
 
 impl Halt {
@@ -118,26 +121,25 @@ fn setup(mut commands: Commands) {
     ));
 }
 
-/// `Esc` stops the game, `Enter` lets it go. Not one key toggling, because a
-/// pause is somewhere you can arrive twice — from the key and, later, from a
-/// menu closing — and "the other one gets you out" is the rule that survives
-/// that. Letting go of the controls belongs here rather than to whatever is
-/// stopping the game, because it is true of every way of stopping it.
+/// `Esc` stops a running game, `Enter` lets a paused one go. Not one key
+/// toggling: two keys, each with one job, is the rule that still works when
+/// something else is standing in front of the game. Both transitions are
+/// written from a named state rather than from any state, so while a menu is up
+/// neither of them fires and both keys are the menu's — which is the whole of
+/// the arrangement between the two modules, stated here and again there.
+///
+/// Letting go of the controls belongs here rather than to whatever stopped the
+/// game, because it is true of every way of stopping it.
 fn watch(
     keys: Res<ButtonInput<KeyCode>>,
     mut halt: ResMut<Halt>,
     mut players: Query<&mut Controls, With<Player>>,
 ) {
-    let wanted = if keys.just_pressed(KeyCode::Escape) {
-        Halt::Pause
-    } else if keys.just_pressed(KeyCode::Enter) && *halt == Halt::Pause {
-        Halt::Nothing
-    } else {
-        return;
+    let wanted = match (*halt, keys.just_pressed(KeyCode::Escape)) {
+        (Halt::Nothing, true) => Halt::Pause,
+        (Halt::Pause, false) if keys.just_pressed(KeyCode::Enter) => Halt::Nothing,
+        _ => return,
     };
-    if wanted == *halt {
-        return;
-    }
     *halt = wanted;
     if halt.stopped() {
         for mut controls in &mut players {
@@ -196,6 +198,8 @@ mod tests {
             .add_message::<Reset>()
             .insert_resource(track)
             .init_resource::<ButtonInput<KeyCode>>()
+            // What the body panels are repainted through, without a renderer.
+            .init_resource::<Assets<StandardMaterial>>()
             .add_plugins((PausePlugin, crate::input::InputPlugin, CarPlugin, LapPlugin));
         app.world_mut().resource_mut::<Schedules>().remove(Startup);
         app.world_mut().spawn((

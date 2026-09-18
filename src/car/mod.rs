@@ -10,14 +10,17 @@
 //! [`driver::Driver`].
 
 mod driver;
+mod garage;
 mod physics;
 mod setup;
 
-use bevy::{prelude::*, world_serialization::WorldInstanceReady};
+use bevy::{gltf::GltfMaterialName, prelude::*, world_serialization::WorldInstanceReady};
 
 use crate::Reset;
 use crate::input::InputSet;
+use crate::menu::MenuSet;
 use crate::track::{Track, TrackSet};
+pub(crate) use garage::{Spec, Stars};
 pub(crate) use physics::{
     Car, Controls, HALF_TRACK, Handling, REAR_AXLE, SCALE, Surface, WHEEL_WIDTH,
 };
@@ -48,6 +51,13 @@ struct Body {
     lean: Vec2,
 }
 
+/// A body panel of the glTF, and the material it came with. The finish — the
+/// metal flake, how it takes a highlight — is the model's; only the colour is
+/// the car's, so a repaint starts from what the model shipped rather than from
+/// numbers copied out of the Blender script.
+#[derive(Component)]
+struct Bodywork(Handle<StandardMaterial>);
+
 /// A wheel of the glTF, and how it is allowed to move.
 #[derive(Component)]
 struct Wheel {
@@ -63,27 +73,38 @@ pub struct CarPlugin;
 impl Plugin for CarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Setup>()
+            .init_resource::<Spec>()
             .insert_resource(Time::<Fixed>::from_hz(240.0))
             .add_systems(Startup, setup)
-            // After the input, which is what asks for both, and after the
-            // track, because a switch writes the reset that puts the car back
-            // and the grid it goes back to is the new circuit's. Both are said
-            // outright: an app built without one of those plugins still has to
-            // run these in the right place.
+            // After the input, which is what asks for both; after the menus,
+            // which are what choose the car; and after the track, because a
+            // switch writes the reset that puts the car back and the grid it
+            // goes back to is the new circuit's. All said outright: an app built
+            // without one of those plugins still has to run these in the right
+            // place.
             .add_systems(
                 PreUpdate,
-                (apply_setup, restart).after(InputSet).after(TrackSet),
+                (tune, restart)
+                    .after(InputSet)
+                    .after(MenuSet)
+                    .after(TrackSet),
             )
             .add_systems(FixedUpdate, drive.in_set(DriveSet))
-            .add_systems(Update, (turn_wheels, lean_body));
+            .add_systems(Update, (turn_wheels, lean_body, repaint));
     }
 }
 
-fn setup(mut commands: Commands, track: Res<Track>, asset_server: Res<AssetServer>) {
+fn setup(
+    mut commands: Commands,
+    track: Res<Track>,
+    chosen: Res<Setup>,
+    spec: Res<Spec>,
+    asset_server: Res<AssetServer>,
+) {
     commands
         .spawn((
             Car::default(),
-            Handling::SHOOTING_BRAKE,
+            chosen.applied_to(spec.handling()),
             Controls::default(),
             Player,
             track.start_transform().with_scale(Vec3::splat(SCALE)),
@@ -96,7 +117,8 @@ fn setup(mut commands: Commands, track: Res<Track>, asset_server: Res<AssetServe
                 Visibility::default(),
                 WorldAssetRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(MODEL))),
             ))
-            .observe(attach_wheels);
+            .observe(attach_wheels)
+            .observe(find_the_bodywork);
         });
 }
 
@@ -185,14 +207,61 @@ fn drive(
     }
 }
 
-/// Lean the car the way the slider says. The setup is a preference rather than
-/// race state, so it survives a restart and is applied the moment it moves.
-fn apply_setup(chosen: Res<Setup>, mut cars: Query<&mut Handling, With<Player>>) {
-    if !chosen.is_changed() {
+/// The car that is being driven, leaned the way the slider says.
+///
+/// Two preferences meeting in one place, and in one order: the car is the
+/// baseline and the slider is the lean on it. Both survive a restart, and both
+/// are applied the moment either moves.
+fn tune(chosen: Res<Setup>, spec: Res<Spec>, mut cars: Query<&mut Handling, With<Player>>) {
+    if !chosen.is_changed() && !spec.is_changed() {
         return;
     }
     for mut handling in &mut cars {
-        *handling = chosen.applied_to(Handling::SHOOTING_BRAKE);
+        *handling = chosen.applied_to(spec.handling());
+    }
+}
+
+/// Which parts of the model are painted, taken once as the glTF arrives. The
+/// name comes from the material in `make_shooting_brake.py`, so the model says
+/// what its own bodywork is rather than this guessing from a colour.
+fn find_the_bodywork(
+    ready: On<WorldInstanceReady>,
+    mut commands: Commands,
+    children: Query<&Children>,
+    painted: Query<(&GltfMaterialName, &MeshMaterial3d<StandardMaterial>)>,
+) {
+    for entity in children.iter_descendants(ready.entity) {
+        if let Ok((name, material)) = painted.get(entity)
+            && name.0 == "Paint"
+        {
+            commands.entity(entity).insert(Bodywork(material.0.clone()));
+        }
+    }
+}
+
+/// Put the chosen car's colour on the body panels.
+///
+/// The three cars are the same model, so the colour is the whole of what tells
+/// them apart from the outside. It is laid over the model's own paint material
+/// rather than a fresh one, so the flake and the highlight are the same on all
+/// three and only the colour under them moves.
+fn repaint(
+    spec: Res<Spec>,
+    arrived: Query<(), Added<Bodywork>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut panels: Query<(&Bodywork, &mut MeshMaterial3d<StandardMaterial>)>,
+) {
+    if !spec.is_changed() && arrived.is_empty() {
+        return;
+    }
+    let paint = spec.sheet().paint;
+    for (bodywork, mut material) in &mut panels {
+        let Some(shipped) = materials.get(&bodywork.0) else {
+            continue;
+        };
+        let mut repainted = shipped.clone();
+        repainted.base_color = paint;
+        material.0 = materials.add(repainted);
     }
 }
 
@@ -279,6 +348,8 @@ mod tests {
             .add_message::<Reset>()
             .insert_resource(track)
             .init_resource::<ButtonInput<KeyCode>>()
+            // What the body panels are repainted through, without a renderer.
+            .init_resource::<Assets<StandardMaterial>>()
             .add_plugins((
                 crate::pause::PausePlugin,
                 crate::input::InputPlugin,

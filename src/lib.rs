@@ -4,6 +4,7 @@ mod ghost;
 mod hud;
 mod input;
 mod lap;
+mod menu;
 mod pause;
 mod skid;
 mod track;
@@ -70,6 +71,7 @@ impl Plugin for GamePlugin {
             car::CarPlugin,
             camera::CameraPlugin,
             lap::LapPlugin,
+            menu::MenuPlugin,
             pause::PausePlugin,
             ghost::GhostPlugin,
             skid::SkidPlugin,

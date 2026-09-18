@@ -111,6 +111,13 @@ pub(crate) fn all_circuits() -> &'static [Circuit] {
     circuits::all()
 }
 
+/// The tightest corner the game allows, which is what a car's hardest stop is
+/// measured down to. Read by the garage's report in [`crate::car`], so the
+/// figure the corner markers are a ruler for comes from the same place the
+/// markers themselves read it.
+#[cfg(test)]
+pub(crate) use ribbon::MIN_RADIUS;
+
 #[derive(Resource)]
 pub struct Track {
     circuit: &'static Circuit,

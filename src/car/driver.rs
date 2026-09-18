@@ -160,8 +160,14 @@ mod tests {
     //! dull car; what they guard is that the car stays drivable.
 
     use super::*;
-    use crate::car::{SCALE, Setup, advance};
-    use crate::track::all_circuits;
+    use crate::car::physics::{self, Surface};
+    use crate::car::{SCALE, Setup, Spec, advance};
+    use crate::track::{MIN_RADIUS, all_circuits};
+
+    const FLAT: Surface = Surface {
+        grip: 1.0,
+        slope: 0.0,
+    };
 
     /// Metres a second the time budget assumes. Well under what the car can do,
     /// because these drivers are not quick — it is how long a lap is *allowed*
@@ -220,6 +226,44 @@ mod tests {
             previous = progress;
         }
         lap
+    }
+
+    /// Drive one timed lap, the way the game times one: the run-up arms the
+    /// clock at the line and the next crossing of it, a lap's worth of progress
+    /// later, stops it. `None` if the driver never got round — which is a
+    /// result, and the one the balance tests would rather hear about than
+    /// average away.
+    fn lap_time(track: &Track, style: Style, handling: Handling) -> Option<f32> {
+        let mut driver = Driver::new(style);
+        let mut transform = track.start_transform().with_scale(Vec3::splat(SCALE));
+        let mut car = Car::default();
+        let dt = 1.0 / 120.0;
+        let mut was = track.start_along(transform.translation);
+        let mut previous = track.progress(transform.translation);
+        let (mut running, mut clock, mut round) = (false, 0.0f32, 0.0f32);
+        // Three laps' worth of time at PACE before giving up on one.
+        for _ in 0..(3.0 * track.length() / PACE / dt) as usize {
+            let controls = driver.decide(track, &handling, &transform, &car);
+            advance(track, &handling, controls, &mut transform, &mut car, dt);
+            let progress = track.progress(transform.translation);
+            round += (progress - previous + 0.5).rem_euclid(1.0) - 0.5;
+            previous = progress;
+            if running {
+                clock += dt;
+            }
+            let along = track.start_along(transform.translation);
+            if was <= 0.0 && along > 0.0 && track.on_start_gate(transform.translation) {
+                if !running {
+                    running = true;
+                    clock = 0.0;
+                    round = 0.0;
+                } else if round > 0.95 {
+                    return Some(clock);
+                }
+            }
+            was = along;
+        }
+        None
     }
 
     fn report(who: &str, lap: &Lap) {
@@ -304,31 +348,201 @@ mod tests {
     }
 
     /// Every notch of the setup slider has to be lappable by the person holding
-    /// the keys, not just the one the car ships on. A setup that looks good on a
-    /// dial and cannot get round is not a setup.
+    /// the keys, not just the one the car ships on — and now on every car, not
+    /// just the one the game opens on. A setup that looks good on a dial and
+    /// cannot get round is not a setup, and a car that only one notch can drive
+    /// is not a car.
     #[test]
     fn a_clumsy_driver_gets_round_on_every_setup() {
-        for notch in Setup::ALL {
-            let handling = notch.applied_to(Handling::SHOOTING_BRAKE);
-            let track = Track::any();
-            let budget = 0.5 * track.length() / PACE;
-            let lap = lap(&track, Style::Clumsy, handling, 0.5);
-            report(notch.name(), &lap);
-            // Low, because Oversteer is meant to be slow for a driver who holds
-            // the throttle through a slide — sliding costs speed, and that
-            // setup slides. What is guarded is getting round and never stopping.
+        for spec in Spec::ALL {
+            for notch in Setup::ALL {
+                let handling = notch.applied_to(spec.handling());
+                let track = Track::any();
+                let budget = 0.5 * track.length() / PACE;
+                let lap = lap(&track, Style::Clumsy, handling, 0.5);
+                report(&format!("{} on {}", spec.name(), notch.name()), &lap);
+                // Low, because Oversteer is meant to be slow for a driver who
+                // holds the throttle through a slide — sliding costs speed, and
+                // that setup slides. What is guarded is getting round and never
+                // stopping.
+                assert!(
+                    lap.progress > 0.3,
+                    "{} on {:?}: {budget:.0} s only got {:.0}% round",
+                    spec.name(),
+                    notch,
+                    lap.progress * 100.0
+                );
+                assert!(
+                    lap.stopped < budget / 3.7,
+                    "{} on {:?}: going nowhere {:.0} s of {budget:.0}",
+                    spec.name(),
+                    notch,
+                    lap.stopped
+                );
+            }
+        }
+    }
+
+    /// The point of a garage: no car is *the* car to pick.
+    ///
+    /// Measured rather than asserted by taste — all three lap every circuit with
+    /// the plain driver, and two things have to hold. Nobody may be far off the
+    /// pace anywhere, or the menu has a wrong answer in it; and the quickest car
+    /// has to change from circuit to circuit, or it has a right one. Which is
+    /// the whole difference between three cars and one car with two worse
+    /// copies of itself.
+    ///
+    /// The driver is not a racing driver and these are not lap records. That is
+    /// fine: it is the same driver in all three, so what is being compared is
+    /// the cars.
+    #[test]
+    fn no_car_is_the_car_to_pick() {
+        /// How far off the quickest car of a circuit the slowest may be. The
+        /// three sit inside a fortieth of it today; this is the bar, not the
+        /// reading, so retuning has room before it has a wrong answer in it.
+        const SPREAD: f32 = 0.06;
+        let mut winners = Vec::new();
+        for circuit in all_circuits() {
+            let track = Track::new(circuit);
+            let times: Vec<(Spec, f32)> = Spec::ALL
+                .into_iter()
+                .map(|spec| {
+                    let time =
+                        lap_time(&track, Style::Plain, spec.handling()).unwrap_or_else(|| {
+                            panic!("{} never got a lap in round {}", spec.name(), circuit.name)
+                        });
+                    (spec, time)
+                })
+                .collect();
+            let (best, quickest) = times
+                .iter()
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .copied()
+                .expect("three cars");
+            let slowest = times.iter().map(|(_, t)| *t).fold(0.0f32, f32::max);
             assert!(
-                lap.progress > 0.3,
-                "{:?}: {budget:.0} s only got {:.0}% round",
-                notch,
-                lap.progress * 100.0
+                slowest < quickest * (1.0 + SPREAD),
+                "{}: {:.1} s to {:.1} s is {:.0}% between the cars",
+                circuit.name,
+                quickest,
+                slowest,
+                100.0 * (slowest / quickest - 1.0)
             );
-            assert!(
-                lap.stopped < budget / 3.7,
-                "{:?}: going nowhere {:.0} s of {budget:.0}",
-                notch,
-                lap.stopped
+            winners.push(best);
+        }
+        winners.sort_by_key(|spec| spec.at());
+        winners.dedup();
+        assert!(
+            winners.len() > 1,
+            "{} is quickest everywhere, so there is nothing to choose",
+            winners[0].name()
+        );
+    }
+
+    /// Where a car stops accelerating on the flat, which is not `top_speed`:
+    /// that is only where the engine's push fades out, and drag and rolling
+    /// resistance are still there when it does.
+    fn settles_at(handling: &Handling) -> f32 {
+        let mut car = Car::default();
+        let dt = 1.0 / 240.0;
+        for _ in 0..240 * 120 {
+            physics::step(
+                &mut car,
+                handling,
+                Vec3::NEG_Z,
+                Vec3::X,
+                Controls {
+                    throttle: 1.0,
+                    ..default()
+                },
+                FLAT,
+                dt,
             );
+        }
+        car.velocity.length()
+    }
+
+    /// The hardest stop this car has in it: from where it settles down to what
+    /// it can carry through the tightest corner the game allows, on the brakes
+    /// the whole way. What the line of corner markers is a ruler for.
+    fn hardest_stop(handling: &Handling) -> f32 {
+        let entry = {
+            // The speed a corner of MIN_RADIUS holds, which depends on the speed
+            // through the downforce, so it is found rather than solved.
+            let mut v = 5.0f32;
+            for _ in 0..200 {
+                v = (handling.grip_at(v) * MIN_RADIUS).sqrt();
+            }
+            v
+        };
+        let mut car = Car {
+            velocity: Vec3::NEG_Z * settles_at(handling),
+            ..default()
+        };
+        let dt = 1.0 / 240.0;
+        let mut metres = 0.0;
+        while car.velocity.length() > entry && metres < 200.0 {
+            metres += car.velocity.length() * dt;
+            physics::step(
+                &mut car,
+                handling,
+                Vec3::NEG_Z,
+                Vec3::X,
+                Controls {
+                    brake: 1.0,
+                    ..default()
+                },
+                FLAT,
+                dt,
+            );
+        }
+        metres
+    }
+
+    /// What the three cars actually do, circuit by circuit. The table the
+    /// garage was balanced against.
+    ///
+    /// `cargo test --locked --lib the_garage -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn the_garage() {
+        println!(
+            "{:<22}{:>14}{:>14}   stars",
+            "", "settles at", "hardest stop"
+        );
+        for spec in Spec::ALL {
+            let handling = spec.handling();
+            let stars = spec.sheet().stars;
+            println!(
+                "{:<22}{:>10.1} m/s{:>10.1} m   {:?} {:?} {:?}",
+                spec.name(),
+                settles_at(&handling),
+                hardest_stop(&handling),
+                stars.handling,
+                stars.acceleration,
+                stars.top_speed
+            );
+        }
+        println!();
+        print!("{:<22}", "circuit");
+        for spec in Spec::ALL {
+            print!("{:>12}", spec.name());
+        }
+        println!("{:>10}", "spread");
+        for circuit in all_circuits() {
+            let track = Track::new(circuit);
+            let times: Vec<f32> = Spec::ALL
+                .into_iter()
+                .map(|spec| lap_time(&track, Style::Plain, spec.handling()).unwrap_or(f32::NAN))
+                .collect();
+            let quickest = times.iter().copied().fold(f32::MAX, f32::min);
+            print!("{:<22}", circuit.name);
+            for time in &times {
+                let mark = if *time == quickest { "*" } else { " " };
+                print!("{:>11.2}{mark}", time);
+            }
+            let slowest = times.iter().copied().fold(0.0f32, f32::max);
+            println!("{:>9.1}%", 100.0 * (slowest / quickest - 1.0));
         }
     }
 

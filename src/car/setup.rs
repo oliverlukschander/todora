@@ -21,6 +21,13 @@
 //! turn at full lock and still has to refuse to spin from steering alone, which
 //! is what the tests here hold it to. A setup should change how the car feels,
 //! not whether it is drivable.
+//!
+//! It leans whatever car it is given rather than replacing the numbers with its
+//! own. That is the whole of how the slider and the garage meet: the car is the
+//! baseline and the slider is the lean on top of it, so the grippy car on
+//! oversteer is a grippy car that has been loosened and not a different car
+//! wearing its badge. Each notch is a fraction of what the car brings — see
+//! [`Lean`] — which is also why the middle notch is exactly the car as it is.
 
 use bevy::prelude::*;
 
@@ -64,30 +71,64 @@ impl Setup {
         }
     }
 
-    /// `base` leaned this way. Only the five dials that make a slide move; the
-    /// `..base` says so, and everything else — grip, brakes, engine — is the
-    /// same car on every notch.
-    pub fn applied_to(self, base: Handling) -> Handling {
+    /// How far this notch leans a car, as a fraction of what that car brings.
+    fn lean(self) -> Lean {
         match self {
-            Setup::Understeer => Handling {
-                lock_margin: 0.98,
-                align: 4.2,
-                power_lets_go: 0.32,
-                kick: 0.8,
-                yaw_response: 9.8,
-                ..base
+            Setup::Understeer => Lean {
+                lock_margin: 0.89,
+                align: 1.31,
+                power_lets_go: 0.71,
+                kick: 0.40,
+                yaw_response: 0.89,
             },
-            Setup::Balanced => base,
-            Setup::Oversteer => Handling {
-                lock_margin: 1.26,
-                align: 2.4,
-                power_lets_go: 0.60,
-                kick: 3.0,
-                yaw_response: 12.4,
-                ..base
+            Setup::Balanced => Lean {
+                lock_margin: 1.0,
+                align: 1.0,
+                power_lets_go: 1.0,
+                kick: 1.0,
+                yaw_response: 1.0,
+            },
+            Setup::Oversteer => Lean {
+                lock_margin: 1.15,
+                align: 0.75,
+                power_lets_go: 1.33,
+                kick: 1.50,
+                yaw_response: 1.13,
             },
         }
     }
+
+    /// `base` leaned this way. Only the five dials that make a slide move; the
+    /// `..base` says so, and everything else — grip, brakes, engine — is the
+    /// same car on every notch.
+    ///
+    /// Each dial is scaled rather than set, so the slider means the same thing
+    /// whichever of the three cars it is applied to and the middle notch is that
+    /// car exactly. Setting them outright, as this used to, quietly made every
+    /// car identical at both ends of the slider and only different in the
+    /// middle, which is the opposite of what a garage and a slider should do to
+    /// each other.
+    pub fn applied_to(self, base: Handling) -> Handling {
+        let lean = self.lean();
+        Handling {
+            lock_margin: base.lock_margin * lean.lock_margin,
+            align: base.align * lean.align,
+            power_lets_go: base.power_lets_go * lean.power_lets_go,
+            kick: base.kick * lean.kick,
+            yaw_response: base.yaw_response * lean.yaw_response,
+            ..base
+        }
+    }
+}
+
+/// One notch of the slider: a fraction for each of the five dials it moves.
+#[derive(Clone, Copy)]
+struct Lean {
+    lock_margin: f32,
+    align: f32,
+    power_lets_go: f32,
+    kick: f32,
+    yaw_response: f32,
 }
 
 #[cfg(test)]
@@ -221,17 +262,32 @@ mod tests {
     }
 
     /// The slider has to be a slider: balanced in the middle of both leans, on
-    /// every dial it moves. Retune the car and this is what catches the notches
-    /// crossing over.
+    /// every dial it moves. Retune a car and this is what catches the notches
+    /// crossing over — on every car, because the slider is a lean on whatever it
+    /// is given and a lean that ran the wrong way on one of them would be a
+    /// slider that means something different depending on what you are driving.
     #[test]
     fn the_notches_lean_in_order() {
-        let [u, b, o] = Setup::ALL.map(tuned);
-        assert!(u.lock_margin < b.lock_margin && b.lock_margin < o.lock_margin);
-        // Higher align pulls the nose back harder, so it runs the other way.
-        assert!(u.align > b.align && b.align > o.align);
-        assert!(u.power_lets_go < b.power_lets_go && b.power_lets_go < o.power_lets_go);
-        assert!(u.kick < b.kick && b.kick < o.kick);
-        assert!(u.yaw_response < b.yaw_response && b.yaw_response < o.yaw_response);
+        for spec in crate::car::Spec::ALL {
+            let [u, b, o] = Setup::ALL.map(|notch| notch.applied_to(spec.handling()));
+            let car = spec.name();
+            assert_eq!(b, spec.handling(), "{car}: the middle notch is not the car");
+            assert!(
+                u.lock_margin < b.lock_margin && b.lock_margin < o.lock_margin,
+                "{car}"
+            );
+            // Higher align pulls the nose back harder, so it runs the other way.
+            assert!(u.align > b.align && b.align > o.align, "{car}");
+            assert!(
+                u.power_lets_go < b.power_lets_go && b.power_lets_go < o.power_lets_go,
+                "{car}"
+            );
+            assert!(u.kick < b.kick && b.kick < o.kick, "{car}");
+            assert!(
+                u.yaw_response < b.yaw_response && b.yaw_response < o.yaw_response,
+                "{car}"
+            );
+        }
         assert_eq!(Setup::ALL.map(Setup::notch), [0, 1, 2]);
     }
 

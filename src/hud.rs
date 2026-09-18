@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::car::{Car, Setup};
+use crate::car::{Car, Setup, Spec};
 use crate::ghost::Ghost;
 use crate::lap::{LapTimer, format_time};
 use crate::track::Track;
@@ -36,6 +36,7 @@ impl Plugin for HudPlugin {
                 draw_clock,
                 draw_g_meter,
                 draw_setup,
+                draw_car,
                 draw_delta,
                 draw_circuit,
             )
@@ -63,6 +64,9 @@ struct SetupKnob;
 struct SetupName;
 
 #[derive(Component)]
+struct CarName;
+
+#[derive(Component)]
 struct DeltaReadout;
 
 #[derive(Component)]
@@ -71,7 +75,7 @@ struct CircuitName;
 fn setup(mut commands: Commands) {
     commands.spawn((
         Text::new(
-            "W — throttle\nS — brake, reverse at a stop\nA / D — steer\nSpace — handbrake\n1 / 2 / 3 — setup\nG — ghost\nT — track\nR — restart\nEsc / Enter — pause\nScroll — zoom",
+            "W — throttle\nS — brake, reverse at a stop\nA / D — steer\nSpace — handbrake\n1 / 2 / 3 — setup\nC — car\nG — ghost\nT — track\nR — restart\nEsc / Enter — pause\nScroll — zoom",
         ),
         TextFont {
             font_size: FontSize::Px(16.0),
@@ -149,6 +153,15 @@ fn setup(mut commands: Commands) {
                         BorderColor::all(AMBER_DIM),
                     ),
                 ],
+            ),
+            (
+                CarName,
+                Text::new(Spec::default().name()),
+                TextFont {
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(AMBER_DIM),
             ),
             (
                 SpeedReadout,
@@ -300,6 +313,18 @@ fn draw_setup(
     }
     if let Ok(mut text) = name.single_mut() {
         text.0 = chosen.name().into();
+    }
+}
+
+/// Name the car being driven. It sits over the meter rather than in the menu,
+/// because which car you are in is a thing you want to know while driving it and
+/// the menu is only up when you are not.
+fn draw_car(spec: Res<Spec>, mut readout: Query<&mut Text, With<CarName>>) {
+    if !spec.is_changed() {
+        return;
+    }
+    if let Ok(mut text) = readout.single_mut() {
+        text.0 = spec.name().into();
     }
 }
 

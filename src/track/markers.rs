@@ -11,13 +11,24 @@
 //! point: the diamonds counting you in do not stop at the turn, they carry on
 //! round it, so the ones ahead are the shape of the corner before you can see
 //! the shape of the corner. Where it tightens they crowd up on the inside; where
-//! it opens they run away from you. The approach reaches 16 m back because the
-//! car's hardest stop — top speed down to a corner at
-//! [`super::ribbon::MIN_RADIUS`] — takes 15.1 m, so the first diamond of a line
-//! is the brakes for the slowest corners and the ones after it are the brakes
-//! for everything quicker. They are all the same diamond the same distance
-//! apart, because a dotted line is read as a rhythm and a rhythm is only
-//! information while it is regular.
+//! it opens they run away from you. The approach reaches 16 m back because that
+//! is the hardest stop the game has in it: the quickest car in the garage,
+//! flat out on the level, down to what it can carry through a corner at
+//! [`super::ribbon::MIN_RADIUS`], takes 16.0 m of road — `the_garage` measures
+//! it. So the first diamond of a line is the brakes for the slowest corners and
+//! the ones after it are the brakes for everything quicker. They are all the
+//! same diamond the same distance apart, because a dotted line is read as a
+//! rhythm and a rhythm is only information while it is regular.
+//!
+//! One line, three cars, and it does not move for any of them. The three stop
+//! from their own top speed in 4.6 m, 9.9 m and 16.0 m, so the quick car brakes
+//! at the first diamond of a line, the one the game ships on somewhere around
+//! the third, and the grippy one not until the last — and a long descent, which
+//! carries a car past the speed it settles at, puts a little more on top of all
+//! three. That is the point of a ruler. A line of marks that moved with the car
+//! would be telling the driver what they already know, in a rhythm they would
+//! have to learn again every time they changed car; a fixed one tells them where
+//! the corner is and leaves the rest to them.
 //!
 //! They stand up, and that is most of what makes them readable. From the driving
 //! seat the road ahead is seen almost edge-on: at 60 m the line of sight down to
