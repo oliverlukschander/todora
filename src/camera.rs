@@ -3,6 +3,7 @@ use bevy::{
     prelude::*,
 };
 
+use crate::Reset;
 use crate::car::{Car, level};
 use crate::track::Track;
 use crate::world::SKY;
@@ -67,9 +68,14 @@ fn zoom(scroll: Res<AccumulatedMouseScroll>, mut cameras: Query<&mut FollowCam>)
 
 fn follow(
     time: Res<Time>,
+    mut resets: MessageReader<Reset>,
     cars: Query<&Transform, (With<Car>, Without<FollowCam>)>,
     mut cameras: Query<(&FollowCam, &mut Transform), Without<Car>>,
 ) {
+    // The car has been put back on the grid, which is somewhere else — and on a
+    // switch, somewhere else entirely. Chasing it there means a second of flying
+    // across the circuit, or between two of them.
+    let cut = resets.read().next().is_some();
     let Ok(car) = cars.single() else {
         return;
     };
@@ -83,8 +89,16 @@ fn follow(
     // ahead crushed into the bottom of the frame.
     let ahead = level(*car.forward());
     let desired = car.translation - ahead * (BACK * follow.zoom) + Vec3::Y * (HEIGHT * follow.zoom);
-    let t_xz = 1.0 - (-FOLLOW_XZ * dt).exp();
-    let t_y = 1.0 - (-FOLLOW_Y * dt).exp();
+    let t_xz = if cut {
+        1.0
+    } else {
+        1.0 - (-FOLLOW_XZ * dt).exp()
+    };
+    let t_y = if cut {
+        1.0
+    } else {
+        1.0 - (-FOLLOW_Y * dt).exp()
+    };
     camera.translation.x = camera.translation.x.lerp(desired.x, t_xz);
     camera.translation.z = camera.translation.z.lerp(desired.z, t_xz);
     camera.translation.y = camera.translation.y.lerp(desired.y, t_y);

@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use crate::car::{Car, Setup};
 use crate::ghost::Ghost;
 use crate::lap::{LapTimer, format_time};
+use crate::track::Track;
 
 const AMBER: Color = Color::srgb(1.0, 0.72, 0.12);
 const AMBER_DIM: Color = Color::srgb(0.72, 0.48, 0.08);
@@ -29,7 +30,14 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup).add_systems(
             Update,
-            (draw_clock, draw_g_meter, draw_setup, draw_delta).after(crate::ghost::GhostSet),
+            (
+                draw_clock,
+                draw_g_meter,
+                draw_setup,
+                draw_delta,
+                draw_circuit,
+            )
+                .after(crate::ghost::GhostSet),
         );
     }
 }
@@ -55,10 +63,13 @@ struct SetupName;
 #[derive(Component)]
 struct DeltaReadout;
 
+#[derive(Component)]
+struct CircuitName;
+
 fn setup(mut commands: Commands) {
     commands.spawn((
         Text::new(
-            "W — throttle\nS — brake, reverse at a stop\nA / D — steer\nSpace — handbrake\n1 / 2 / 3 — setup\nG — ghost\nR — restart\nScroll — zoom",
+            "W — throttle\nS — brake, reverse at a stop\nA / D — steer\nSpace — handbrake\n1 / 2 / 3 — setup\nG — ghost\nT — track\nR — restart\nScroll — zoom",
         ),
         TextFont {
             font_size: FontSize::Px(16.0),
@@ -215,6 +226,19 @@ fn setup(mut commands: Commands) {
         BorderColor::all(AMBER_DIM),
         children![
             (
+                CircuitName,
+                Text::new(""),
+                TextFont {
+                    font_size: FontSize::Px(14.0),
+                    ..default()
+                },
+                TextColor(AMBER_DIM),
+                Node {
+                    margin: UiRect::bottom(px(4)),
+                    ..default()
+                },
+            ),
+            (
                 ClockReadout,
                 Text::new(clock_text(&LapTimer::default())),
                 TextFont {
@@ -274,6 +298,17 @@ fn draw_setup(
     }
     if let Ok(mut text) = name.single_mut() {
         text.0 = chosen.name().into();
+    }
+}
+
+/// Name the circuit being driven, so the board above it is read against the
+/// right one.
+fn draw_circuit(track: Res<Track>, mut readout: Query<&mut Text, With<CircuitName>>) {
+    if !track.is_changed() {
+        return;
+    }
+    if let Ok(mut text) = readout.single_mut() {
+        text.0 = track.circuit().name.to_uppercase();
     }
 }
 

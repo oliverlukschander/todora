@@ -33,9 +33,25 @@ pub(crate) const MIN_RADIUS: f32 = 10.0;
 /// Rise over run, after smoothing. The DEM heights are quantised to whole metres
 /// and the plan is scaled far harder than the elevation, so a single 1 m DEM step
 /// otherwise lands inside one station and reads as a wall.
-const MAX_GRADE: f32 = 0.12;
+///
+/// This is a backstop, not a shape. At 0.12 it was doing the shaping: near half
+/// of Spielberg and well over half of Spa came out pinned to it, so every hill
+/// on both circuits was the same ramp and the only thing that varied was how
+/// long it went on for. Eau Rouge in particular had neither a dip to drop into
+/// nor a climb to haul out of — the plunge from La Source, the compression and
+/// the run up to Raidillon were all one constant 12%. At 0.20 the DEM does the
+/// shaping again: Eau Rouge steepens through the compression the way it should
+/// (4%, 8%, 12%, 16%, 20%), a fifth of Spa touches the cap instead of three
+/// fifths, and a long descent now carries the car past its own top speed,
+/// because the engine stops pushing there and gravity does not.
+pub(crate) const MAX_GRADE: f32 = 0.20;
 /// Arc length the height profile is averaged over before the grade cap.
 const SMOOTH_SPAN: f32 = 24.0;
+/// Arc length the mean line is taken over. Shorter than this is a corner and
+/// gets exaggerated; longer than this is the layout of the circuit and is left
+/// where the trace put it, so Spa is still Spa rather than Spa with the corners
+/// somewhere else.
+const CORNER_SPAN: f32 = 45.0;
 /// Stretches of circuit closer together than this along the lap are neighbours,
 /// and are expected to be close in space too.
 const APART: f32 = 60.0;
@@ -73,6 +89,7 @@ pub struct Station {
 pub struct Ribbon {
     stations: Vec<Station>,
     length: f32,
+    kept: f32,
 }
 
 /// Where a world position sits relative to the circuit.
@@ -95,8 +112,12 @@ pub struct Fix {
 impl Ribbon {
     /// Build the centreline from raw control points: spline, open the corners
     /// that are too tight to loft, then settle the elevation.
-    pub fn new(control: &[Vec3]) -> Self {
+    pub fn new(control: &[Vec3], corners: f32) -> Self {
         let mut line = resample(&spline(control), STEP);
+        exaggerate_corners(&mut line, corners);
+        // Measured after exaggerating, because `kept` is about what opening the
+        // corners costs, and exaggerating is what gives it something to open.
+        let before = closed_length(&line);
         for _ in 0..RELAX_PASSES {
             let mut moved = false;
             for _ in 0..RELAX_STEPS {
@@ -112,7 +133,9 @@ impl Ribbon {
         }
         smooth_heights(&mut line);
         cap_grade(&mut line);
-        Self::from_polyline(line)
+        let mut ribbon = Self::from_polyline(line);
+        ribbon.kept = ribbon.length / before.max(1e-4);
+        ribbon
     }
 
     pub fn stations(&self) -> &[Station] {
@@ -122,6 +145,20 @@ impl Ribbon {
     /// Plan length of one lap.
     pub fn length(&self) -> f32 {
         self.length
+    }
+
+    /// How much of the circuit came through opening its corners, as a fraction
+    /// of the spline it was built from.
+    ///
+    /// Opening a corner cuts it, so every circuit loses a little — the two in
+    /// the game keep about nine tenths. A circuit whose corners are nearly all
+    /// tighter than [`MIN_RADIUS`] at this scale loses far more than that: there
+    /// is nothing left to relax against, and pass after pass pulls the whole lap
+    /// toward its own centre until it is a loop with no corners in it. Monaco
+    /// shrinks from 3.3 km to a hundred metres that way. Every station on it is
+    /// perfectly well formed, so nothing else notices; this does.
+    pub fn kept(&self) -> f32 {
+        self.kept
     }
 
     pub fn start(&self) -> &Station {
@@ -219,7 +256,11 @@ impl Ribbon {
                 }
             })
             .collect();
-        Self { stations, length }
+        Self {
+            stations,
+            length,
+            kept: 1.0,
+        }
     }
 }
 
@@ -317,6 +358,33 @@ fn open_corners(line: &mut [Vec3]) -> bool {
         line[i].z += RELAX_RATE * (mid.z - line[i].z);
     }
     !tight.is_empty()
+}
+
+/// Push every station away from the circuit's own mean line, in plan.
+///
+/// A low-pass of the centreline is the layout — where the circuit goes. What is
+/// left over is the corners. Amplifying only the leftovers exaggerates a corner
+/// without moving the circuit: in curvature terms a long sweep is most of its
+/// own mean line, so it comes through unchanged, while a chicane averages away
+/// to nothing and comes through multiplied. Straights have nothing to amplify.
+///
+/// Plan only. The height profile is scaled in [`super`] and smoothed below, and
+/// exaggerating it here as well would stack two treatments on one axis.
+fn exaggerate_corners(line: &mut [Vec3], corners: f32) {
+    let n = line.len();
+    let half = ((CORNER_SPAN / STEP) as usize / 2).max(1).min(n / 2);
+    let mean: Vec<Vec3> = (0..n)
+        .map(|i| {
+            (0..=2 * half)
+                .map(|j| line[(i + n + j - half) % n])
+                .sum::<Vec3>()
+                / (2 * half + 1) as f32
+        })
+        .collect();
+    for (point, mean) in line.iter_mut().zip(mean) {
+        point.x = mean.x + corners * (point.x - mean.x);
+        point.z = mean.z + corners * (point.z - mean.z);
+    }
 }
 
 /// Average the height profile along the circuit so the quantised DEM stops

@@ -1,14 +1,31 @@
+//! The clock: what a lap is, when one has been driven, and how quick it was.
+//!
+//! Two kinds of thing live in here, and the reset key is what tells them apart.
+//! The lap in progress is the clock, how far round it has got, and whether it
+//! has started — that is what `R` throws away. The records are the laps already
+//! driven and the best of them, and a restart is not a reason to forget those:
+//! you press it because the lap went wrong, and the thing you are chasing is
+//! the one you are not driving. They go when the circuit does, because they
+//! belong to it.
+
 use bevy::prelude::*;
 
 use crate::Reset;
 use crate::car::{Car, DriveSet, Player};
 use crate::input::InputSet;
-use crate::track::Track;
+use crate::track::{Track, TrackSet};
 
 /// Everything that judges the lap runs in here, after the car has moved.
 /// Anything that wants to hear a lap finish in the same frame runs after it.
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct LapSet;
+
+/// Putting the clock and the board back runs in here. Anything that then has
+/// something of its own to write onto the board — the ghost, with the time of
+/// the lap saved for the circuit just arrived at — runs after it, or a switch
+/// clears the board after the ghost has filled it in.
+#[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
+pub(crate) struct ClockSet;
 
 /// A lap has just been completed: its time, and whether it beat every lap
 /// before it.
@@ -28,7 +45,10 @@ impl Plugin for LapPlugin {
                 FixedUpdate,
                 (tick, gate).chain().in_set(LapSet).after(DriveSet),
             )
-            .add_systems(PreUpdate, start_again.after(InputSet));
+            .add_systems(
+                PreUpdate,
+                start_again.in_set(ClockSet).after(InputSet).after(TrackSet),
+            );
     }
 }
 
@@ -53,6 +73,24 @@ impl LapTimer {
     /// Signed travel since the lap began, clamped for the ghost's lookup.
     pub(crate) fn progress(&self) -> f32 {
         self.net_progress.clamp(0.0, 1.0)
+    }
+
+    /// Give up the lap in progress and start it again from the line. What the
+    /// reset key does: the laps already driven and the best of them are not part
+    /// of the lap in progress, so they stay.
+    fn abandon(&mut self) {
+        self.current = 0.0;
+        self.running = false;
+        self.prev_along = None;
+        self.prev_progress = None;
+        self.net_progress = 0.0;
+    }
+
+    /// Count a lap driven before this session — the one saved as the ghost — as
+    /// the best. It was driven round this circuit at this scale, so it is a time
+    /// on the board like any other, and it is the time the delta is read against.
+    pub(crate) fn remember(&mut self, time: f32) {
+        self.best = Some(self.best.map_or(time, |best| best.min(time)));
     }
 }
 
@@ -123,9 +161,18 @@ fn gate(
     timer.prev_along = Some(along);
 }
 
-fn start_again(mut resets: MessageReader<Reset>, mut timer: ResMut<LapTimer>) {
-    if resets.read().next().is_some() {
+/// A new circuit has no history on it; a restart on the one being driven gives
+/// up the lap in progress and nothing else.
+///
+/// The track key builds the circuit before this runs, so a changed [`Track`] is
+/// how a switch tells itself apart from a restart — including the first frame of
+/// all, where the board is empty anyway.
+fn start_again(mut resets: MessageReader<Reset>, track: Res<Track>, mut timer: ResMut<LapTimer>) {
+    let restarted = resets.read().next().is_some();
+    if track.is_changed() {
         *timer = LapTimer::default();
+    } else if restarted {
+        timer.abandon();
     }
 }
 
@@ -141,30 +188,68 @@ pub fn format_time(secs: f32) -> String {
 mod tests {
     use super::*;
 
-    /// A reset has to leave no trace of the lap that was running.
+    fn mid_lap() -> LapTimer {
+        LapTimer {
+            current: 42.0,
+            last: Some(61.0),
+            best: Some(58.0),
+            completed: 3,
+            running: true,
+            prev_along: Some(2.0),
+            prev_progress: Some(0.8),
+            net_progress: 0.8,
+        }
+    }
+
+    /// A restart puts the clock back to the line and leaves the board alone.
+    /// The best lap is what the driver is chasing; taking it away for pressing
+    /// `R` would punish the restart rather than the lap that went wrong.
     #[test]
-    fn a_reset_puts_the_clock_back() {
+    fn a_restart_puts_the_clock_back_and_keeps_the_board() {
         let mut app = App::new();
         app.add_message::<Reset>()
-            .insert_resource(LapTimer {
-                current: 42.0,
-                last: Some(61.0),
-                best: Some(58.0),
-                completed: 3,
-                running: true,
-                prev_along: Some(2.0),
-                prev_progress: Some(0.8),
-                net_progress: 0.8,
-            })
+            .insert_resource(Track::any())
+            .insert_resource(mid_lap())
             .add_systems(Update, start_again);
 
+        // The first frame sees a freshly inserted track, so it clears the board
+        // the way a switch does. From then on it is a restart.
+        app.update();
+        app.insert_resource(mid_lap());
         app.update();
         assert_eq!(
-            app.world().resource::<LapTimer>().completed,
-            3,
-            "reset by itself"
+            app.world().resource::<LapTimer>().current,
+            42.0,
+            "the clock moved with no reset"
         );
 
+        app.world_mut().write_message(Reset);
+        app.update();
+        let timer = app.world().resource::<LapTimer>();
+        assert_eq!(timer.current, 0.0);
+        assert!(!timer.running);
+        assert_eq!(timer.net_progress, 0.0);
+        assert!(timer.prev_along.is_none() && timer.prev_progress.is_none());
+        assert_eq!(timer.completed, 3, "a restart forgot the laps driven");
+        assert_eq!(timer.last, Some(61.0), "a restart forgot the last lap");
+        assert_eq!(timer.best, Some(58.0), "a restart forgot the best lap");
+    }
+
+    /// A different circuit is a different board: nothing set on the old one
+    /// means anything on the new one.
+    #[test]
+    fn a_new_circuit_clears_the_board() {
+        let mut app = App::new();
+        app.add_message::<Reset>()
+            .insert_resource(Track::any())
+            .insert_resource(mid_lap())
+            .add_systems(Update, start_again);
+        app.update();
+        app.insert_resource(mid_lap());
+        app.update();
+
+        // What the track key does: a new Track, then a reset for everyone else.
+        app.insert_resource(Track::any());
         app.world_mut().write_message(Reset);
         app.update();
         let timer = app.world().resource::<LapTimer>();
@@ -172,6 +257,23 @@ mod tests {
         assert_eq!(timer.current, 0.0);
         assert!(timer.last.is_none() && timer.best.is_none());
         assert!(!timer.running);
+    }
+
+    /// A lap saved from an earlier session is a time on the board, and only ever
+    /// improves it.
+    #[test]
+    fn a_remembered_lap_is_the_best_until_it_is_beaten() {
+        let mut timer = LapTimer::default();
+        timer.remember(58.0);
+        assert_eq!(timer.best, Some(58.0));
+        timer.remember(61.0);
+        assert_eq!(timer.best, Some(58.0), "a slower saved lap took the board");
+        timer.remember(55.5);
+        assert_eq!(timer.best, Some(55.5));
+        assert!(
+            timer.last.is_none(),
+            "a saved lap is not this session's last"
+        );
     }
 
     /// A finished lap has to announce itself, and say whether it was the best:
@@ -184,13 +286,13 @@ mod tests {
             heard.0.extend(laps.read().copied());
         }
 
-        let track = Track::new();
+        let track = Track::any();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<LapFinished>()
             .init_resource::<Heard>()
             .init_resource::<LapTimer>()
-            .insert_resource(Track::new())
+            .insert_resource(Track::any())
             .add_systems(Update, (gate, collect).chain());
         let start = track.start_transform();
         let car = app.world_mut().spawn((Car::default(), Player, start)).id();
@@ -236,7 +338,7 @@ mod tests {
 
     #[test]
     fn backing_up_then_recrossing_the_line_is_not_a_lap() {
-        let track = Track::new();
+        let track = Track::any();
         let start = track.start_transform();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)

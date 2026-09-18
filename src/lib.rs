@@ -31,7 +31,13 @@ pub fn run() {
 }
 
 /// Start again: car on the grid, clock at zero, marks wiped. Sent by the reset
-/// key; each plugin puts its own state back, because each plugin is what owns it.
+/// key, and by a change of circuit, which is a reset onto somewhere else. Each
+/// plugin puts its own state back, because each plugin is what owns it.
+///
+/// This gives up the lap in progress, not the session. The laps already driven,
+/// the best of them and the ghost belong to the circuit rather than to the lap,
+/// so they survive a reset and go when the circuit does — which the plugins that
+/// hold them tell apart by whether [`track::Track`] changed this frame.
 #[derive(Message)]
 pub(crate) struct Reset;
 

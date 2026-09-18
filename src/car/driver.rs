@@ -161,6 +161,12 @@ mod tests {
 
     use super::*;
     use crate::car::{SCALE, Setup, advance};
+    use crate::track::all_circuits;
+
+    /// Metres a second the time budget assumes. Well under what the car can do,
+    /// because these drivers are not quick — it is how long a lap is *allowed*
+    /// to take, not how long it should.
+    const PACE: f32 = 5.9;
 
     #[derive(Default)]
     struct Lap {
@@ -173,8 +179,12 @@ mod tests {
         off_road_descending: f32,
     }
 
-    fn lap(style: Style, handling: Handling, seconds: f32) -> Lap {
-        let track = Track::new();
+    /// Drive `track` for `laps` laps' worth of time at [`PACE`]. The budget
+    /// follows the circuit rather than being a fixed number of seconds: the
+    /// circuits are different lengths on purpose, and 90 seconds that is most of
+    /// a lap of Spielberg is half a lap of Spa.
+    fn lap(track: &Track, style: Style, handling: Handling, laps: f32) -> Lap {
+        let seconds = laps * track.length() / PACE;
         let mut driver = Driver::new(style);
         let mut transform = track.start_transform().with_scale(Vec3::splat(SCALE));
         let mut car = Car::default();
@@ -183,9 +193,9 @@ mod tests {
         let mut previous = track.progress(transform.translation);
 
         for _ in 0..(seconds / dt) as usize {
-            let controls = driver.decide(&track, &handling, &transform, &car);
+            let controls = driver.decide(track, &handling, &transform, &car);
             let speed = car.velocity.length();
-            advance(&track, &handling, controls, &mut transform, &mut car, dt);
+            advance(track, &handling, controls, &mut transform, &mut car, dt);
 
             lap.distance += speed * dt;
             let ground = track.ground(transform.translation);
@@ -227,52 +237,70 @@ mod tests {
         );
     }
 
+    /// Every circuit, because a circuit nobody can get round is not a circuit.
+    /// This is the net under the hills: the elevation comes from a real DEM at a
+    /// scale that makes it steeper than life, and a climb the car cannot take or
+    /// a descent it cannot stop on fails here rather than under the player.
     #[test]
     fn a_plain_driver_gets_round() {
-        let lap = lap(Style::Plain, Handling::SHOOTING_BRAKE, 90.0);
-        report("plain", &lap);
-        assert!(
-            lap.progress > 0.9,
-            "90 s only got {:.0}% round",
-            lap.progress * 100.0
-        );
-        // Loose on purpose: these are the bounds of "can get round", not a target.
-        assert!(
-            lap.off_road < 30.0,
-            "off the road {:.0} s of 90",
-            lap.off_road
-        );
-        assert!(
-            lap.stopped < 15.0,
-            "going nowhere {:.0} s of 90",
-            lap.stopped
-        );
+        for circuit in all_circuits() {
+            let track = Track::new(circuit);
+            let budget = track.length() / PACE;
+            let lap = lap(&track, Style::Plain, Handling::SHOOTING_BRAKE, 1.0);
+            report(circuit.name, &lap);
+            assert!(
+                lap.progress > 0.9,
+                "{}: {budget:.0} s only got {:.0}% round",
+                circuit.name,
+                lap.progress * 100.0
+            );
+            // Loose on purpose: the bounds of "can get round", not a target.
+            assert!(
+                lap.off_road < budget / 3.0,
+                "{}: off the road {:.0} s of {budget:.0}",
+                circuit.name,
+                lap.off_road
+            );
+            assert!(
+                lap.stopped < budget / 6.0,
+                "{}: going nowhere {:.0} s of {budget:.0}",
+                circuit.name,
+                lap.stopped
+            );
+        }
     }
 
     /// Full lock or nothing, 150 ms behind, brakes late, cannot see far. This is
     /// the person holding the keys, and the car has to be drivable by them.
     #[test]
     fn a_clumsy_driver_still_gets_round() {
-        let lap = lap(Style::Clumsy, Handling::SHOOTING_BRAKE, 90.0);
-        report("clumsy", &lap);
-        assert!(
-            lap.progress > 0.9,
-            "90 s only got {:.0}% round",
-            lap.progress * 100.0
-        );
-        // Loose: the grass is a gravel trap, so every excursion this driver
-        // makes is a slow one, and it makes plenty. What matters is that it is
-        // never stuck out there.
-        assert!(
-            lap.off_road < 45.0,
-            "off the road {:.0} s of 90",
-            lap.off_road
-        );
-        assert!(
-            lap.stopped < 20.0,
-            "going nowhere {:.0} s of 90",
-            lap.stopped
-        );
+        for circuit in all_circuits() {
+            let track = Track::new(circuit);
+            let budget = track.length() / PACE;
+            let lap = lap(&track, Style::Clumsy, Handling::SHOOTING_BRAKE, 1.0);
+            report(circuit.name, &lap);
+            assert!(
+                lap.progress > 0.9,
+                "{}: {budget:.0} s only got {:.0}% round",
+                circuit.name,
+                lap.progress * 100.0
+            );
+            // Loose: the grass is a gravel trap, so every excursion this
+            // driver makes is a slow one, and it makes plenty. What matters is
+            // that it is never stuck out there.
+            assert!(
+                lap.off_road < budget / 2.0,
+                "{}: off the road {:.0} s of {budget:.0}",
+                circuit.name,
+                lap.off_road
+            );
+            assert!(
+                lap.stopped < budget / 4.5,
+                "{}: going nowhere {:.0} s of {budget:.0}",
+                circuit.name,
+                lap.stopped
+            );
+        }
     }
 
     /// Every notch of the setup slider has to be lappable by the person holding
@@ -282,20 +310,22 @@ mod tests {
     fn a_clumsy_driver_gets_round_on_every_setup() {
         for notch in Setup::ALL {
             let handling = notch.applied_to(Handling::SHOOTING_BRAKE);
-            let lap = lap(Style::Clumsy, handling, 45.0);
+            let track = Track::any();
+            let budget = 0.5 * track.length() / PACE;
+            let lap = lap(&track, Style::Clumsy, handling, 0.5);
             report(notch.name(), &lap);
             // Low, because Oversteer is meant to be slow for a driver who holds
             // the throttle through a slide — sliding costs speed, and that
             // setup slides. What is guarded is getting round and never stopping.
             assert!(
                 lap.progress > 0.3,
-                "{:?}: 45 s only got {:.0}% round",
+                "{:?}: {budget:.0} s only got {:.0}% round",
                 notch,
                 lap.progress * 100.0
             );
             assert!(
-                lap.stopped < 12.0,
-                "{:?}: going nowhere {:.0} s of 45",
+                lap.stopped < budget / 3.7,
+                "{:?}: going nowhere {:.0} s of {budget:.0}",
                 notch,
                 lap.stopped
             );
@@ -309,15 +339,18 @@ mod tests {
     /// when the tyres are busy, and covers the same ground on every notch.
     #[test]
     fn a_driver_who_lifts_is_not_punished_for_oversteer() {
+        let track = Track::any();
         let balanced = lap(
+            &track,
             Style::Plain,
             Setup::Balanced.applied_to(Handling::SHOOTING_BRAKE),
-            45.0,
+            0.5,
         );
         let loose = lap(
+            &track,
             Style::Plain,
             Setup::Oversteer.applied_to(Handling::SHOOTING_BRAKE),
-            45.0,
+            0.5,
         );
         assert!(
             loose.distance > balanced.distance * 0.94,
@@ -342,7 +375,7 @@ mod tests {
         for style in [Style::Clumsy, Style::Plain] {
             for notch in Setup::ALL {
                 let handling = notch.applied_to(Handling::SHOOTING_BRAKE);
-                let lap = lap(style, handling, 60.0);
+                let lap = lap(&Track::any(), style, handling, 0.7);
                 println!(
                     "{:?} on {:<11} {:6.0} m   off-road {:5.1} s",
                     style,
@@ -375,7 +408,7 @@ mod tests {
     #[test]
     #[ignore]
     fn speed_profile() {
-        let track = Track::new();
+        let track = Track::any();
         let step = 0.5f32;
         let mut here = track.start_transform().translation;
         let mut radii = Vec::new();

@@ -17,7 +17,7 @@ use bevy::{prelude::*, world_serialization::WorldInstanceReady};
 
 use crate::Reset;
 use crate::input::InputSet;
-use crate::track::Track;
+use crate::track::{Track, TrackSet};
 pub(crate) use physics::{
     Car, Controls, HALF_TRACK, Handling, REAR_AXLE, SCALE, Surface, WHEEL_WIDTH,
 };
@@ -65,7 +65,15 @@ impl Plugin for CarPlugin {
         app.init_resource::<Setup>()
             .insert_resource(Time::<Fixed>::from_hz(240.0))
             .add_systems(Startup, setup)
-            .add_systems(PreUpdate, (apply_setup, restart).after(InputSet))
+            // After the input, which is what asks for both, and after the
+            // track, because a switch writes the reset that puts the car back
+            // and the grid it goes back to is the new circuit's. Both are said
+            // outright: an app built without one of those plugins still has to
+            // run these in the right place.
+            .add_systems(
+                PreUpdate,
+                (apply_setup, restart).after(InputSet).after(TrackSet),
+            )
             .add_systems(FixedUpdate, drive.in_set(DriveSet))
             .add_systems(Update, (turn_wheels, lean_body));
     }
@@ -264,7 +272,7 @@ mod tests {
     use std::time::Duration;
 
     fn simulation() -> (App, Entity) {
-        let track = Track::new();
+        let track = Track::any();
         let start = track.start_transform();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -365,7 +373,7 @@ mod tests {
 
     #[test]
     fn a_long_frame_preserves_driving_time() {
-        let track = Track::new();
+        let track = Track::any();
         let controls = Controls {
             throttle: 1.0,
             ..default()
@@ -403,7 +411,7 @@ mod tests {
     /// short ones adding up to it must land in the same place.
     #[test]
     fn advancing_is_frame_rate_independent() {
-        let track = Track::new();
+        let track = Track::any();
         let handling = Handling::SHOOTING_BRAKE;
         let corner = Controls {
             throttle: 0.7,
