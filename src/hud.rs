@@ -9,7 +9,13 @@ use crate::track::Track;
 /// world is the same panel seen in different places.
 pub(crate) const AMBER: Color = Color::srgb(1.0, 0.72, 0.12);
 pub(crate) const AMBER_DIM: Color = Color::srgb(0.72, 0.48, 0.08);
+/// An instrument, read *over* the world while driving: translucent, because
+/// what is behind it is the thing being driven at.
 pub(crate) const PANEL: Color = Color::srgba(0.04, 0.03, 0.02, 0.82);
+/// Something standing *in front of* the game rather than over it — a pause, a
+/// menu. Near enough opaque, because there is nothing behind it worth seeing
+/// through it: the world it is covering is stopped.
+pub(crate) const FRONT: Color = Color::srgba(0.05, 0.04, 0.03, 0.97);
 /// The delta to the ghost: green when this lap is ahead of it, red when behind.
 const AHEAD: Color = Color::srgb(0.38, 0.86, 0.42);
 const BEHIND: Color = Color::srgb(0.96, 0.32, 0.26);

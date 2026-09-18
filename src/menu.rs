@@ -22,7 +22,7 @@ use bevy::prelude::*;
 
 use crate::Reset;
 use crate::car::{Spec, Stars};
-use crate::hud::{AMBER, AMBER_DIM, PANEL};
+use crate::hud::{AMBER, AMBER_DIM, FRONT};
 use crate::pause::{Halt, HaltSet};
 
 /// Opening, moving and choosing all run in here, after the pause has had its
@@ -138,7 +138,7 @@ fn setup(mut commands: Commands) {
                 row_gap: px(4),
                 ..default()
             },
-            BackgroundColor(PANEL),
+            BackgroundColor(FRONT),
             BorderColor::all(AMBER_DIM),
         ))
         .with_children(|panel| {

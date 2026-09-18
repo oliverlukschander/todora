@@ -24,7 +24,7 @@
 use bevy::prelude::*;
 
 use crate::car::{Controls, Player};
-use crate::hud::{AMBER, AMBER_DIM, PANEL};
+use crate::hud::{AMBER, AMBER_DIM, FRONT};
 
 /// What is standing in front of the game, if anything.
 #[derive(Resource, Clone, Copy, Default, PartialEq, Eq, Debug)]
@@ -97,7 +97,7 @@ fn setup(mut commands: Commands) {
             row_gap: px(4),
             ..default()
         },
-        BackgroundColor(PANEL),
+        BackgroundColor(FRONT),
         BorderColor::all(AMBER_DIM),
         Visibility::Hidden,
         children![
@@ -165,12 +165,15 @@ fn hold_the_clock(halt: Res<Halt>, mut time: ResMut<Time<Virtual>>) {
     }
 }
 
+/// The banner is the pause's own, not every halt's. A menu is already standing
+/// in front of the game and saying so; a second panel behind it saying the game
+/// is stopped is the same news twice, through each other.
 fn show(halt: Res<Halt>, mut banner: Query<&mut Visibility, With<Banner>>) {
     if !halt.is_changed() {
         return;
     }
     if let Ok(mut visibility) = banner.single_mut() {
-        *visibility = if halt.stopped() {
+        *visibility = if *halt == Halt::Pause {
             Visibility::Visible
         } else {
             Visibility::Hidden
@@ -359,6 +362,32 @@ mod tests {
             where_is_the_car(&mut app).distance(grid) < 0.01,
             "the reset key was not heard once the game started again"
         );
+    }
+
+    /// Only one thing stands in front of the game at a time. The banner belongs
+    /// to the pause, not to every halt, or a menu would have it showing through
+    /// itself saying what the menu is already there to say.
+    #[test]
+    fn the_banner_is_the_pauses_own() {
+        let mut app = game();
+        app.world_mut().spawn((Banner, Visibility::Hidden));
+        app.update();
+        let shown = |app: &mut App| {
+            let mut banners = app
+                .world_mut()
+                .query_filtered::<&Visibility, With<Banner>>();
+            *banners.single(app.world()).expect("the banner is there") == Visibility::Visible
+        };
+        assert!(!shown(&mut app));
+        for (halt, want) in [
+            (Halt::Pause, true),
+            (Halt::Menu, false),
+            (Halt::Nothing, false),
+        ] {
+            *app.world_mut().resource_mut::<Halt>() = halt;
+            app.update();
+            assert_eq!(shown(&mut app), want, "the banner under {halt:?}");
+        }
     }
 
     /// The virtual clock is the pause, so it has to follow [`Halt`] exactly —
