@@ -56,6 +56,22 @@ const BOUNCE: f32 = 0.45;
 /// no barrier at all.
 const RESCUE_AFTER: f32 = 1.6;
 const GOING_NOWHERE: f32 = 1.5;
+/// How far before the start/finish line the car is set down, so that a lap
+/// begins at speed instead of from a standstill.
+///
+/// It takes 45 m to reach 20 m/s, and 20 m/s is as good as this is going to get:
+/// the car settles at 22.2 m/s on the flat, not at the 24 of `top_speed`, which
+/// is only where the engine's push fades to nothing — drag and rolling
+/// resistance are still there when it does. The last tenth costs another 65 m.
+///
+/// And 65 m is not there to spend. The run-up wants to be straight, or the car
+/// arrives at the line slower for having cornered on the way, and a straight is
+/// what the circuits have least of behind their lines: Spielberg has 48 m of it,
+/// Monza 97, and Spa none at all, because Spa's line is inside La Source. At 45
+/// every circuit sets the car down pointing very nearly the way the line does;
+/// at 75 Spielberg sets it down sideways, mid-corner. `the_grid_is_a_run_up_to
+/// _the_line` is what holds that.
+const RUN_UP: f32 = 45.0;
 /// How much of a circuit has to survive being shrunk and having its corners
 /// opened for what is left to still be that circuit. See [`Ribbon::kept`]: the
 /// two in the game keep about nine tenths, and a circuit that keeps a quarter
@@ -145,10 +161,14 @@ impl Track {
         self.circuit
     }
 
-    /// Pose of the grid slot, facing down the start/finish straight.
+    /// Pose of the grid slot: [`RUN_UP`] metres before the start/finish line,
+    /// facing the way the lap runs.
+    ///
+    /// The grid is not the line. The clock starts where the line is, so the run
+    /// up to it is the driver's to spend and costs nothing — see [`crate::lap`].
     pub fn start_transform(&self) -> Transform {
-        let start = self.ribbon.start();
-        Transform::from_translation(start.pos).looking_to(start.tangent, Vec3::Y)
+        let grid = self.ribbon.before_start(RUN_UP);
+        Transform::from_translation(grid.pos).looking_to(grid.tangent, Vec3::Y)
     }
 
     /// Signed distance past the start/finish plane, along the circuit.
@@ -626,10 +646,40 @@ mod tests {
             let pose = track.start_transform();
             let fix = track.ribbon.locate(pose.translation);
             assert!(fix.lateral.abs() < 0.01, "{name}");
-            assert!(track.on_start_gate(pose.translation), "{name}");
-            assert!(track.progress(pose.translation) < 0.01, "{name}");
+            let lap = track.ribbon.length();
+            assert!(
+                track.progress(pose.translation) > 1.0 - (RUN_UP + 1.0) / lap,
+                "{name} sets the car down further back than the run-up"
+            );
+        }
+    }
+
+    /// The grid is a run-up, and a run-up has to be usable. It sits behind the
+    /// line by [`RUN_UP`] as the lap runs — which the line's own plane has to
+    /// agree with, because that plane is what the clock reads to know the car
+    /// has arrived — and it faces very nearly the way the line faces, because a
+    /// car set down sideways in a corner spends the run-up getting straight
+    /// rather than getting up to speed.
+    #[test]
+    fn the_grid_is_a_run_up_to_the_line() {
+        for (name, track) in every_track() {
+            let pose = track.start_transform();
+            let along = track.start_along(pose.translation);
+            assert!(
+                (-RUN_UP - 1.0..-RUN_UP * 0.9).contains(&along),
+                "{name} reads {along:.1} m behind a line it is set down {RUN_UP} m from"
+            );
+            let turn = level(*pose.forward())
+                .dot(track.ribbon.start().tangent)
+                .acos()
+                .to_degrees();
+            assert!(
+                turn < 20.0,
+                "{name} sets the car down {turn:.0} degrees off the line"
+            );
+            // And the way out of the grid is toward the line, not away from it.
             let ahead = pose.translation + *pose.forward() * 3.0;
-            assert!(track.start_along(ahead) > 2.9, "{name}");
+            assert!(track.start_along(ahead) > along, "{name} faces backwards");
         }
     }
 

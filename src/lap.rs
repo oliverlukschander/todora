@@ -1,5 +1,13 @@
 //! The clock: what a lap is, when one has been driven, and how quick it was.
 //!
+//! The clock starts at the line, never on the grid. The car is set down a run-up
+//! short of the start/finish line so a lap can begin at speed, and what happens
+//! in that run-up is the driver's own business: the clock is armed by the first
+//! crossing and every crossing after that finishes a lap and starts the next.
+//! One rule, and it is the rule that was always wanted — the old one, that the
+//! clock starts when the car moves off, only agreed with it because the car used
+//! to be set down on the line itself.
+//!
 //! Two kinds of thing live in here, and the reset key is what tells them apart.
 //! The lap in progress is the clock, how far round it has got, and whether it
 //! has started — that is what `R` throws away. The records are the laps already
@@ -11,7 +19,7 @@
 use bevy::prelude::*;
 
 use crate::Reset;
-use crate::car::{Car, DriveSet, Player};
+use crate::car::{DriveSet, Player};
 use crate::input::InputSet;
 use crate::track::{Track, TrackSet};
 
@@ -65,7 +73,7 @@ pub struct LapTimer {
 }
 
 impl LapTimer {
-    /// Whether the clock is going: the car has moved off, and a lap is on.
+    /// Whether the clock is going: the car has crossed the line, and a lap is on.
     pub fn running(&self) -> bool {
         self.running
     }
@@ -75,9 +83,9 @@ impl LapTimer {
         self.net_progress.clamp(0.0, 1.0)
     }
 
-    /// Give up the lap in progress and start it again from the line. What the
-    /// reset key does: the laps already driven and the best of them are not part
-    /// of the lap in progress, so they stay.
+    /// Give up the lap in progress and go back to the run-up. What the reset key
+    /// does: the laps already driven and the best of them are not part of the lap
+    /// in progress, so they stay, and the clock waits at the line again.
     fn abandon(&mut self) {
         self.current = 0.0;
         self.running = false;
@@ -109,13 +117,11 @@ impl Default for LapTimer {
     }
 }
 
-fn tick(time: Res<Time>, mut timer: ResMut<LapTimer>, cars: Query<&Car, With<Player>>) {
+/// The clock only ever runs between one crossing of the line and the next.
+/// [`gate`] is what starts it.
+fn tick(time: Res<Time>, mut timer: ResMut<LapTimer>) {
     if timer.running {
         timer.current += time.delta_secs();
-        return;
-    }
-    if cars.iter().any(|car| car.velocity.length() > 0.4) {
-        timer.running = true;
     }
 }
 
@@ -141,22 +147,29 @@ fn gate(
         timer.prev_along = Some(along);
         return;
     };
-    if prev <= 0.0 && along > 0.0 && track.on_start_gate(pos) && timer.net_progress > 0.95 {
-        let time = timer.current;
-        finished.write(LapFinished {
-            time,
-            best: timer.best.is_none_or(|best| time < best),
-        });
-        timer.last = Some(timer.current);
-        timer.best = Some(
-            timer
-                .best
-                .map_or(timer.current, |best| best.min(timer.current)),
-        );
-        timer.completed += 1;
-        timer.current = 0.0;
-        timer.net_progress = 0.0;
-        timer.running = true;
+    if prev <= 0.0 && along > 0.0 && track.on_start_gate(pos) {
+        if !timer.running {
+            // The end of the run-up. Everything before this is the driver's own
+            // time, spent getting up to speed, and none of it is the lap.
+            timer.running = true;
+            timer.current = 0.0;
+            timer.net_progress = 0.0;
+        } else if timer.net_progress > 0.95 {
+            let time = timer.current;
+            finished.write(LapFinished {
+                time,
+                best: timer.best.is_none_or(|best| time < best),
+            });
+            timer.last = Some(timer.current);
+            timer.best = Some(
+                timer
+                    .best
+                    .map_or(timer.current, |best| best.min(timer.current)),
+            );
+            timer.completed += 1;
+            timer.current = 0.0;
+            timer.net_progress = 0.0;
+        }
     }
     timer.prev_along = Some(along);
 }
@@ -187,6 +200,7 @@ pub fn format_time(secs: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::car::Car;
 
     fn mid_lap() -> LapTimer {
         LapTimer {
@@ -298,9 +312,11 @@ mod tests {
         let car = app.world_mut().spawn((Car::default(), Player, start)).id();
         app.update();
 
-        // Twice round, on the centreline, with the clock ticking.
+        // The run-up and then twice round, on the centreline, with the clock
+        // ticking. Far enough for three crossings of the line: one to arm the
+        // clock at the end of the run-up, and one to finish each lap.
         let mut here = start.translation;
-        for _ in 0..2200 {
+        for _ in 0..((track.length() * 2.0 + 120.0) / 0.5) as usize {
             let ground = track.ground(here);
             here = ground.centre + ground.tangent * 0.5;
             app.world_mut()
@@ -348,29 +364,81 @@ mod tests {
             .add_systems(Update, gate);
         let car = app.world_mut().spawn((Car::default(), Player, start)).id();
         app.update();
+
+        // The run-up and a good way past the line.
         let mut here = start.translation;
-        let mut backwards = Vec::new();
-        for _ in 0..100 {
+        let mut forward = Vec::new();
+        for _ in 0..140 {
             let ground = app.world().resource::<Track>().ground(here);
-            here = ground.centre - ground.tangent * 0.5;
-            backwards.push(here);
-            app.world_mut()
-                .get_mut::<Transform>(car)
-                .unwrap()
-                .translation = here;
-            app.update();
+            here = ground.centre + ground.tangent * 0.5;
+            forward.push(here);
         }
-        for here in backwards
-            .into_iter()
-            .rev()
-            .chain([start.translation + *start.forward()])
-        {
-            app.world_mut()
-                .get_mut::<Transform>(car)
-                .unwrap()
-                .translation = here;
-            app.update();
-        }
+        let drive = |app: &mut App, path: &mut dyn Iterator<Item = Vec3>| {
+            for here in path {
+                app.world_mut()
+                    .get_mut::<Transform>(car)
+                    .unwrap()
+                    .translation = here;
+                app.update();
+            }
+        };
+        // Over the line, which arms the clock; back over it; and over it again.
+        drive(&mut app, &mut forward.iter().copied());
+        assert!(
+            app.world().resource::<LapTimer>().running(),
+            "driving up to the line did not start the clock"
+        );
+        drive(&mut app, &mut forward.iter().rev().copied());
+        drive(&mut app, &mut forward.iter().copied());
         assert_eq!(app.world().resource::<LapTimer>().completed, 0);
+    }
+
+    /// The whole point of the run-up: the clock is armed by the line, not by the
+    /// car moving off, so the metres spent getting up to speed are free. Drive
+    /// up to the line and the clock is still at zero until the moment it is
+    /// crossed.
+    #[test]
+    fn the_clock_starts_at_the_line_and_not_on_the_grid() {
+        let track = Track::any();
+        let start = track.start_transform();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<LapFinished>()
+            .init_resource::<LapTimer>()
+            .insert_resource(Track::any())
+            .add_systems(Update, (tick, gate).chain());
+        let car = app.world_mut().spawn((Car::default(), Player, start)).id();
+        app.update();
+        assert!(
+            !app.world().resource::<LapTimer>().running(),
+            "the clock started on the grid"
+        );
+
+        let mut here = start.translation;
+        let mut armed = None;
+        for _ in 0..200 {
+            let ground = track.ground(here);
+            here = ground.centre + ground.tangent * 0.5;
+            app.world_mut()
+                .get_mut::<Transform>(car)
+                .unwrap()
+                .translation = here;
+            app.update();
+            if app.world().resource::<LapTimer>().running() {
+                armed = Some(here);
+                break;
+            }
+        }
+        let armed = armed.expect("the clock never started");
+        let along = track.start_along(armed);
+        assert!(
+            (0.0..1.0).contains(&along),
+            "the clock started {along:.1} m from the line, not at it"
+        );
+        assert_eq!(
+            app.world().resource::<LapTimer>().current,
+            0.0,
+            "the lap began with time already on it"
+        );
     }
 }

@@ -461,4 +461,44 @@ mod tests {
             }
         }
     }
+
+    /// The run-up does what it is there for. The car is set down short of the
+    /// line so a lap can start at speed; this is what says it arrives with some.
+    /// Full throttle from the grid, and the speed as the line goes by.
+    ///
+    /// Spielberg and Monza have a straight behind their lines and reach 20 m/s
+    /// of the 22.2 the car actually holds on the flat. Spa has no straight at
+    /// all — its line is inside La Source — so it comes out of the hairpin at
+    /// half of that. Still a rolling start, and still Spa.
+    #[test]
+    fn the_run_up_reaches_the_line_at_speed() {
+        for circuit in crate::track::all_circuits() {
+            let track = Track::new(circuit);
+            let handling = Handling::SHOOTING_BRAKE;
+            let mut driver = Driver::new(Style::Plain);
+            let mut transform = track.start_transform().with_scale(Vec3::splat(SCALE));
+            let mut car = Car::default();
+            let dt = 1.0 / 240.0;
+            let mut was = track.start_along(transform.translation);
+            let mut at_the_line = None;
+            for _ in 0..240 * 20 {
+                let controls = driver.decide(&track, &handling, &transform, &car);
+                advance(&track, &handling, controls, &mut transform, &mut car, dt);
+                let along = track.start_along(transform.translation);
+                if was <= 0.0 && along > 0.0 {
+                    at_the_line = Some(car.velocity.length());
+                    break;
+                }
+                was = along;
+            }
+            let speed = at_the_line
+                .unwrap_or_else(|| panic!("{}: the run-up never reached the line", circuit.name));
+            assert!(
+                speed > 8.0,
+                "{}: the car crosses its own line at {speed:.1} m/s, which is \
+                 barely a start at all",
+                circuit.name
+            );
+        }
+    }
 }

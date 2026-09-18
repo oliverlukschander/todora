@@ -165,6 +165,16 @@ impl Ribbon {
         &self.stations[0]
     }
 
+    /// The station `back` metres before the start/finish line, the way the lap
+    /// runs. The stations are evenly spaced by construction, so this is
+    /// arithmetic on the spacing rather than a walk.
+    pub fn before_start(&self, back: f32) -> &Station {
+        let n = self.stations.len();
+        let step = self.length / n as f32;
+        let steps = (back / step).round() as usize % n;
+        &self.stations[(n - steps) % n]
+    }
+
     /// Tightest corner on the circuit. The cross-section may not reach past
     /// this, or its outer ribs cusp.
     pub fn min_radius(&self) -> f32 {
