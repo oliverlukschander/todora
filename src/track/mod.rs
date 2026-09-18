@@ -21,8 +21,8 @@
 //! loft, and knows where the start line is. The shape lives in [`ribbon`]; the
 //! cross-section in [`profile`].
 
-mod boards;
 mod circuits;
+mod markers;
 mod profile;
 mod ribbon;
 
