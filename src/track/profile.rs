@@ -18,6 +18,7 @@ use bevy::{
     asset::RenderAssetUsages, mesh::Indices, prelude::*, render::render_resource::PrimitiveTopology,
 };
 
+use super::boards;
 use super::ribbon::{Ribbon, Station};
 
 /// Half of the 8 m road, kerbs and edge lines included.
@@ -33,6 +34,12 @@ pub(super) const HALF_WIDTH: f32 = 4.0;
 pub(super) const TARMAC_HALF: f32 = 3.15;
 /// Height of the kerb's outer lip, which the verge hangs off.
 pub(super) const KERB_TOP: f32 = 0.05;
+/// Where the verge the braking markers are painted on gives way to grass. It is
+/// a strip of the same grass at the same height as the rest of it — the only
+/// thing that makes it its own band is that [`boards`] can paint on it, and
+/// unpainted it is invisible. Wide enough that a marker is a block beside the
+/// road rather than a line on the grass: 1.2 m, about the width of the car.
+const VERGE: f32 = 5.20;
 /// How far the cross-section reaches either side of the centreline on a circuit
 /// with room for all of it. A circuit with less gets less — see [`Profile::fit`].
 pub(super) const EDGE: f32 = 7.0;
@@ -79,12 +86,14 @@ pub(super) const GRASS_GRIP: f32 = 0.38;
 const PROFILE: &[(f32, f32, Band)] = &[
     (-EDGE, -0.95, Band::Skirt),
     (-6.00, -0.20, Band::Grass),
+    (-VERGE, -0.10, Band::Verge),
     (-HALF_WIDTH, KERB_TOP, Band::Kerb),
     (-3.30, 0.00, Band::Line),
     (-TARMAC_HALF, 0.00, Band::Tarmac),
     (TARMAC_HALF, 0.00, Band::Line),
     (3.30, 0.00, Band::Kerb),
-    (HALF_WIDTH, KERB_TOP, Band::Grass),
+    (HALF_WIDTH, KERB_TOP, Band::Verge),
+    (VERGE, -0.10, Band::Grass),
     (6.00, -0.20, Band::Skirt),
     (EDGE, -0.95, Band::End),
 ];
@@ -96,6 +105,9 @@ enum Band {
     Tarmac,
     Line,
     Kerb,
+    /// The strip of grass just outside the kerb, which is grass until a braking
+    /// marker is painted on it. See [`boards`].
+    Verge,
     Grass,
     Skirt,
     /// Closes the profile. No strip starts here.
@@ -109,14 +121,19 @@ impl Band {
     /// a stripe edge lands exactly on a strip edge instead of smearing across it.
     /// The ribbon rounds its station count so the pattern meets itself at the
     /// start/finish line.
-    fn paint(self, i: usize) -> [f32; 4] {
+    ///
+    /// `board` is whether a braking marker is painted at this station, which
+    /// only the verge answers to. The markers take the same white as the edge
+    /// lines: there is one white on the circuit, and it is the one the paint is.
+    fn paint(self, i: usize, board: bool) -> [f32; 4] {
         match self {
             Band::Tarmac if i < STRIPE => paint(0.90, 0.90, 0.88),
             Band::Tarmac => paint(0.15, 0.15, 0.17),
             Band::Line => paint(0.90, 0.90, 0.88),
             Band::Kerb if (i / STRIPE).is_multiple_of(2) => paint(0.76, 0.13, 0.11),
             Band::Kerb => paint(0.93, 0.93, 0.91),
-            Band::Grass => paint(0.33, 0.52, 0.24),
+            Band::Verge if board => paint(0.90, 0.90, 0.88),
+            Band::Verge | Band::Grass => paint(0.33, 0.52, 0.24),
             Band::Skirt | Band::End => paint(0.25, 0.42, 0.19),
         }
     }
@@ -191,6 +208,7 @@ impl Profile {
     pub(super) fn loft(&self, ribbon: &Ribbon) -> Mesh {
         let stations = ribbon.stations();
         let n = stations.len();
+        let marks = boards::marks(stations);
         let bands = self.ribs.len() - 1;
         let mut positions = Vec::with_capacity(n * bands * 4);
         let mut normals = Vec::with_capacity(n * bands * 4);
@@ -212,9 +230,9 @@ impl Profile {
                 across.cross(along).normalize_or(Vec3::Y).to_array()
             };
 
-            for i in 0..n {
+            for (i, &board) in marks.iter().enumerate() {
                 let j = (i + 1) % n;
-                let color = left.2.paint(i);
+                let color = left.2.paint(i, board);
                 for (station, side) in [(i, 0), (i, 1), (j, 0), (j, 1)] {
                     positions.push(rim[station][side].to_array());
                     normals.push(rim_normal(station, side));
@@ -277,6 +295,8 @@ pub(super) fn grip(lateral: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use bevy::mesh::VertexAttributeValues;
+
     use super::*;
     use crate::track::{Track, circuits, ribbon};
 
@@ -367,6 +387,46 @@ mod tests {
         }
     }
 
+    /// The markers get onto the road, on every circuit and on both sides of it.
+    /// What the [`boards`] tests cannot see: they check where a marker belongs,
+    /// this checks that the loft actually paints it there.
+    #[test]
+    fn the_markers_reach_the_mesh() {
+        for circuit in circuits::all() {
+            let track = Track::new(circuit);
+            let stations = track.ribbon.stations();
+            let n = stations.len();
+            let marked = boards::marks(stations).iter().filter(|m| **m).count();
+            assert!(marked > 0, "{} carries no markers at all", circuit.name);
+
+            let mesh = track.profile.loft(&track.ribbon);
+            let Some(VertexAttributeValues::Float32x4(colors)) =
+                mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+            else {
+                panic!("the loft lost its paint");
+            };
+            let white = paint(0.90, 0.90, 0.88);
+            // The loft lays the bands out in order, `n` quads of four vertices
+            // each, so a band's quad is where its rib says it is.
+            let painted = track
+                .profile
+                .ribs
+                .iter()
+                .enumerate()
+                .filter(|(_, rib)| rib.2 == Band::Verge)
+                .flat_map(|(band, _)| (0..n).map(move |i| (band * n + i) * 4))
+                .filter(|&v| colors[v] == white)
+                .count();
+            assert_eq!(
+                painted,
+                marked * 2,
+                "{}: {marked} stations of marker reached the mesh as {painted} \
+                 quads, and there are two verges",
+                circuit.name
+            );
+        }
+    }
+
     /// One stripe is a whole number of stations and the lap is a whole number of
     /// stripe pairs, so the kerb pattern meets itself at the start/finish line.
     #[test]
@@ -380,8 +440,11 @@ mod tests {
                 "{}: {n} stations breaks the stripe pattern",
                 circuit.name
             );
-            assert_eq!(Band::Kerb.paint(0), Band::Kerb.paint(n - STRIPE * 2));
-            assert_ne!(Band::Kerb.paint(0), Band::Kerb.paint(STRIPE));
+            assert_eq!(
+                Band::Kerb.paint(0, false),
+                Band::Kerb.paint(n - STRIPE * 2, false)
+            );
+            assert_ne!(Band::Kerb.paint(0, false), Band::Kerb.paint(STRIPE, false));
         }
     }
 
