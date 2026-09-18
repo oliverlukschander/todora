@@ -123,7 +123,10 @@ impl Band {
     }
 }
 
-fn paint(r: f32, g: f32, b: f32) -> [f32; 4] {
+/// One colour of the circuit's paint, linear for the vertex colour attribute.
+/// [`markers`] reads its palette through here too, so there is one place a
+/// colour is turned into what the mesh carries.
+pub(super) fn paint(r: f32, g: f32, b: f32) -> [f32; 4] {
     let c = Color::srgb(r, g, b).to_linear();
     [c.red, c.green, c.blue, c.alpha]
 }
@@ -235,18 +238,19 @@ impl Profile {
 
         // The corner markers, laid on the swept surface rather than into it: a
         // diamond is smaller than a station and is not a rectangle, so it is the
-        // one mark the sweep cannot make. See [`markers`]. Same mesh, same
-        // material, same white as the lines — one quad each, flat-shaded off its
-        // own corners, which is what the fall of the verge under it gives.
+        // one mark the sweep cannot make. See [`markers`], which brings its own
+        // colour with it. Same mesh and same material all the same — one quad
+        // each, flat-shaded off its own corners, which is what the fall of the
+        // verge under it gives.
         for diamond in markers::diamonds(stations, self) {
-            let normal = (diamond[1] - diamond[0])
-                .cross(diamond[2] - diamond[0])
+            let normal = (diamond.corners[1] - diamond.corners[0])
+                .cross(diamond.corners[2] - diamond.corners[0])
                 .normalize_or(Vec3::Y)
                 .to_array();
-            for corner in diamond {
+            for corner in diamond.corners {
                 positions.push(corner.to_array());
                 normals.push(normal);
-                colors.push(paint(0.90, 0.90, 0.88));
+                colors.push(diamond.color);
             }
             let base = (positions.len() - 4) as u32;
             indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -391,15 +395,16 @@ mod tests {
 
     /// The diamonds get onto the road, on every circuit and on both sides of
     /// it. What the [`markers`] tests cannot see: they check where a diamond
-    /// belongs and what shape it is, this checks that it reaches the mesh —
-    /// four white vertices apiece, on the end of the swept strips.
+    /// belongs, what shape it is and what colour it takes, this checks that all
+    /// of it reaches the mesh — four vertices of one colour apiece, on the end
+    /// of the swept strips, in every colour the palette has.
     #[test]
     fn the_diamonds_reach_the_mesh() {
         for circuit in circuits::all() {
             let track = Track::new(circuit);
             let stations = track.ribbon.stations();
-            let diamonds = markers::diamonds(stations, &track.profile).len();
-            assert!(diamonds > 0, "{} carries no diamonds at all", circuit.name);
+            let diamonds = markers::diamonds(stations, &track.profile);
+            assert!(!diamonds.is_empty(), "{} has no diamonds", circuit.name);
 
             let mesh = track.profile.loft(&track.ribbon);
             let Some(VertexAttributeValues::Float32x4(colors)) =
@@ -410,14 +415,25 @@ mod tests {
             let swept = stations.len() * (PROFILE.len() - 1) * 4;
             assert_eq!(
                 colors.len(),
-                swept + diamonds * 4,
+                swept + diamonds.len() * 4,
                 "{}: the diamonds did not reach the mesh",
                 circuit.name
             );
-            let white = paint(0.90, 0.90, 0.88);
-            assert!(
-                colors[swept..].iter().all(|&c| c == white),
-                "{} has a diamond that is not white",
+            for (diamond, quad) in diamonds.iter().zip(colors[swept..].chunks_exact(4)) {
+                assert!(
+                    quad.iter().all(|&c| c == diamond.color),
+                    "{}: a diamond reached the mesh in more than one colour",
+                    circuit.name
+                );
+            }
+            let mut shades: Vec<[f32; 4]> = diamonds.iter().map(|d| d.color).collect();
+            shades.dedup();
+            shades.sort_by(|a, b| a.partial_cmp(b).expect("colours are numbers"));
+            shades.dedup();
+            assert_eq!(
+                shades.len(),
+                markers::PALETTE_LEN,
+                "{} does not use the whole palette",
                 circuit.name
             );
         }
