@@ -72,6 +72,35 @@ const GOING_NOWHERE: f32 = 1.5;
 /// at 75 Spielberg sets it down sideways, mid-corner. `the_grid_is_a_run_up_to
 /// _the_line` is what holds that.
 const RUN_UP: f32 = 45.0;
+/// How much of a lap may sit at [`ribbon::MAX_GRADE`] before the cap has
+/// stopped backing the hills up and started being their shape. At the cap the
+/// game ships with, the worst circuit is Spa at 16%, then Imola at 9% and
+/// Spielberg at 7%; halve the cap and Spa is at 67% and Spielberg at 60%, which
+/// is every hill on both of them coming out as the same ramp.
+#[cfg(test)]
+const PINNED_TO_THE_CAP: f32 = 0.25;
+
+/// How much of its relief a circuit has to bring through the smoothing. Lower
+/// than it looks, because the smoothing span is fixed in metres while relief is
+/// not: a circuit whose height is in short features loses more of it than one
+/// whose height is in long climbs. Las Vegas is the worst of them at 73%, its
+/// rises being underpasses shorter than the span they are averaged over.
+#[cfg(test)]
+const KEPT_RELIEF: f32 = 0.7;
+
+/// How far behind the start plane the grid has to read, at the very least. Two
+/// car lengths: nearer than that and the lap would begin before the driver had
+/// touched anything.
+#[cfg(test)]
+const CLEAR_OF_THE_LINE: f32 = 5.0;
+
+/// Relief a circuit may lose to smoothing however flat it is, in metres of
+/// Todora height. Three and a half steps of a DEM quantised to the metre, at
+/// [`HEIGHT_SCALE`]: below this, what was lost is under the resolution of what
+/// the elevation model was able to say in the first place.
+#[cfg(test)]
+const FLATTENED: f32 = 1.0;
+
 /// How much of a circuit has to survive being shrunk and having its corners
 /// opened for what is left to still be that circuit. See [`Ribbon::kept`]: the
 /// two in the game keep about nine tenths, and a circuit that keeps a quarter
@@ -403,16 +432,33 @@ mod tests {
             .map(|circuit| (circuit.name, Track::new(circuit)))
     }
 
-    /// Two things at once, on every circuit. No step is steeper than the cap —
-    /// the DEM is quantised to whole metres and the plan is shrunk five times
-    /// harder than the height, so an unsmoothed step would read as a wall. And
-    /// almost all of the relief the trace carried survives being smoothed and
-    /// capped, which is the other way round: a cap low enough to iron the hills
-    /// flat would pass the first check and fail this one.
+    /// Three things at once, on every circuit.
+    ///
+    /// No step is steeper than the cap — the DEM is quantised to whole metres
+    /// and the plan is shrunk five times harder than the height, so an
+    /// unsmoothed step would read as a wall.
+    ///
+    /// Little of the lap is *pinned* to that cap, which is what says the cap is
+    /// backing the hills up rather than shaping them. This is the one that
+    /// catches a cap set too low, and it catches it directly: halving the cap
+    /// takes Spa from a sixth of its lap pinned to two thirds of it.
+    ///
+    /// And most of the relief the trace carried survives the smoothing, which
+    /// catches the other end — a span long enough to iron the circuits flat.
+    /// This one has to be read carefully, because the span is in metres and the
+    /// relief is not: see [`KEPT_RELIEF`] and [`FLATTENED`].
     ///
     /// Stated as a fraction rather than as metres, because the circuits are not
     /// equally hilly. Spa rises 27 m and Monza 6, and Monza is not broken — it
     /// is Monza.
+    ///
+    /// A fraction on its own is not enough at the flat end, though, because the
+    /// smoothing span is fixed in metres while the relief is not: the flatter a
+    /// circuit is, the larger a share of it 24 m of averaging takes. Mexico City
+    /// climbs 5 m in life, which is 1.4 m here, and comes out with 0.9 of them.
+    /// So a circuit passes on either count — it kept most of its relief, or what
+    /// it lost is under [`FLATTENED`], which is below the resolution of the
+    /// question being asked.
     #[test]
     fn hills_roll_instead_of_stepping() {
         for (name, track) in every_track() {
@@ -430,6 +476,21 @@ mod tests {
                 "{name}: max grade {steepest} is past the cap of {}",
                 ribbon::MAX_GRADE
             );
+            let pinned = (0..n)
+                .filter(|&i| {
+                    let a = stations[i].pos;
+                    let b = stations[(i + 1) % n].pos;
+                    let run = Vec3::new(b.x - a.x, 0.0, b.z - a.z).length().max(1e-4);
+                    (b.y - a.y).abs() / run > ribbon::MAX_GRADE * 0.98
+                })
+                .count() as f32
+                / n as f32;
+            assert!(
+                pinned < PINNED_TO_THE_CAP,
+                "{name}: {:.0}% of the lap is pinned to the grade cap, which is \
+                 the cap doing the shaping rather than backing it up",
+                pinned * 100.0
+            );
 
             let (low, high) = stations.iter().fold((f32::MAX, f32::MIN), |(l, h), s| {
                 (l.min(s.pos.y), h.max(s.pos.y))
@@ -440,8 +501,9 @@ mod tests {
                 .iter()
                 .fold((f32::MAX, f32::MIN), |(l, h), p| (l.min(p[1]), h.max(p[1])));
             let wanted = (raw_high - raw_low) * HEIGHT_SCALE;
+            let lost = wanted - (high - low);
             assert!(
-                high - low > 0.8 * wanted,
+                high - low > KEPT_RELIEF * wanted || lost < FLATTENED,
                 "{name}: smoothing left {:.1} m of the {wanted:.1} m the circuit climbs",
                 high - low
             );
@@ -670,41 +732,50 @@ mod tests {
         }
     }
 
-    /// The grid is a run-up, and a run-up has to be usable. It sits behind the
-    /// line by [`RUN_UP`] as the lap runs — which the line's own plane has to
-    /// agree with, because that plane is what the clock reads to know the car
-    /// has arrived — and it faces down the circuit rather than across it.
+    /// The grid is a run-up, and a run-up has to be usable.
     ///
-    /// The bar is what "across it" means, and it is loose on purpose. A car set
-    /// down in the exit of the last corner is not a problem; that is where 45 m
-    /// before a start/finish line usually *is*. Silverstone's grid faces 29
-    /// degrees off its line because it sits in the exit of Woodcote, and the car
-    /// still arrives doing 19.5 m/s — better than Monza. What a tighter bar here
-    /// would catch is circuits that are fine, and what it would not catch is a
-    /// run-up that is straight and still useless. How much speed the car
-    /// actually brings to the line is a question for the car, so it is asked
-    /// where the car is: `the_run_up_reaches_the_line_at_speed`.
+    /// Three things, and the first is what the grid *means*: it is [`RUN_UP`]
+    /// metres back along the road, measured round the circuit the way a lap is.
+    ///
+    /// The second is that the start plane agrees it is behind there, with room
+    /// to spare — that plane is what the clock reads to know the car has
+    /// arrived, and a grid sitting on it would start the lap before the driver
+    /// touched anything. How far behind it reads is *not* the run-up and cannot
+    /// be asked to be: the plane measures a straight line while the road bends,
+    /// so the two only agree where the run-up is straight. Mexico City's last
+    /// 45 m are the stadium section, which turns the car through most of a half
+    /// circle, so its grid reads 19 m behind the plane while being 45 m behind
+    /// the line.
+    ///
+    /// The third is that the car faces the way the lap runs *where it is put
+    /// down*, which is not the way the line faces and must not be confused with
+    /// it. This used to ask for the two to agree within 20 degrees, which was
+    /// only ever true of circuits whose run-up happened to be straight: Mexico
+    /// City's grid faces 155 degrees away from its line and is perfectly correct
+    /// — it is pointing down the stadium section, which is where the road goes.
+    /// What a bent run-up costs is speed at the line, and that is asked where
+    /// the car is, in `the_run_up_reaches_the_line_at_speed`.
     #[test]
     fn the_grid_is_a_run_up_to_the_line() {
         for (name, track) in every_track() {
             let pose = track.start_transform();
+            let back = (1.0 - track.progress(pose.translation)) * track.ribbon.length();
+            assert!(
+                (RUN_UP - 1.0..RUN_UP + 1.0).contains(&back),
+                "{name} sets the car down {back:.1} m back along the road, not {RUN_UP}"
+            );
+
             let along = track.start_along(pose.translation);
             assert!(
-                (-RUN_UP - 1.0..-RUN_UP * 0.9).contains(&along),
-                "{name} reads {along:.1} m behind a line it is set down {RUN_UP} m from"
+                (-RUN_UP - 1.0..=-CLEAR_OF_THE_LINE).contains(&along),
+                "{name} reads {along:.1} m behind its own start plane"
             );
-            let turn = level(*pose.forward())
-                .dot(track.ribbon.start().tangent)
-                .acos()
-                .to_degrees();
+
+            let here = track.ribbon.locate(pose.translation);
             assert!(
-                turn < 45.0,
-                "{name} sets the car down {turn:.0} degrees off the line, which is \
-                 across it rather than down it"
+                level(*pose.forward()).dot(here.tangent) > 0.99,
+                "{name} sets the car down across its own road rather than down it"
             );
-            // And the way out of the grid is toward the line, not away from it.
-            let ahead = pose.translation + *pose.forward() * 3.0;
-            assert!(track.start_along(ahead) > along, "{name} faces backwards");
         }
     }
 
@@ -805,6 +876,55 @@ mod tests {
         );
     }
 
+    /// What every circuit came out as: the table the bars in these tests are set
+    /// against, and the first thing to look at when a new one will not go in.
+    ///
+    /// `cargo test --locked --lib the_circuits -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn the_circuits() {
+        println!(
+            "{:<26}{:>8}{:>7}{:>7}{:>8}{:>9}{:>8}",
+            "circuit", "lap", "kept", "edge", "pinned", "straight", "relief"
+        );
+        for (name, track) in every_track() {
+            let stations = track.ribbon.stations();
+            let n = stations.len();
+            let grade = |i: usize| {
+                let (a, b) = (stations[i].pos, stations[(i + 1) % n].pos);
+                let run = Vec3::new(b.x - a.x, 0.0, b.z - a.z).length().max(1e-4);
+                (b.y - a.y).abs() / run
+            };
+            let pinned = (0..n)
+                .filter(|&i| grade(i) > ribbon::MAX_GRADE * 0.98)
+                .count();
+            let window = (40.0 / (track.ribbon.length() / n as f32)) as usize;
+            let straight = (0..n)
+                .filter(|&i| {
+                    let from = stations[i].pos;
+                    let flat = |v: Vec3| Vec3::new(v.x, 0.0, v.z);
+                    let dir = flat(stations[(i + window) % n].pos - from).normalize_or(Vec3::X);
+                    (0..=window).all(|k| {
+                        let off = flat(stations[(i + k) % n].pos - from);
+                        (off - dir * off.dot(dir)).length() <= TARMAC_HALF
+                    })
+                })
+                .count();
+            let (low, high) = stations.iter().fold((f32::MAX, f32::MIN), |(l, h), s| {
+                (l.min(s.pos.y), h.max(s.pos.y))
+            });
+            println!(
+                "{name:<26}{:>7.0}m{:>6.0}%{:>6.2}m{:>7.0}%{:>8.0}%{:>7.1}m",
+                track.ribbon.length(),
+                track.ribbon.kept() * 100.0,
+                track.profile.edge(),
+                100.0 * pinned as f32 / n as f32,
+                100.0 * straight as f32 / n as f32,
+                high - low,
+            );
+        }
+    }
+
     /// A corner has to be a corner: something the driver goes round, not a bend
     /// the road is wide enough to ignore.
     ///
@@ -853,7 +973,10 @@ mod tests {
     fn the_menu_can_reach_every_circuit() {
         let all = all_circuits();
         assert!(all.len() > 1, "there is only one circuit to list");
-        assert_eq!(all[0].id, circuits::first().id, "the game opens off-list");
+        assert!(
+            all.iter().any(|c| c.id == circuits::first().id),
+            "the game opens on a circuit the menu cannot reach"
+        );
         for (at, circuit) in all.iter().enumerate() {
             assert_eq!(circuit_at(circuit), at, "{} is listed twice", circuit.name);
             assert!(

@@ -1,8 +1,8 @@
 # Todora
 
-A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy.org/). Drive a comic shooting-brake around scaled real circuits — the Red Bull Ring, Spa-Francorchamps, Monza and Silverstone so far, with **T** for the list of them.
+A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy.org/). Drive a comic shooting-brake around seventeen scaled real circuits, with **T** for the list of them.
 
-The car is the ruler (~2.4 m long, ~1.1 m wide). Every circuit is shrunk the same way — the same 0.4⁄3 in plan, the same 0.28 in elevation, the same 8 m road — so they are comparable: Spielberg comes out a 528 m lap, Silverstone 691 m, Monza 855 m and Spa, which is half again as long as Spielberg in life, 868 m. Scaling each circuit to a target length instead would have made the long ones tighter and the short ones emptier, and the same lap time would have meant a different thing on each.
+The car is the ruler (~2.4 m long, ~1.1 m wide). Every circuit is shrunk the same way — the same 0.4⁄3 in plan, the same 0.28 in elevation, the same 8 m road — so they are comparable: the shortest lap is Mexico City's 456 m and the longest is Spa's 868 m, which is half again as long as Spielberg's 528 in life and comes out half again as long here. Scaling each circuit to a target length instead would have made the long ones tighter and the short ones emptier, and the same lap time would have meant a different thing on each.
 
 The hills come from a real elevation model and are kept as steep as it says, within a backstop. That backstop used to do the shaping rather than back it up: at 12% nearly half of Spielberg and well over half of Spa came out pinned to it, so every hill was the same ramp and only its length varied. Eau Rouge had neither a dip to drop into nor a climb to haul out of. At 20% the model shapes it again — Eau Rouge steepens through the compression the way it should, and a long descent now carries the car past its own top speed, because the engine stops pushing at the limiter and gravity does not.
 
@@ -44,15 +44,15 @@ Your fastest lap drives again alongside you as a ghost — a translucent copy of
 
 The ghost outlives the session. Beat your own time and the lap is written out — a few thousand poses against the clock, one file per circuit, under `Library/Application Support/Todora/laps` on a Mac. Come back tomorrow and it is on the grid with you, its time already on the board as **BEST**. The file carries a fingerprint of the finished centreline — not of the trace it came from, so it moves when anything that shapes a circuit moves, the scales and the smoothing and the grade backstop included. A lap saved around one shape is quietly not a lap any more rather than a car driving through the scenery. Nothing about saving is allowed to be a problem: nowhere to write, a half-written file, a file somebody has edited — each one means no ghost, said once in the log, and a game that carries on.
 
-Three cars, and the same shooting brake three times over — the promise that everything a car is lives in one `Handling` value, cashed: a second car is data rather than code. **C** opens the garage. The **Tourer** is the one the game has always shipped, green, and the middle of everything. The **Clubman** is red and holds on: more grip and more downforce, and it runs out of engine at 18.7 m/s where the Tourer goes to 22.2. The **Express** is silver and does the opposite — least grip, and still pulling at 26.0 m/s. They are balanced by lapping rather than by taste: the plain driver takes all three round every circuit, each of them is quickest somewhere, and no circuit spreads them by more than 2.2%.
+Three cars, and the same shooting brake three times over — the promise that everything a car is lives in one `Handling` value, cashed: a second car is data rather than code. **C** opens the garage. The **Tourer** is the one the game has always shipped, green, and the middle of everything. The **Clubman** is red and holds on: more grip and more downforce, and it runs out of engine at 18.7 m/s where the Tourer goes to 22.2. The **Express** is silver and does the opposite — least grip, and still pulling at 26.0 m/s. They are balanced by lapping rather than by taste: the plain driver takes all three round every circuit, and each of them is quickest somewhere.
 
-| | settles at | hardest stop | Red Bull Ring | Spa | Monza |
+| | settles at | hardest stop | Imola | Spa | Las Vegas |
 |---|---|---|---|---|---|
-| Tourer | 22.2 m/s | 9.9 m | **41.20** | 70.33 | 64.90 |
-| Clubman | 18.7 m/s | 4.6 m | 41.55 | **69.94** | 65.50 |
-| Express | 26.0 m/s | 16.0 m | 41.33 | 71.48 | **64.71** |
+| Tourer | 22.2 m/s | 9.9 m | **44.53** | 70.33 | 52.99 |
+| Clubman | 18.7 m/s | 4.6 m | 44.71 | **69.94** | 54.85 |
+| Express | 26.0 m/s | 16.0 m | 44.60 | 71.48 | **52.23** |
 
-`no_car_is_the_car_to_pick` holds both halves of that: nobody far off the pace anywhere, so the menu has no wrong answer in it, and the quickest car not the same one everywhere, so it has no right one. A menu with either is not a choice. The stars in it are held to the numbers too — a car cannot be retuned into disagreeing with its own entry. Changing car gives up the lap in progress, because half a lap in one car and half in another is not a lap in either; the board and the ghost stay, because they belong to the circuit.
+Over all seventeen the Tourer is quickest on seven, the Clubman on six and the Express on four, and the widest any circuit spreads them is 5% — Las Vegas, which is the one with the most road to use, won by the car built to use it. Imola spreads them by 0.4%. `no_car_is_the_car_to_pick` holds both halves of that: nobody far off the pace anywhere, so the menu has no wrong answer in it, and the quickest car not the same one everywhere, so it has no right one. A menu with either is not a choice. The stars in it are held to the numbers too — a car cannot be retuned into disagreeing with its own entry. Changing car gives up the lap in progress, because half a lap in one car and half in another is not a lap in either; the board and the ghost stay, because they belong to the circuit.
 
 The setup slider and the garage meet in one order: the car is the baseline and the slider is the lean on top of it. Each notch scales what the car brings rather than replacing it, so the middle notch is exactly the car as it is and the grippy car on oversteer is a grippy car that has been loosened — not a different car wearing its badge. Setting the five dials outright, which is what the slider used to do, would have made all three cars identical at both ends of the slider and different only in the middle.
 
@@ -88,13 +88,29 @@ That is the whole job. The id is a circuit in [bacinger/f1-circuits](https://git
 
 A circuit then has to earn its place, and the tests are what decide. Corners tighter than the loft can carry are opened out before the road is swept, which cuts them; the circuits in the game keep between four fifths and all of it that way; a circuit that keeps far less has been rounded off into a ring rather than shrunk, and `every_circuit_survives_the_shrink` is what says so. What a circuit can carry either side of the road it settles for itself: the 8 m road never moves, and the verge narrows to fit the tightest corner and the closest the circuit comes to itself. So adding one is additive — a circuit with less room gets a narrower verge instead of everyone else getting one.
 
-Some circuits do not earn it, and the two most asked for are both out for reasons worth writing down.
+Seventeen of the forty circuits in the source clear it. The other twenty-three fail in one of three ways, and the two most asked for are one each of the first two, so they are worth writing down.
+
+| | circuits | why |
+|---|---|---|
+| in the game | 17 | |
+| does not survive the shrink | 15 | its corners are nearly all tighter than the loft can carry, so opening them eats the lap |
+| no room for a road and a verge | 6 | it runs too close to itself somewhere, so the cross-section has nowhere to go |
+| crosses over itself | 2 | Suzuka and the Nürburgring |
+
 
 **Monaco** does not survive the shrink. Opened to the 10 m corners the loft needs, it keeps a quarter of its lap: 3.3 km of street circuit comes out as a 105 m ring with nothing in it. Lowering the target does not rescue it, which is the part worth knowing before anyone tries — at 5 m it keeps 82% and laps a respectable 340 m, and then passes within 3.95 m of itself, which leaves 1.98 m either side of the centreline to put an 8 m road on. Monaco is not too tight in its corners so much as too tight in its land, and this game's road is five times too wide for the land already.
 
 **Suzuka** crosses over itself. It is the one circuit on the calendar that does, and Todora's circuit is one closed ribbon carrying one surface: what the car is standing on is found by asking which point of the centreline is nearest, and at a crossing there are two answers. The existing separation check catches it without being asked to — the two stretches come within 0.12 m of each other in plan, which allows a cross-section of 0.06 m where a road and a verge need 5.5 m. Making it work is a bridge, not a circuit: a lookup that picks by height as well as by plan, an elevation model that knows the bridge is there (the 90 m one this uses does not — it reads both stretches at the same height), and a loft that can carry one road over another.
 
 Both are said by tests that were already there, written for the three circuits that came first. That is the point of them.
+
+What every circuit that did get in came out as:
+
+```sh
+cargo test --locked --lib the_circuits -- --ignored --nocapture
+```
+
+Laps run from 456 m to 868 m. All but one carry the full 7 m cross-section — Paul Ricard settles for 6.84 m — and every one of them keeps at least three quarters of its lap through the corner-opening pass. A 40 m straight fits down between 28% of Losail and 55% of Las Vegas, against a bar of 60%.
 
 ## Checks
 
@@ -104,7 +120,7 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --all-targets
 ```
 
-Tests cover acceleration, braking, reverse, slopes, grass, drift recovery, all three setups, wall impacts, lap validation and ghost recording. Every circuit in the game is held to the same bar — it survives the shrink, carries a road, laps as one lap, closes its kerb stripes at the line, starts on the tarmac, marks its corners with a line of diamonds all the same shape and all the same distance apart, running through its palette once over every braking zone, laid round the bend as well as up to it, standing on the verge with no face of them near vertical and never anywhere there is no bend, keeps most of the relief its elevation model gave it, has corners a straight line does not fit down, and is lapped by both AI drivers within a time budget set by its own length — so a new one either clears it or fails loudly. The relief is checked as a fraction rather than in metres, because Spa rises 27 m and Monza 6, and Monza is not broken. A restart keeps the board and the ghost while a switch clears both, the track key builds the next circuit before anything puts itself back, and the saved lap is checked both ways round and against every way a file can be wrong. The schedule tests compare equal driving time across different frame rates and stalls, and check that resets and setup changes reach the next physics step. Mixed-input stress tests check finite values and bounded speeds and forces. AI drivers exercise every circuit through the same movement path as the game, which is the net under the hills: a climb the car cannot take or a descent it cannot stop on fails there rather than under the player.
+Tests cover acceleration, braking, reverse, slopes, grass, drift recovery, all three setups on all three cars, wall impacts, lap validation and ghost recording. Every circuit in the game is held to the same bar — it survives the shrink, carries a road, laps as one lap, closes its kerb stripes at the line, starts on the tarmac, marks its corners with a line of diamonds all the same shape and all the same distance apart, running through its palette once over every braking zone, laid round the bend as well as up to it, standing on the verge with no face of them near vertical and never anywhere there is no bend, keeps most of the relief its elevation model gave it without leaning on the grade cap to shape its hills, has corners a straight line does not fit down, and is lapped by both AI drivers within a time budget set by its own length — so a new one either clears it or fails loudly. The relief is checked as a fraction rather than in metres, because Spa rises 27 m and Monza 6, and Monza is not broken. A restart keeps the board and the ghost while a switch clears both, the track key builds the next circuit before anything puts itself back, and the saved lap is checked both ways round and against every way a file can be wrong. The schedule tests compare equal driving time across different frame rates and stalls, and check that resets and setup changes reach the next physics step. Mixed-input stress tests check finite values and bounded speeds and forces. AI drivers exercise every circuit through the same movement path as the game, which is the net under the hills: a climb the car cannot take or a descent it cannot stop on fails there rather than under the player.
 
 Run the optional handling reports — the garage's balance table among them — with:
 

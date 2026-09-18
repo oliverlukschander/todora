@@ -9,10 +9,23 @@
 //! Adding one is a file and a line: run `tools/make_track.py` against an id from
 //! bacinger/f1-circuits and it writes the module and registers it here.
 
+mod albert_park;
+mod americas;
+mod bahrain;
+mod gilles_villeneuve;
+mod hermanos_rodriguez;
+mod imola;
+mod indianapolis;
+mod istanbul_park;
+mod las_vegas;
+mod losail;
+mod marina_bay;
 mod monza;
+mod paul_ricard;
 mod red_bull_ring;
 mod silverstone;
 mod spa_francorchamps;
+mod watkins_glen;
 
 pub(crate) struct Circuit {
     /// Stable and file-safe: it names the lap saved to disk.
@@ -31,17 +44,35 @@ pub(crate) struct Circuit {
     pub(crate) centreline: &'static [[f32; 3]],
 }
 
-/// In the order the track key walks them.
+/// Every circuit, in the order the menu lists them, which is alphabetical:
+/// seventeen of them is too many to remember a running order for, and a
+/// list you can find a name in is worth more than one that tells you which
+/// was added when.
 const ALL: &[Circuit] = &[
-    red_bull_ring::CIRCUIT,
-    spa_francorchamps::CIRCUIT,
+    albert_park::CIRCUIT,
+    americas::CIRCUIT,
+    bahrain::CIRCUIT,
+    gilles_villeneuve::CIRCUIT,
+    hermanos_rodriguez::CIRCUIT,
+    imola::CIRCUIT,
+    indianapolis::CIRCUIT,
+    istanbul_park::CIRCUIT,
+    las_vegas::CIRCUIT,
+    losail::CIRCUIT,
+    marina_bay::CIRCUIT,
     monza::CIRCUIT,
+    paul_ricard::CIRCUIT,
+    red_bull_ring::CIRCUIT,
     silverstone::CIRCUIT,
+    spa_francorchamps::CIRCUIT,
+    watkins_glen::CIRCUIT,
 ];
 
-/// The circuit the game opens on.
+/// The circuit the game opens on. Named rather than taken off the top of the
+/// list, because the list is alphabetical and the Red Bull Ring is not — it is
+/// the one Todora was built around, and the shortest lap of the seventeen.
 pub(crate) fn first() -> &'static Circuit {
-    &ALL[0]
+    &red_bull_ring::CIRCUIT
 }
 
 /// Where `circuit` sits in the list, which is where the menu opens its cursor.

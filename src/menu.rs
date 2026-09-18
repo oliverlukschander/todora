@@ -129,9 +129,15 @@ const PIP: f32 = 7.0;
 const PIP_GAP: f32 = 3.0;
 const OUT_OF: u8 = 5;
 /// The cursor's gutter, the width a name is given, and one rating's own width.
+/// The name column is wide enough for the longest there is — "Circuit of the
+/// Americas" — because a name that wrapped onto a second line would make one row
+/// twice the height of the others and the list would stop being a list.
 const CURSOR: f32 = 12.0;
-const NAME: f32 = 108.0;
+const NAME: f32 = 208.0;
 const RATING: f32 = OUT_OF as f32 * (PIP + PIP_GAP) + 14.0;
+/// One row, and the type on it. Small enough that seventeen circuits and the
+/// two lines around them are a panel rather than a page.
+const ROW: f32 = 15.0;
 
 /// A part of the panel that is shown or not shown.
 ///
@@ -158,141 +164,156 @@ struct Title;
 struct RowName;
 
 fn setup(mut commands: Commands) {
+    // The panel is centred by a sheet the size of the screen rather than by
+    // being nudged half its own width to the left, because how tall and how wide
+    // it comes out depends on which page is up and how many rows that page has.
     commands
         .spawn((
             Piece::Panel,
             Node {
                 display: Display::None,
                 position_type: PositionType::Absolute,
-                top: percent(26),
-                left: percent(50),
-                margin: UiRect::left(px(-(CURSOR * 2.0 + NAME + 3.0 * RATING) / 2.0)),
-                // One width whichever page is up: a panel that changed size
-                // under the cursor would move the row the cursor is on.
-                min_width: px(CURSOR * 2.0 + NAME + 3.0 * RATING),
-                padding: UiRect::axes(px(18), px(14)),
-                border: UiRect::all(px(2)),
-                flex_direction: FlexDirection::Column,
-                row_gap: px(4),
+                top: px(0),
+                left: px(0),
+                width: percent(100),
+                height: percent(100),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(FRONT),
-            BorderColor::all(AMBER_DIM),
         ))
-        .with_children(|panel| {
-            panel.spawn((
-                Title,
-                Text::new(""),
-                TextFont {
-                    font_size: FontSize::Px(20.0),
-                    ..default()
-                },
-                TextColor(AMBER),
-                Node {
-                    margin: UiRect::bottom(px(6)),
-                    ..default()
-                },
-            ));
-
-            panel
+        .with_children(|sheet| {
+            sheet
                 .spawn((
-                    Piece::Heading,
                     Node {
-                        flex_direction: FlexDirection::Row,
-                        margin: UiRect::left(px(CURSOR * 2.0 + NAME)),
+                        // One width whichever page is up: a panel that changed
+                        // size under the cursor would move the row it is on.
+                        min_width: px(CURSOR * 2.0 + NAME + 3.0 * RATING),
+                        padding: UiRect::axes(px(18), px(14)),
+                        border: UiRect::all(px(2)),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: px(4),
                         ..default()
                     },
+                    BackgroundColor(FRONT),
+                    BorderColor::all(AMBER_DIM),
                 ))
-                .with_children(|heading| {
-                    for label in ["HANDLING", "ACCEL", "TOP"] {
-                        heading.spawn((
-                            Node {
-                                width: px(RATING),
-                                ..default()
-                            },
-                            children![(
-                                Text::new(label),
-                                TextFont {
-                                    font_size: FontSize::Px(10.0),
-                                    ..default()
-                                },
-                                TextColor(AMBER_DIM),
-                            )],
-                        ));
-                    }
-                });
+                .with_children(|panel| {
+                    panel.spawn((
+                        Title,
+                        Text::new(""),
+                        TextFont {
+                            font_size: FontSize::Px(20.0),
+                            ..default()
+                        },
+                        TextColor(AMBER),
+                        Node {
+                            margin: UiRect::bottom(px(6)),
+                            ..default()
+                        },
+                    ));
 
-            for page in Page::ALL {
-                for (at, (name, stars)) in page.entries().into_iter().enumerate() {
                     panel
                         .spawn((
-                            Piece::Row { page, at },
+                            Piece::Heading,
                             Node {
-                                display: Display::None,
                                 flex_direction: FlexDirection::Row,
-                                align_items: AlignItems::Center,
-                                padding: UiRect::axes(px(0), px(3)),
+                                margin: UiRect::left(px(CURSOR * 2.0 + NAME)),
                                 ..default()
                             },
                         ))
-                        .with_children(|row| {
-                            row.spawn((
-                                RowName,
-                                Text::new(name),
-                                TextFont {
-                                    font_size: FontSize::Px(16.0),
-                                    ..default()
-                                },
-                                TextColor(AMBER_DIM),
-                                Node {
-                                    width: px(CURSOR + NAME),
-                                    margin: UiRect::left(px(CURSOR)),
-                                    ..default()
-                                },
-                            ));
-                            for (_, out_of_five) in stars.into_iter().flat_map(Stars::rows) {
-                                row.spawn((
+                        .with_children(|heading| {
+                            for label in ["HANDLING", "ACCEL", "TOP"] {
+                                heading.spawn((
                                     Node {
                                         width: px(RATING),
-                                        flex_direction: FlexDirection::Row,
-                                        align_items: AlignItems::Center,
                                         ..default()
                                     },
-                                    Children::spawn(SpawnIter((0..OUT_OF).map(move |i| {
-                                        (
-                                            Node {
-                                                width: px(PIP),
-                                                height: px(PIP),
-                                                margin: UiRect::right(px(PIP_GAP)),
-                                                border: UiRect::all(px(1)),
-                                                ..default()
-                                            },
-                                            BackgroundColor(if i < out_of_five {
-                                                AMBER
-                                            } else {
-                                                Color::NONE
-                                            }),
-                                            BorderColor::all(AMBER_DIM),
-                                        )
-                                    }))),
+                                    children![(
+                                        Text::new(label),
+                                        TextFont {
+                                            font_size: FontSize::Px(10.0),
+                                            ..default()
+                                        },
+                                        TextColor(AMBER_DIM),
+                                    )],
                                 ));
                             }
                         });
-                }
-            }
 
-            panel.spawn((
-                Text::new("UP / DOWN — MOVE     ENTER — TAKE     ESC — BACK"),
-                TextFont {
-                    font_size: FontSize::Px(11.0),
-                    ..default()
-                },
-                TextColor(AMBER_DIM),
-                Node {
-                    margin: UiRect::top(px(8)),
-                    ..default()
-                },
-            ));
+                    for page in Page::ALL {
+                        for (at, (name, stars)) in page.entries().into_iter().enumerate() {
+                            panel
+                                .spawn((
+                                    Piece::Row { page, at },
+                                    Node {
+                                        display: Display::None,
+                                        flex_direction: FlexDirection::Row,
+                                        align_items: AlignItems::Center,
+                                        padding: UiRect::axes(px(0), px(2)),
+                                        ..default()
+                                    },
+                                ))
+                                .with_children(|row| {
+                                    row.spawn((
+                                        RowName,
+                                        Text::new(name),
+                                        TextFont {
+                                            font_size: FontSize::Px(ROW),
+                                            ..default()
+                                        },
+                                        TextColor(AMBER_DIM),
+                                        Node {
+                                            width: px(CURSOR + NAME),
+                                            margin: UiRect::left(px(CURSOR)),
+                                            ..default()
+                                        },
+                                    ));
+                                    for (_, out_of_five) in stars.into_iter().flat_map(Stars::rows)
+                                    {
+                                        row.spawn((
+                                            Node {
+                                                width: px(RATING),
+                                                flex_direction: FlexDirection::Row,
+                                                align_items: AlignItems::Center,
+                                                ..default()
+                                            },
+                                            Children::spawn(SpawnIter((0..OUT_OF).map(move |i| {
+                                                (
+                                                    Node {
+                                                        width: px(PIP),
+                                                        height: px(PIP),
+                                                        margin: UiRect::right(px(PIP_GAP)),
+                                                        border: UiRect::all(px(1)),
+                                                        ..default()
+                                                    },
+                                                    BackgroundColor(if i < out_of_five {
+                                                        AMBER
+                                                    } else {
+                                                        Color::NONE
+                                                    }),
+                                                    BorderColor::all(AMBER_DIM),
+                                                )
+                                            }))),
+                                        ));
+                                    }
+                                });
+                        }
+                    }
+
+                    panel.spawn((
+                        Text::new("UP / DOWN — MOVE     ENTER — TAKE     ESC — BACK"),
+                        TextFont {
+                            font_size: FontSize::Px(11.0),
+                            ..default()
+                        },
+                        TextColor(AMBER_DIM),
+                        Node {
+                            margin: UiRect::top(px(8)),
+                            ..default()
+                        },
+                    ));
+                });
         });
 }
 
@@ -580,9 +601,10 @@ mod tests {
         app.update();
         press(&mut app, KeyCode::KeyT);
         assert_eq!(app.world().resource::<Menu>().page, Some(Page::Circuit));
+        let driving = circuit_at(app.world().resource::<Track>().circuit());
         assert_eq!(
             app.world().resource::<Menu>().at,
-            0,
+            driving,
             "the cursor did not open on the circuit being driven"
         );
 
@@ -595,7 +617,8 @@ mod tests {
             .iter_current_update_messages()
             .map(|GoTo(circuit)| circuit.id)
             .collect();
-        assert_eq!(asked, vec![all_circuits()[1].id]);
+        let next = (driving + 1).min(all_circuits().len() - 1);
+        assert_eq!(asked, vec![all_circuits()[next].id]);
         assert_eq!(
             app.world().resource::<Messages<Reset>>().len(),
             0,
