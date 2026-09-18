@@ -236,24 +236,27 @@ impl Profile {
             }
         }
 
-        // The corner markers, laid on the swept surface rather than into it: a
-        // diamond is smaller than a station and is not a rectangle, so it is the
-        // one mark the sweep cannot make. See [`markers`], which brings its own
-        // colour with it. Same mesh and same material all the same — one quad
-        // each, flat-shaded off its own corners, which is what the fall of the
-        // verge under it gives.
+        // The corner markers, standing on the swept surface rather than lying in
+        // it: a diamond is smaller than a station, is not a rectangle and is not
+        // flat, so it is the one mark the sweep cannot make. See [`markers`],
+        // which brings its own colour with it. Same mesh and same material all
+        // the same — one triangle per face, flat-shaded off its own three
+        // corners, so the four sides of a marker catch the light differently and
+        // it reads as a solid rather than as a painted shape.
         for diamond in markers::diamonds(stations, self) {
-            let normal = (diamond.corners[1] - diamond.corners[0])
-                .cross(diamond.corners[2] - diamond.corners[0])
-                .normalize_or(Vec3::Y)
-                .to_array();
-            for corner in diamond.corners {
-                positions.push(corner.to_array());
-                normals.push(normal);
-                colors.push(diamond.color);
+            for face in diamond.faces() {
+                let normal = (face[1] - face[0])
+                    .cross(face[2] - face[0])
+                    .normalize_or(Vec3::Y)
+                    .to_array();
+                for corner in face {
+                    positions.push(corner.to_array());
+                    normals.push(normal);
+                    colors.push(diamond.color);
+                }
+                let base = (positions.len() - 3) as u32;
+                indices.extend_from_slice(&[base, base + 1, base + 2]);
             }
-            let base = (positions.len() - 4) as u32;
-            indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         }
 
         Mesh::new(
@@ -413,15 +416,16 @@ mod tests {
                 panic!("the loft lost its paint");
             };
             let swept = stations.len() * (PROFILE.len() - 1) * 4;
+            let standing = markers::FACES * 3;
             assert_eq!(
                 colors.len(),
-                swept + diamonds.len() * 4,
+                swept + diamonds.len() * standing,
                 "{}: the diamonds did not reach the mesh",
                 circuit.name
             );
-            for (diamond, quad) in diamonds.iter().zip(colors[swept..].chunks_exact(4)) {
+            for (diamond, marker) in diamonds.iter().zip(colors[swept..].chunks_exact(standing)) {
                 assert!(
-                    quad.iter().all(|&c| c == diamond.color),
+                    marker.iter().all(|&c| c == diamond.color),
                     "{}: a diamond reached the mesh in more than one colour",
                     circuit.name
                 );
@@ -469,21 +473,33 @@ mod tests {
             );
             let mesh = track.profile.loft(&track.ribbon);
             let verts = mesh.count_vertices();
-            let diamonds = markers::diamonds(track.ribbon.stations(), &track.profile).len();
-            assert_eq!(
-                verts,
-                track.ribbon.stations().len() * (PROFILE.len() - 1) * 4 + diamonds * 4
-            );
+            // Two kinds of thing in one mesh: quads swept along the circuit, and
+            // the triangles the markers standing on it are made of.
+            let quads = track.ribbon.stations().len() * (PROFILE.len() - 1);
+            let faces =
+                markers::diamonds(track.ribbon.stations(), &track.profile).len() * markers::FACES;
+            assert_eq!(verts, quads * 4 + faces * 3);
             let Some(Indices::U32(indices)) = mesh.indices() else {
                 panic!("loft lost its indices");
             };
-            assert_eq!(indices.len(), verts / 4 * 6);
+            assert_eq!(indices.len(), quads * 6 + faces * 3);
             assert!(indices.iter().all(|&i| (i as usize) < verts));
         }
     }
 
     /// Every triangle winds the same way round, so the circuit is not visible
     /// from below and invisible from above.
+    ///
+    /// Held over the whole mesh, corner markers included, now that the markers
+    /// stand up. That is a decision and not an oversight: it would have been
+    /// easy to scope this to the swept strips and let the markers do as they
+    /// like, but the invariant is worth more than the markers are. A face that
+    /// faced sideways would be a face seen edge-on from the car — a mark that
+    /// disappears at exactly the angle it is being read from, and one the
+    /// shading has nothing to light. So the marker is a pyramid: it gains all
+    /// of its height and none of a wall's, every face still leaning further up
+    /// than sideways. Give one a vertical side and this is what says so, which
+    /// is the check being here at all.
     #[test]
     fn loft_faces_up() {
         for circuit in circuits::all() {

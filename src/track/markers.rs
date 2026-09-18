@@ -1,4 +1,4 @@
-//! Corner markers: little diamonds up the verge and round the bend.
+//! Corner markers: little diamonds standing up the verge and round the bend.
 //!
 //! A marker belongs to the circuit and to nothing else. It says where the corner
 //! is and nothing about how to drive it, so nothing here knows what the car can
@@ -19,16 +19,39 @@
 //! apart, because a dotted line is read as a rhythm and a rhythm is only
 //! information while it is regular.
 //!
+//! They stand up, and that is most of what makes them readable. From the driving
+//! seat the road ahead is seen almost edge-on: at 60 m the line of sight down to
+//! the verge is about three degrees, so a mark lying flat on it presents a
+//! twentieth of its own size and has all but vanished by the time it matters,
+//! while a mark standing up presents very nearly all of its height at any
+//! distance it can be seen at. Height is what a mark needs in order to keep its
+//! size, and it costs nothing on the ground — the footprint is the same 0.4 m
+//! diamond, because that was never the part that was too small.
+//!
+//! So a diamond is cut rather than drawn: the same four corners on the verge,
+//! brought up to a point [`TALL`] above the middle of them. Four faces, no
+//! bottom — it stands on the verge, and the one face nobody can see is the one
+//! not worth paying for. A pyramid is also the shape that gains height without
+//! gaining a vertical face: every face of it still leans more up than sideways,
+//! so the loft is still a surface seen from above and `loft_faces_up` still
+//! holds over the whole mesh rather than having to be told to look away.
+//!
+//! Nothing collides with them. The car runs through a standing diamond the way
+//! it used to run over a flat one, because a marker that could be hit would be
+//! a marker the driver went round rather than one they read, and these are only
+//! ever information. Off the road is already a gravel trap; it does not need
+//! furniture in it as well.
+//!
 //! These are the one mark on the circuit the loft cannot make. Every other one —
 //! the kerb stripes, the edge lines, the start/finish paint — is a strip of the
 //! sweep taking a colour, which fixes what shape it may be: a rectangle, square
-//! to the road, at least one station long and its whole band wide. A diamond is
-//! a fifth of the width of the band it sits in and is turned forty-five degrees
-//! to the road, so no way of writing the table produces one. It is four vertices
-//! of its own instead, sitting [`LIFT`] above the verge and lying along the fall
-//! of it. They go into the loft's own mesh rather than a second one, so there is
-//! still one surface, one material, and one thing to replace when the circuit
-//! changes.
+//! to the road, at least one station long, its whole band wide and flat on the
+//! ground. A diamond is a fifth of the width of the band it sits in, turned
+//! forty-five degrees to the road, and standing up off the ground, so no way of
+//! writing the table produces one. It is twelve vertices of its own instead,
+//! standing [`LIFT`] clear of a verge that is falling away under it. They go
+//! into the loft's own mesh rather than a second one, so there is still one
+//! surface, one material, and one thing to replace when the circuit changes.
 
 use bevy::prelude::*;
 
@@ -61,8 +84,28 @@ const SPACING: usize = 8;
 const APPROACH: usize = 5;
 /// Half a diamond's diagonal. 0.4 m point to point, a third of the width of the
 /// car: enough to carry down a straight, where at 0.3 m a diamond was there when
-/// you arrived at it and not before, and still a twentieth of the road.
+/// you arrived at it and not before, and still a twentieth of the road. The
+/// footprint has not had to grow now that they stand up — see [`TALL`], which is
+/// where the reach came from instead.
 const HALF: f32 = 0.20;
+/// How far a diamond rises above the verge it stands on.
+///
+/// Low. This is a mark on the verge, not a bollard beside it: about as tall as
+/// one of the car's wheels and three times the kerb's own lip, which is enough
+/// to give it a lit side, a shadow, and a height that does not foreshorten away,
+/// and not enough for it to read as something that has to be missed. Nearly all
+/// of the reach was bought by leaving the ground at all; height past this was
+/// only making a spike.
+///
+/// It is also what decides how steep the four faces are, and they have to stay
+/// off vertical: the verge falls away under the diamond, so the face on the low
+/// side is the steepest, and even that one leans forty-one degrees off the
+/// vertical. `no_face_of_a_diamond_stands_on_its_edge` is what holds that as the
+/// shape changes.
+const TALL: f32 = 0.15;
+/// Faces a diamond has: four sides and no bottom. Named because the mesh is
+/// counted in [`super::profile`] as well as filled there.
+pub(super) const FACES: usize = 4;
 /// Metres either side of the centreline the line of diamonds runs down. Half a
 /// metre outside the kerb — close enough to the road to sit in the corner of the
 /// eye, far enough not to be taken for part of it — and well inside the
@@ -107,18 +150,32 @@ const _: () = assert!(LATERAL + HALF < EDGE);
 
 /// One diamond, ready to go into the loft's mesh.
 pub(super) struct Diamond {
-    /// Four corners wound to face up: back, out, front, in.
-    pub corners: [Vec3; 4],
+    /// The four corners it stands on, wound to face up: back, out, front, in.
+    pub base: [Vec3; 4],
+    /// The point, [`TALL`] above the middle of them.
+    pub apex: Vec3,
     /// Its turn of [`PALETTE`], linear for the vertex colour attribute.
     pub color: [f32; 4],
+}
+
+impl Diamond {
+    /// The four faces, each wound to face outward and up.
+    ///
+    /// The base is wound to face up, so walking it in order and closing each
+    /// pair onto the point gives faces that wind outward without anything having
+    /// to know which side of the road this diamond is on.
+    pub fn faces(&self) -> [[Vec3; 3]; FACES] {
+        std::array::from_fn(|i| [self.base[i], self.base[(i + 1) % FACES], self.apex])
+    }
 }
 
 /// Every diamond on the circuit. Both verges, so a marked station makes two —
 /// the same colour on each, because the line is one line seen from either side.
 ///
 /// Each corner takes the verge's own height at its own distance off the
-/// centreline, so a diamond lies along the fall of the verge instead of floating
-/// flat over it.
+/// centreline, so a diamond stands on the fall of the verge instead of floating
+/// flat over it. The point goes straight up from the middle of them, because a
+/// marker leaning out with the camber is a marker that has been knocked.
 pub(super) fn diamonds(stations: &[Station], profile: &Profile) -> Vec<Diamond> {
     let marked = markers(stations);
     let mut out = Vec::with_capacity(marked.len() * 2);
@@ -135,13 +192,15 @@ pub(super) fn diamonds(stations: &[Station], profile: &Profile) -> Vec<Diamond> 
                     + station.tangent * along
                     + Vec3::Y * (profile.height(lateral) + LIFT)
             };
+            let base = [
+                corner(0.0, -HALF),
+                corner(HALF, 0.0),
+                corner(0.0, HALF),
+                corner(-HALF, 0.0),
+            ];
             out.push(Diamond {
-                corners: [
-                    corner(0.0, -HALF),
-                    corner(HALF, 0.0),
-                    corner(0.0, HALF),
-                    corner(-HALF, 0.0),
-                ],
+                apex: base.iter().sum::<Vec3>() / FACES as f32 + Vec3::Y * TALL,
+                base,
                 color: paint(r, g, b),
             });
         }
@@ -210,7 +269,6 @@ fn corners(stations: &[Station]) -> Vec<bool> {
         .collect()
 }
 
-#[cfg(test)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -371,8 +429,8 @@ mod tests {
             for diamond in &diamonds {
                 // Across the verge the diagonal picks up the fall of it, so it
                 // comes out a little longer than the flat one.
-                let across = diamond.corners[1].distance(diamond.corners[3]);
-                let along = diamond.corners[0].distance(diamond.corners[2]);
+                let across = diamond.base[1].distance(diamond.base[3]);
+                let along = diamond.base[0].distance(diamond.base[2]);
                 assert!(
                     (HALF * 2.0..HALF * 2.0 + 0.02).contains(&across),
                     "{name}: a diamond is {across:.4} m across, not {:.2}",
@@ -383,12 +441,60 @@ mod tests {
                     "{name}: a diamond is {along:.4} m long, not {:.2}",
                     HALF * 2.0
                 );
+                // The point is straight up from the middle of the base, by the
+                // same amount everywhere. A marker that took the camber of the
+                // verge with it would lean out over the road on one side and in
+                // on the other, and the two verges would not be one line.
+                let middle = diamond.base.iter().sum::<Vec3>() / 4.0;
+                assert!(
+                    (diamond.apex - middle - Vec3::Y * TALL).length() < 1e-4,
+                    "{name}: a diamond points {:?} rather than straight up",
+                    diamond.apex - middle
+                );
+                // And it stands over all four of them. Not by its full height:
+                // the verge falls across the footprint, so the corner on the
+                // high side is already some way up the point.
+                for corner in diamond.base {
+                    assert!(
+                        diamond.apex.y - corner.y > TALL * 0.75,
+                        "{name}: a diamond stands only {:.3} m over its own corner",
+                        diamond.apex.y - corner.y
+                    );
+                }
             }
         }
     }
 
-    /// Diamonds lie on the verge of the circuit actually being driven. They sit
-    /// at a fixed distance off the centreline while the verge either side
+    /// The reason a marker is a pyramid and not a post: every face leans further
+    /// up than sideways, so the line is lit from above like the rest of the
+    /// circuit and no face of it is ever seen edge-on. `loft_faces_up` holds the
+    /// whole mesh to the sign of that; this holds it to a margin, on the verge
+    /// each circuit actually builds, which is the one that tips the low face
+    /// over further. Ten degrees, and today it has forty-one.
+    #[test]
+    fn no_face_of_a_diamond_stands_on_its_edge() {
+        /// Degrees a face has to keep between itself and vertical.
+        const UPRIGHT: f32 = 10.0;
+        for (name, track) in every_track() {
+            let mut steepest = 90.0f32;
+            for diamond in diamonds(track.ribbon.stations(), &track.profile) {
+                for face in diamond.faces() {
+                    // The normal leans off vertical by as much as the face leans
+                    // off horizontal, so this is the face's own tilt.
+                    let normal = (face[1] - face[0]).cross(face[2] - face[0]);
+                    let tilt = (normal.y / normal.length()).acos().to_degrees();
+                    steepest = steepest.min(90.0 - tilt);
+                }
+            }
+            assert!(
+                steepest > UPRIGHT,
+                "{name}: a diamond has a face {steepest:.0} degrees off vertical"
+            );
+        }
+    }
+
+    /// Diamonds stand on the verge of the circuit actually being driven. They
+    /// sit at a fixed distance off the centreline while the verge either side
     /// narrows to whatever that circuit has room for, and the const assertions
     /// above cannot see how far that is.
     #[test]
@@ -402,7 +508,7 @@ mod tests {
                 LATERAL + HALF
             );
             for diamond in diamonds(track.ribbon.stations(), &track.profile) {
-                for corner in diamond.corners {
+                for corner in diamond.base.into_iter().chain([diamond.apex]) {
                     let lateral = track.ribbon.locate(corner).lateral.abs();
                     assert!(
                         (HALF_WIDTH..edge).contains(&lateral),
