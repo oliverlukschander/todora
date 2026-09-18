@@ -279,7 +279,12 @@ mod tests {
             .add_message::<Reset>()
             .insert_resource(track)
             .init_resource::<ButtonInput<KeyCode>>()
-            .add_plugins((crate::input::InputPlugin, CarPlugin, crate::lap::LapPlugin));
+            .add_plugins((
+                crate::pause::PausePlugin,
+                crate::input::InputPlugin,
+                CarPlugin,
+                crate::lap::LapPlugin,
+            ));
         // Exercise the production schedules without spawning the rendered model.
         app.world_mut().resource_mut::<Schedules>().remove(Startup);
         let car = app

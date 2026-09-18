@@ -10,6 +10,7 @@ use bevy::prelude::*;
 
 use crate::Reset;
 use crate::car::{Controls, Player, Setup};
+use crate::pause::{HaltSet, running};
 
 /// Everything that reads the player runs in here, ahead of the car.
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
@@ -19,9 +20,16 @@ pub struct InputPlugin;
 
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
+        // After the pause, which is what decides whether the driver is being
+        // listened to at all: while the game is stopped nothing they press
+        // reaches the car, and the frame it starts again is a frame the keys
+        // are read on.
         app.add_systems(
             PreUpdate,
-            read.in_set(InputSet).after(bevy::input::InputSystems),
+            read.in_set(InputSet)
+                .after(bevy::input::InputSystems)
+                .after(HaltSet)
+                .run_if(running),
         );
     }
 }

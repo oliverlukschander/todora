@@ -31,6 +31,7 @@ use bevy::prelude::*;
 use crate::Reset;
 use crate::car::{Car, level};
 use crate::input::InputSet;
+use crate::pause::running;
 pub(crate) use circuits::Circuit;
 use profile::{HALF_WIDTH, Profile};
 use ribbon::Ribbon;
@@ -93,7 +94,10 @@ impl Plugin for TrackPlugin {
         // can read the grid slot the moment they spawn.
         app.insert_resource(Track::new(circuits::first()))
             .add_systems(Startup, setup)
-            .add_systems(PreUpdate, switch.in_set(TrackSet).after(InputSet));
+            .add_systems(
+                PreUpdate,
+                switch.in_set(TrackSet).after(InputSet).run_if(running),
+            );
     }
 }
 

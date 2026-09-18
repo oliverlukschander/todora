@@ -26,6 +26,7 @@ use crate::Reset;
 use crate::car::{MODEL, Player, SCALE};
 use crate::input::InputSet;
 use crate::lap::{ClockSet, LapFinished, LapSet, LapTimer};
+use crate::pause::running;
 use crate::track::{Track, TrackSet};
 use store::Saved;
 
@@ -50,7 +51,10 @@ impl Plugin for GhostPlugin {
                 reset.after(ClockSet).after(InputSet).after(TrackSet),
             )
             .add_systems(FixedUpdate, (finish, record).chain().after(LapSet))
-            .add_systems(Update, (toggle, replay).chain().in_set(GhostSet));
+            .add_systems(
+                Update,
+                (toggle.run_if(running), replay).chain().in_set(GhostSet),
+            );
     }
 }
 

@@ -5,9 +5,11 @@ use crate::ghost::Ghost;
 use crate::lap::{LapTimer, format_time};
 use crate::track::Track;
 
-const AMBER: Color = Color::srgb(1.0, 0.72, 0.12);
-const AMBER_DIM: Color = Color::srgb(0.72, 0.48, 0.08);
-const PANEL: Color = Color::srgba(0.04, 0.03, 0.02, 0.82);
+/// The instrument palette. Shared, because everything Todora draws over the
+/// world is the same panel seen in different places.
+pub(crate) const AMBER: Color = Color::srgb(1.0, 0.72, 0.12);
+pub(crate) const AMBER_DIM: Color = Color::srgb(0.72, 0.48, 0.08);
+pub(crate) const PANEL: Color = Color::srgba(0.04, 0.03, 0.02, 0.82);
 /// The delta to the ghost: green when this lap is ahead of it, red when behind.
 const AHEAD: Color = Color::srgb(0.38, 0.86, 0.42);
 const BEHIND: Color = Color::srgb(0.96, 0.32, 0.26);
@@ -69,7 +71,7 @@ struct CircuitName;
 fn setup(mut commands: Commands) {
     commands.spawn((
         Text::new(
-            "W — throttle\nS — brake, reverse at a stop\nA / D — steer\nSpace — handbrake\n1 / 2 / 3 — setup\nG — ghost\nT — track\nR — restart\nScroll — zoom",
+            "W — throttle\nS — brake, reverse at a stop\nA / D — steer\nSpace — handbrake\n1 / 2 / 3 — setup\nG — ghost\nT — track\nR — restart\nEsc / Enter — pause\nScroll — zoom",
         ),
         TextFont {
             font_size: FontSize::Px(16.0),
