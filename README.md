@@ -178,3 +178,13 @@ Rebuild the shooting-brake from Blender:
 ```sh
 /Applications/Blender.app/Contents/MacOS/Blender --background --python tools/make_shooting_brake.py
 ```
+
+## Circuit data and thanks
+
+Todora's circuit layouts are based on data from [bacinger/f1-circuits](https://github.com/bacinger/f1-circuits). We're hugely grateful to Tomislav Bacinger and the project's contributors for collecting and sharing these circuits. Thank you for giving Todora its tracks and making projects like this possible!
+
+## Disclaimer
+
+This repository is unofficial and is not associated in any way with the Formula 1 companies. F1, FORMULA ONE, FORMULA 1, FIA FORMULA ONE WORLD CHAMPIONSHIP, GRAND PRIX, and related marks are trademarks of Formula One Licensing B.V.
+
+Formula 1™ circuits data are not official, and they are not approved nor endorsed by Formula One Licensing B.V.
