@@ -18,6 +18,7 @@
 //! lap is written out; come back tomorrow, or switch away and back, and it is
 //! there to drive against with its time already on the board.
 
+pub(crate) mod clear;
 mod store;
 
 use bevy::{light::NotShadowCaster, prelude::*, world_serialization::WorldInstanceReady};
@@ -45,7 +46,9 @@ pub struct GhostPlugin;
 
 impl Plugin for GhostPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup)
+        app.init_resource::<clear::Confirmation>()
+            .add_systems(Update, clear::buttons.before(GhostSet))
+            .add_systems(Startup, setup)
             .add_systems(
                 PreUpdate,
                 reset.after(ClockSet).after(InputSet).after(TrackSet),

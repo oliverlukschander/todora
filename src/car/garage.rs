@@ -58,7 +58,7 @@ const TOURER: Handling = Handling::SHOOTING_BRAKE;
 /// holding on survives a fast corner.
 const CLUBMAN: Handling = Handling {
     grip: 14.8,
-    downforce: 0.00981,
+    downforce: TOURER.downforce * 1.09,
     top_speed: 21.8,
     ..Handling::SHOOTING_BRAKE
 };
@@ -67,7 +67,7 @@ const CLUBMAN: Handling = Handling {
 /// do and runs out of engine long after them.
 const EXPRESS: Handling = Handling {
     grip: 12.8,
-    downforce: 0.00801,
+    downforce: TOURER.downforce * 0.89,
     top_speed: 31.0,
     ..Handling::SHOOTING_BRAKE
 };
@@ -117,10 +117,10 @@ impl Spec {
     pub fn sheet(self) -> Sheet {
         match self {
             Spec::Tourer => Sheet {
-                name: "TOURER",
+                name: "OMARCHY GT #95",
                 handling: TOURER,
-                // British racing green.
-                paint: Color::srgb(0.04, 0.20, 0.11),
+                // The pale blue of the 2014 Le Mans GTE Am winner.
+                paint: Color::srgb(0.70, 0.84, 0.88),
                 stars: Stars {
                     handling: 3,
                     acceleration: 3,

@@ -24,10 +24,10 @@
 
 use bevy::prelude::*;
 
-/// The glTF is modelled at full size; this is the fraction of it we drive.
+/// Scales the authored GT to about 1.06 m long and 0.45 m across the body.
 /// Shared by the model, ghosts, wheel contacts and wheelbase.
-pub(crate) const SCALE: f32 = 0.324;
-/// From `tools/make_shooting_brake.py`, at driving scale.
+pub(crate) const SCALE: f32 = 0.405;
+/// From `tools/make_omarchy_gt.py`, at driving scale.
 pub(crate) const WHEEL_RADIUS: f32 = 0.20 * SCALE;
 pub(crate) const WHEEL_WIDTH: f32 = 0.16 * SCALE;
 pub(crate) const HALF_TRACK: f32 = 0.50 * SCALE;
@@ -150,21 +150,22 @@ impl Handling {
     pub const SHOOTING_BRAKE: Handling = Handling {
         wheelbase: FRONT_AXLE + REAR_AXLE,
         grip: 14.0,
-        downforce: 0.009,
+        // GTE aero: twice the estate car's speed-dependent grip contribution.
+        downforce: 0.018,
         brake_bite: 0.25,
         handbrake_lets_go: 0.68,
         power_lets_go: 0.40,
         sliding_costs: 0.30,
-        // Keep the previous low-speed turning radius with the shorter
-        // wheelbase: atan(tan(0.7) * 0.405), so shrinking does not add steering scrub.
-        max_steer: 0.328_748_2,
+        // Preserve the low-speed turning radius as the wheelbase grows 25%:
+        // atan(tan(0.3287482) * 1.25).
+        max_steer: 0.403_063_06,
         lock_margin: 1.1,
         steer_rate: 10.0,
         yaw_response: 11.0,
         align: 3.6,
         kick: 2.0,
         top_speed: 24.0,
-        accel: 9.5,
+        accel: 6.0,
         brake: 12.8,
         engine_braking: 4.5,
         engine_braking_floor: 0.3,
@@ -789,6 +790,51 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "prints flat-road acceleration for handling tuning"]
+    fn straight_acceleration_report() {
+        for accel in [9.5, 6.0, 4.75] {
+            let handling = Handling { accel, ..*H };
+            let mut car = Car::default();
+            let gas = Controls {
+                throttle: 1.0,
+                ..default()
+            };
+            let mut times = [None; 3];
+            let mut history = Vec::new();
+            let mut distance = 0.0;
+            for frame in 1..=240 * 30 {
+                step(
+                    &mut car,
+                    &handling,
+                    Vec3::NEG_Z,
+                    Vec3::X,
+                    gas,
+                    FLAT,
+                    1.0 / 240.0,
+                );
+                let kmh = car.velocity.length() * 3.6 * crate::hud::DISPLAY_SPEED_SCALE;
+                distance += car.velocity.length() / 240.0;
+                let time = frame as f32 / 240.0;
+                history.push((time, kmh, distance));
+                for (i, target) in [100.0, 150.0, 200.0].into_iter().enumerate() {
+                    if times[i].is_none() && kmh >= target {
+                        times[i] = Some(time);
+                    }
+                }
+            }
+            let top = history.last().unwrap().1;
+            let near_top = history
+                .iter()
+                .find(|(_, speed, _)| *speed >= top * 0.95)
+                .unwrap();
+            println!(
+                "accel={accel}: 0–100/150/200={times:?} s; top={top:.1} displayed km/h; 95% at {:.2}s / {:.1} game metres",
+                near_top.0, near_top.2
+            );
+        }
+    }
+
+    #[test]
     fn it_accelerates_and_tops_out() {
         let mut car = Car::default();
         let gas = Controls {
@@ -797,6 +843,10 @@ mod tests {
         };
         drive(&mut car, gas, FLAT, 4.0);
         let quick = car.velocity.length();
+        assert!(
+            quick * 3.6 * crate::hud::DISPLAY_SPEED_SCALE < 200.0,
+            "the car should still be building towards 200 km/h after four seconds"
+        );
         assert!(
             (12.0..H.top_speed).contains(&quick),
             "4 s got to {quick} m/s"
@@ -971,7 +1021,9 @@ mod tests {
                 ..default()
             },
             GRASS,
-            2.0,
+            // The gentler acceleration needs longer to crawl out; keep the
+            // same minimum recovery speed rather than demanding the old launch.
+            3.5,
         );
         assert!(
             beached.velocity.length() > 2.0,
@@ -1255,7 +1307,7 @@ mod tests {
                 ..default()
             },
             FLAT,
-            1.5,
+            2.5,
         );
         assert!(
             car.velocity.length() > 4.0,

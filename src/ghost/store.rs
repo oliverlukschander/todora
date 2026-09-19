@@ -16,7 +16,10 @@
 //! a file that has been half written or edited, a folder that cannot be made —
 //! each one means no ghost, said once in the log, and a game that carries on.
 
-use std::{fs, io, path::PathBuf};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 use bevy::prelude::*;
 
@@ -42,15 +45,14 @@ impl Saved {
     /// Where this circuit's lap lives, or `None` on a machine that will not say
     /// where a game may keep things.
     pub(super) fn of(track: &Track, mode: Mode) -> Option<Self> {
-        let filename = if mode == Mode::Regular {
-            format!("{}.lap", track.circuit().id)
-        } else {
-            format!("{}-{}.lap", track.circuit().id, mode.name().to_lowercase())
-        };
         Some(Self {
-            path: folder()?.join(filename),
+            path: folder()?.join(filename(track.circuit().id, mode)),
             fingerprint: track.fingerprint(),
         })
+    }
+
+    pub(super) fn remove(&self) -> io::Result<()> {
+        remove_file(&self.path)
     }
 
     /// The lap saved here, if there is one and it is still a lap of this circuit.
@@ -86,6 +88,35 @@ impl Saved {
             warn!("cannot save the lap to {}: {trouble}", self.path.display());
         }
     }
+}
+
+fn filename(id: &str, mode: Mode) -> String {
+    if mode == Mode::Regular {
+        format!("{id}.lap")
+    } else {
+        format!("{id}-{}.lap", mode.name().to_lowercase())
+    }
+}
+
+fn remove_file(path: &Path) -> io::Result<()> {
+    match fs::remove_file(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
+}
+
+pub(super) fn remove_all() -> io::Result<()> {
+    folder().map_or(Ok(()), |folder| remove_all_in(&folder))
+}
+
+fn remove_all_in(folder: &Path) -> io::Result<()> {
+    // Only the circuit/mode files owned by the game; leave other files alone.
+    for circuit in crate::track::all_circuits() {
+        for mode in Mode::ALL {
+            remove_file(&folder.join(filename(circuit.id, mode)))?;
+        }
+    }
+    Ok(())
 }
 
 /// Where this machine keeps what a game saves.
@@ -300,6 +331,42 @@ mod tests {
         assert!(saved.read().is_none(), "a lap of another shape was taken");
 
         fs::remove_dir_all(&folder).expect("a folder we made");
+    }
+
+    #[test]
+    fn reset_removes_only_requested_saves_and_reports_errors() {
+        let folder = std::env::temp_dir().join(format!(
+            "todora-reset-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        fs::create_dir_all(&folder).unwrap();
+        for circuit in crate::track::all_circuits() {
+            for mode in Mode::ALL {
+                fs::write(folder.join(filename(circuit.id, mode)), b"saved ghost").unwrap();
+            }
+        }
+        fs::write(folder.join("notes.txt"), b"keep me").unwrap();
+        let circuit = &crate::track::all_circuits()[0];
+        let saved = Saved {
+            path: folder.join(filename(circuit.id, Mode::Regular)),
+            fingerprint: 0,
+        };
+        saved.remove().unwrap();
+        saved.remove().unwrap(); // Resetting an empty slot is fine.
+        assert!(!saved.path.exists());
+        assert_eq!(
+            fs::read_dir(&folder).unwrap().count(),
+            crate::track::all_circuits().len() * Mode::ALL.len()
+        );
+        remove_all_in(&folder).unwrap();
+        assert_eq!(fs::read_dir(&folder).unwrap().count(), 1);
+        assert_eq!(fs::read(folder.join("notes.txt")).unwrap(), b"keep me");
+        // A directory in place of a file is a portable removal failure, even as root.
+        fs::create_dir(&saved.path).unwrap();
+        assert!(saved.remove().is_err());
+        assert!(remove_all_in(&folder).is_err());
+        fs::remove_dir_all(folder).unwrap();
     }
 
     /// Every circuit files its lap somewhere of its own.

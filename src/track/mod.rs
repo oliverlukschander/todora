@@ -26,6 +26,7 @@
 // is 3.14 or 6.28 metres from the centroid of its circuit. It is a coordinate.
 #[allow(clippy::approx_constant)]
 mod circuits;
+mod infield;
 mod markers;
 mod profile;
 mod ribbon;
@@ -250,6 +251,13 @@ impl Plugin for TrackPlugin {
 /// The loft, so a switch knows whose mesh to replace.
 #[derive(Component)]
 struct Loft;
+
+/// Grass filling the hole inside the loft.
+#[derive(Component)]
+struct Infield;
+
+type LoftMesh = (With<Loft>, Without<Infield>);
+type InfieldMesh = (With<Infield>, Without<Loft>);
 
 /// Every circuit there is, in the order the menu lists them.
 pub(crate) fn all_circuits() -> &'static [Circuit] {
@@ -697,20 +705,26 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let material = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        perceptual_roughness: 0.9,
+        ..default()
+    });
     let mut loft = commands.spawn((
         Loft,
         Mesh3d(meshes.add(track.profile.loft(&track.ribbon))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            perceptual_roughness: 0.9,
-            ..default()
-        })),
+        MeshMaterial3d(material.clone()),
     ));
     // Keep the lower road readable beneath a crossing. The car and markers
     // still cast their own shadows; only the continuous track mesh opts out.
     if !track.circuit.crossings.is_empty() {
         loft.insert(NotShadowCaster);
     }
+    commands.spawn((
+        Infield,
+        Mesh3d(meshes.add(infield::fill(&track.profile, &track.ribbon))),
+        MeshMaterial3d(material),
+    ));
 }
 
 /// Go where the menu said.
@@ -724,7 +738,8 @@ fn switch(
     mut asked: MessageReader<GoTo>,
     mut track: ResMut<Track>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut loft: Query<(Entity, &mut Mesh3d), With<Loft>>,
+    mut loft: Query<(Entity, &mut Mesh3d), LoftMesh>,
+    mut bowl: Query<&mut Mesh3d, InfieldMesh>,
     mut reset: MessageWriter<Reset>,
 ) {
     let Some(GoTo(next)) = asked.read().last() else {
@@ -741,6 +756,9 @@ fn switch(
         } else {
             commands.entity(entity).insert(NotShadowCaster);
         }
+    }
+    if let Ok(mut mesh) = bowl.single_mut() {
+        mesh.0 = meshes.add(infield::fill(&track.profile, &track.ribbon));
     }
     // Everything that owns a piece of the old lap puts it back itself.
     reset.write(Reset);
