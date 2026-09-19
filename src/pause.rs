@@ -134,7 +134,7 @@ fn setup(mut commands: Commands) {
                             BackgroundColor(AMBER),
                         ))
                         .with_children(|button| {
-                            button.spawn(label("Resume drive  /  Enter", 17.0, FRONT));
+                            button.spawn(label("Resume  /  A · Start · Enter", 17.0, FRONT));
                         });
                 });
         });
@@ -152,13 +152,20 @@ fn setup(mut commands: Commands) {
 fn watch(
     keys: Res<ButtonInput<KeyCode>>,
     mut halt: ResMut<Halt>,
+    pads: Query<&Gamepad>,
     mut players: Query<&mut Controls, With<Player>>,
     buttons: Query<&Interaction, (With<Resume>, Changed<Interaction>)>,
 ) {
     let resume_clicked = buttons.iter().any(|i| *i == Interaction::Pressed);
-    let wanted = match (*halt, keys.just_pressed(KeyCode::Escape)) {
-        (Halt::Nothing, true) => Halt::Pause,
-        (Halt::Pause, false) if keys.just_pressed(KeyCode::Enter) || resume_clicked => {
+    let start = pads
+        .iter()
+        .any(|pad| pad.just_pressed(GamepadButton::Start));
+    let confirm = pads
+        .iter()
+        .any(|pad| pad.just_pressed(GamepadButton::South));
+    let wanted = match *halt {
+        Halt::Nothing if keys.just_pressed(KeyCode::Escape) || start => Halt::Pause,
+        Halt::Pause if keys.just_pressed(KeyCode::Enter) || start || confirm || resume_clicked => {
             Halt::Nothing
         }
         _ => return,

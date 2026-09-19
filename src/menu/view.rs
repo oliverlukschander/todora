@@ -215,9 +215,9 @@ pub(super) fn draw(
                 align_items: AlignItems::Center, justify_content: JustifyContent::SpaceBetween, ..default()
             }, BorderColor::all(LINE))).with_children(|footer| {
                 footer.spawn(Node { row_gap: px(4), ..column() }).with_children(|hint| {
-                    hint.spawn(label(if page == Page::Circuit { "Arrow keys / D-pad  Browse     PgUp / PgDn  Page     Enter / A  Drive" }
-                        else { "Up / Down  Car     Left / Right or 1–3  Setup     Enter / A  Apply" }, 13.0, TEXT));
-                    hint.spawn(label(if page == Page::Circuit { "Changing circuit starts a new session. Esc / B returns to your current lap." }
+                    hint.spawn(label(if page == Page::Circuit { "Stick / D-pad / Arrows  Browse     PgUp / PgDn  Page     A / Enter  Drive" }
+                        else { "Stick up/down  Car     Left/right  Setup     A / Enter  Apply" }, 13.0, TEXT));
+                    hint.spawn(label(if page == Page::Circuit { "Changing circuit starts a new session. Start / B / Esc returns to your current lap." }
                         else { "Applying a different car or setup restarts this lap. Your best time stays." }, 12.0, MUTED));
                 });
                 if selected {

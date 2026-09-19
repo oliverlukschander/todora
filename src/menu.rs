@@ -104,6 +104,41 @@ fn searchable(text: &str) -> String {
         .collect()
 }
 
+/// A deliberate stick tilt moves once, then repeats using real time while
+/// the game clock is paused. Hysteresis stops small thumb movements chattering.
+#[derive(Default)]
+struct StickNavigation {
+    direction: IVec2,
+    repeat_at: f64,
+}
+
+impl StickNavigation {
+    fn step(&mut self, stick: Vec2, now: f64) -> IVec2 {
+        let threshold = if self.direction == IVec2::ZERO {
+            0.55
+        } else {
+            0.35
+        };
+        let direction = if stick.abs().max_element() < threshold {
+            IVec2::ZERO
+        } else if stick.x.abs() > stick.y.abs() {
+            IVec2::new(stick.x.signum() as i32, 0)
+        } else {
+            IVec2::new(0, -stick.y.signum() as i32)
+        };
+        if direction != self.direction {
+            self.direction = direction;
+            self.repeat_at = now + 0.35;
+            direction
+        } else if direction != IVec2::ZERO && now >= self.repeat_at {
+            self.repeat_at = now + 0.12;
+            direction
+        } else {
+            IVec2::ZERO
+        }
+    }
+}
+
 #[derive(Component, Clone, Copy)]
 enum Action {
     Open(Page),
@@ -155,7 +190,7 @@ fn open(
     if menu.page.is_some() || *halt != Halt::Nothing {
         return;
     }
-    let page = if pressed(&keys, &pads, KeyCode::KeyC, GamepadButton::West) {
+    let page = if pressed(&keys, &pads, KeyCode::KeyC, GamepadButton::LeftTrigger) {
         Page::Car
     } else if pressed(&keys, &pads, KeyCode::KeyT, GamepadButton::Select) {
         Page::Circuit
@@ -209,6 +244,8 @@ fn walk(
     pads: Query<&Gamepad>,
     mut wheel: MessageReader<MouseWheel>,
     mut scroll_remainder: Local<f32>,
+    mut navigation: Local<StickNavigation>,
+    time: Res<Time<Real>>,
     mut menu: ResMut<Menu>,
     mut halt: ResMut<Halt>,
     mut spec: ResMut<Spec>,
@@ -225,30 +262,43 @@ fn walk(
         .sum();
     let Some(page) = menu.page else {
         *scroll_remainder = 0.0;
+        *navigation = StickNavigation::default();
         return;
     };
-    let step = i32::from(pressed(
-        &keys,
-        &pads,
-        KeyCode::ArrowDown,
-        GamepadButton::DPadDown,
-    )) - i32::from(pressed(
-        &keys,
-        &pads,
-        KeyCode::ArrowUp,
-        GamepadButton::DPadUp,
-    ));
-    let horizontal = i32::from(pressed(
-        &keys,
-        &pads,
-        KeyCode::ArrowRight,
-        GamepadButton::DPadRight,
-    )) - i32::from(pressed(
-        &keys,
-        &pads,
-        KeyCode::ArrowLeft,
-        GamepadButton::DPadLeft,
-    ));
+    let stick = pads
+        .iter()
+        .map(Gamepad::left_stick)
+        .max_by(|a, b| a.length_squared().total_cmp(&b.length_squared()))
+        .unwrap_or_default();
+    let nudge = navigation.step(stick, time.elapsed_secs_f64());
+    let step = (nudge.y
+        + i32::from(pressed(
+            &keys,
+            &pads,
+            KeyCode::ArrowDown,
+            GamepadButton::DPadDown,
+        ))
+        - i32::from(pressed(
+            &keys,
+            &pads,
+            KeyCode::ArrowUp,
+            GamepadButton::DPadUp,
+        )))
+    .clamp(-1, 1);
+    let horizontal = (nudge.x
+        + i32::from(pressed(
+            &keys,
+            &pads,
+            KeyCode::ArrowRight,
+            GamepadButton::DPadRight,
+        ))
+        - i32::from(pressed(
+            &keys,
+            &pads,
+            KeyCode::ArrowLeft,
+            GamepadButton::DPadLeft,
+        )))
+    .clamp(-1, 1);
     if step != 0 {
         menu.move_by(step * if page == Page::Circuit { 2 } else { 1 });
     }
@@ -287,7 +337,11 @@ fn walk(
             }
         }
     }
-    if pressed(&keys, &pads, KeyCode::Escape, GamepadButton::East) {
+    if pressed(&keys, &pads, KeyCode::Escape, GamepadButton::East)
+        || pads
+            .iter()
+            .any(|pad| pad.just_pressed(GamepadButton::Start))
+    {
         close(&mut menu, &mut halt);
     } else if pressed(&keys, &pads, KeyCode::Enter, GamepadButton::South) {
         apply(
@@ -672,5 +726,76 @@ mod tests {
         assert!(app.world().resource::<Time<Virtual>>().is_paused());
         press(&mut app, KeyCode::Escape);
         assert!(!app.world().resource::<Time<Virtual>>().is_paused());
+    }
+    fn pad_press(app: &mut App, controller: Entity, button: GamepadButton) {
+        let mut pad = app.world_mut().get_mut::<Gamepad>(controller).unwrap();
+        pad.digital_mut().release_all();
+        pad.digital_mut().press(button);
+        app.update();
+        app.world_mut()
+            .get_mut::<Gamepad>(controller)
+            .unwrap()
+            .digital_mut()
+            .clear();
+    }
+
+    #[test]
+    fn xbox_x_is_not_garage_and_start_pauses_resumes_and_backs_out() {
+        let mut app = game();
+        let controller = app.world_mut().spawn(Gamepad::default()).id();
+        app.update();
+        pad_press(&mut app, controller, GamepadButton::West);
+        assert!(app.world().resource::<Menu>().page.is_none());
+        pad_press(&mut app, controller, GamepadButton::Start);
+        assert_eq!(*app.world().resource::<Halt>(), Halt::Pause);
+        pad_press(&mut app, controller, GamepadButton::Start);
+        assert_eq!(*app.world().resource::<Halt>(), Halt::Nothing);
+        pad_press(&mut app, controller, GamepadButton::LeftTrigger);
+        assert_eq!(app.world().resource::<Menu>().page, Some(Page::Car));
+        pad_press(&mut app, controller, GamepadButton::Start);
+        assert_eq!(*app.world().resource::<Halt>(), Halt::Nothing);
+        assert!(app.world().resource::<Menu>().page.is_none());
+        pad_press(&mut app, controller, GamepadButton::Start);
+        pad_press(&mut app, controller, GamepadButton::South);
+        assert_eq!(*app.world().resource::<Halt>(), Halt::Nothing);
+    }
+
+    #[test]
+    fn xbox_stick_selects_car_and_setup_and_a_applies_them() {
+        let mut app = game();
+        let controller = app.world_mut().spawn(Gamepad::default()).id();
+        app.update();
+        pad_press(&mut app, controller, GamepadButton::LeftTrigger);
+        app.world_mut()
+            .get_mut::<Gamepad>(controller)
+            .unwrap()
+            .analog_mut()
+            .set(GamepadAxis::LeftStickY, -1.0);
+        app.update();
+        assert_eq!(app.world().resource::<Menu>().at, 1);
+        {
+            let mut pad = app.world_mut().get_mut::<Gamepad>(controller).unwrap();
+            pad.analog_mut().set(GamepadAxis::LeftStickY, 0.0);
+            pad.analog_mut().set(GamepadAxis::LeftStickX, 1.0);
+        }
+        app.update();
+        assert_eq!(app.world().resource::<Menu>().setup, Setup::Oversteer);
+        pad_press(&mut app, controller, GamepadButton::South);
+        assert_eq!(*app.world().resource::<Spec>(), Spec::Clubman);
+        assert_eq!(*app.world().resource::<Setup>(), Setup::Oversteer);
+        assert_eq!(*app.world().resource::<Halt>(), Halt::Nothing);
+    }
+
+    #[test]
+    fn menu_stick_ignores_drift_and_repeats_at_a_readable_pace() {
+        let mut stick = StickNavigation::default();
+        assert_eq!(stick.step(Vec2::splat(0.2), 0.0), IVec2::ZERO);
+        assert_eq!(stick.step(Vec2::Y, 0.1), IVec2::NEG_Y);
+        assert_eq!(stick.step(Vec2::Y, 0.2), IVec2::ZERO);
+        assert_eq!(stick.step(Vec2::Y, 0.46), IVec2::NEG_Y);
+        assert_eq!(stick.step(Vec2::Y, 0.50), IVec2::ZERO);
+        assert_eq!(stick.step(Vec2::Y, 0.59), IVec2::NEG_Y);
+        assert_eq!(stick.step(Vec2::ZERO, 0.6), IVec2::ZERO);
+        assert_eq!(stick.step(Vec2::NEG_X, 0.61), IVec2::NEG_X);
     }
 }

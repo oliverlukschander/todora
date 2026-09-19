@@ -74,7 +74,7 @@ fn read(
             - held(&keys, [KeyCode::KeyD, KeyCode::ArrowRight]),
         handbrake: keys.pressed(KeyCode::Space),
     };
-    let mut restart = keys.just_pressed(KeyCode::KeyR);
+    let restart = keys.just_pressed(KeyCode::KeyR);
 
     for pad in &pads {
         // Stick right is steer right, which is negative here. Past the deadzone
@@ -90,12 +90,21 @@ fn read(
         }
         asked.throttle = asked
             .throttle
-            .max(pad.get(GamepadButton::RightTrigger2).unwrap_or(0.0));
+            .max(pad.get(GamepadButton::RightTrigger2).unwrap_or(0.0))
+            .max(if pad.pressed(GamepadButton::South) {
+                1.0
+            } else {
+                0.0
+            });
         asked.brake = asked
             .brake
-            .max(pad.get(GamepadButton::LeftTrigger2).unwrap_or(0.0));
-        asked.handbrake |= pad.pressed(GamepadButton::South);
-        restart |= pad.just_pressed(GamepadButton::Start);
+            .max(pad.get(GamepadButton::LeftTrigger2).unwrap_or(0.0))
+            .max(if pad.pressed(GamepadButton::West) {
+                1.0
+            } else {
+                0.0
+            });
+        asked.handbrake |= pad.pressed(GamepadButton::East);
         if pad.just_pressed(GamepadButton::DPadLeft) {
             wanted = wanted.slid(-1);
         }
@@ -118,4 +127,85 @@ fn read(
 
 fn held<const N: usize>(keys: &ButtonInput<KeyCode>, any: [KeyCode; N]) -> f32 {
     if keys.any_pressed(any) { 1.0 } else { 0.0 }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pause::Halt;
+
+    #[test]
+    fn xbox_face_buttons_drive_without_handbraking_or_restarting() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Setup>()
+            .init_resource::<Halt>()
+            .add_message::<Reset>()
+            .add_plugins(InputPlugin);
+        let player = app.world_mut().spawn((Player, Controls::default())).id();
+        let mut pad = Gamepad::default();
+        pad.digital_mut().press(GamepadButton::South);
+        pad.digital_mut().press(GamepadButton::West);
+        pad.digital_mut().press(GamepadButton::Start);
+        let controller = app.world_mut().spawn(pad).id();
+        app.update();
+        let controls = app.world().get::<Controls>(player).unwrap();
+        assert_eq!(controls.throttle, 1.0);
+        assert_eq!(controls.brake, 1.0);
+        assert!(!controls.handbrake);
+        assert_eq!(app.world().resource::<Messages<Reset>>().len(), 0);
+
+        app.world_mut()
+            .get_mut::<Gamepad>(controller)
+            .unwrap()
+            .digital_mut()
+            .release_all();
+        app.update();
+        assert_eq!(
+            *app.world().get::<Controls>(player).unwrap(),
+            Controls::default()
+        );
+    }
+
+    #[test]
+    fn stick_vertical_never_drives_and_horizontal_keeps_analogue_steering() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Setup>()
+            .init_resource::<Halt>()
+            .add_message::<Reset>()
+            .add_plugins(InputPlugin);
+        let player = app.world_mut().spawn((Player, Controls::default())).id();
+        let controller = app.world_mut().spawn(Gamepad::default()).id();
+        for y in [-1.0, 1.0] {
+            app.world_mut()
+                .get_mut::<Gamepad>(controller)
+                .unwrap()
+                .analog_mut()
+                .set(GamepadAxis::LeftStickY, y);
+            app.update();
+            assert_eq!(
+                *app.world().get::<Controls>(player).unwrap(),
+                Controls::default()
+            );
+        }
+        for (x, wanted) in [(0.05, 0.0), (0.56, -0.5), (-1.0, 1.0)] {
+            app.world_mut()
+                .get_mut::<Gamepad>(controller)
+                .unwrap()
+                .analog_mut()
+                .set(GamepadAxis::LeftStickX, x);
+            app.update();
+            assert!((app.world().get::<Controls>(player).unwrap().steer - wanted).abs() < 0.001);
+        }
+        // Disconnecting cannot leave steering or a pedal latched.
+        app.world_mut().despawn(controller);
+        app.update();
+        assert_eq!(
+            *app.world().get::<Controls>(player).unwrap(),
+            Controls::default()
+        );
+    }
 }

@@ -33,6 +33,7 @@ impl Plugin for HudPlugin {
             Update,
             (
                 show,
+                draw_controls,
                 draw_clock,
                 draw_g_meter,
                 draw_setup,
@@ -74,6 +75,9 @@ struct CircuitName;
 
 #[derive(Component)]
 struct Instrument;
+
+#[derive(Component)]
+struct ControlHints;
 
 fn setup(mut commands: Commands) {
     use crate::ui::{LINE, TEXT, label};
@@ -223,10 +227,23 @@ fn setup(mut commands: Commands) {
             ));
             timing.spawn((DeltaReadout, label("GHOST  --", 20.0, AMBER_DIM)));
         });
-    commands.spawn((Instrument, label("WASD / Arrows  Drive    Space  Handbrake    R  Restart\nG  Ghost    Scroll  Zoom    Esc  Pause", 12.0, TEXT), Node {
+    commands.spawn((Instrument, ControlHints, label("WASD / Arrows  Drive    Space  Handbrake    R  Restart\nG  Ghost    Scroll  Zoom    Esc  Pause", 12.0, TEXT), Node {
         position_type: PositionType::Absolute, bottom: px(24), left: px(24),
         padding: UiRect::axes(px(14), px(10)), border_radius: BorderRadius::all(px(8)), ..default()
     }, BackgroundColor(PANEL)));
+}
+
+fn draw_controls(pads: Query<&Gamepad>, mut text: Query<&mut Text, With<ControlHints>>) {
+    let hint = if pads.is_empty() {
+        "WASD / Arrows  Drive    Space  Handbrake    R  Restart\nG  Ghost    Scroll  Zoom    Esc  Pause"
+    } else {
+        "Left stick  Steer    A  Gas    X  Brake    B  Handbrake\nStart  Pause    LB  Garage    View  Circuits    Y  Ghost"
+    };
+    if let Ok(mut text) = text.single_mut()
+        && text.0 != hint
+    {
+        text.0 = hint.into();
+    }
 }
 
 fn show(halt: Res<crate::pause::Halt>, mut instruments: Query<&mut Visibility, With<Instrument>>) {
