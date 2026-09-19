@@ -594,6 +594,11 @@ mod tests {
     /// On the grass specifically, not merely inside the mesh. Past the grass is
     /// the lip the verge falls away over, at six times the slope, and a marker
     /// hanging off that is a marker that has been knocked over.
+    ///
+    /// On a bridge the question needs the deck as well as the plan: a diamond
+    /// on the shoulder of a bridge is directly above the road underneath, and a
+    /// lookup that only knew where it was in plan would report it as sitting in
+    /// the middle of a road it is two metres above.
     #[test]
     fn a_diamond_stands_on_the_shoulder_it_was_given() {
         for (name, track) in every_track() {
@@ -601,7 +606,13 @@ mod tests {
             let mut nearest = f32::MAX;
             for diamond in diamonds(track.ribbon.stations(), profile) {
                 for corner in diamond.base {
-                    let fix = track.ribbon.locate(corner);
+                    // Asked of the deck-aware lookup rather than of the plan,
+                    // because a diamond on the shoulder of a bridge is directly
+                    // above the road going under it and the plan cannot tell
+                    // the two apart. The corner carries its own height, which
+                    // is what the lookup goes on when nothing tells it where it
+                    // was.
+                    let fix = track.fix(corner, None);
                     let across = fix.lateral.abs();
                     let grass = profile.grass(fix.at, fix.t, fix.lateral);
                     assert!(

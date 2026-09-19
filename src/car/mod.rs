@@ -103,7 +103,13 @@ fn setup(
 ) {
     commands
         .spawn((
-            Car::default(),
+            Car {
+                // Put down on the grid knowing where the grid is, so that the
+                // very first lookup is answered by continuity like every one
+                // after it rather than by guessing from height.
+                along: Some(track.start_along_lap()),
+                ..Car::default()
+            },
             chosen.applied_to(spec.handling()),
             Controls::default(),
             Player,
@@ -165,7 +171,10 @@ pub(crate) fn advance(
     while left > 1e-6 {
         let h = left.min(SUBSTEP);
         let heading = level(*transform.forward());
-        let ground = track.ground(transform.translation);
+        // The deck the car is on, not the nearest road in plan: over a bridge
+        // those are two different surfaces with two different slopes, and this
+        // is the one the engine is given.
+        let ground = track.ground_from(transform.translation, car.along);
         let surface = Surface {
             grip: ground.grip,
             // The grade runs along the circuit; the car gets the component of it
@@ -276,7 +285,10 @@ fn restart(
     }
     for (mut transform, mut car) in &mut cars {
         *transform = track.start_transform().with_scale(transform.scale);
-        *car = Car::default();
+        *car = Car {
+            along: Some(track.start_along_lap()),
+            ..Car::default()
+        };
     }
 }
 

@@ -37,7 +37,7 @@ use crate::car::{Car, level};
 use crate::menu::MenuSet;
 pub(crate) use circuits::Circuit;
 use profile::{HALF_WIDTH, Profile};
-use ribbon::Ribbon;
+use ribbon::{Overpass, Ribbon};
 
 /// The car is the ruler: ~2.4 m long, ~1.1 m wide, 1 unit = 1 metre. Every
 /// circuit is scaled by this, so a longer circuit makes a longer lap rather than
@@ -53,6 +53,67 @@ const PLAN_SCALE: f32 = 0.4 / 3.0;
 /// real by the ratio of the two: at 0.4 that was three times, and every descent
 /// arrived at its corner too fast to take. This still rolls.
 const HEIGHT_SCALE: f32 = 0.28;
+/// How thick a bridge deck is: the road above, and the structure it is carried
+/// on, between the surface the car drives on and the soffit the car below
+/// drives under.
+///
+/// A number the game chooses, like the clearance beside it in
+/// [`Circuit::crossings`]. What the elevation model knows about a crossing is
+/// that there is one; how far apart the two roads are is not in a 90 m ground
+/// model and is not pretended to be.
+const DECK: f32 = 0.4;
+/// How far either side of a crossing the deck is held level, and how long the
+/// ramps onto it are, as a multiple of how far it has to rise.
+///
+/// The deck has to be level across the whole of the road underneath it and a
+/// margin either side, or the road below passes under a slope and the clearance
+/// is whatever the slope happens to be at the worst point of it. How far along
+/// the deck that reaches depends on the angle the two roads cross at — square
+/// on it is one cross-section either side, and shallower it is more — so three
+/// cross-sections covers everything down to a crossing of twenty degrees.
+///
+/// The ramp is set against the rise rather than against the road, because what
+/// it is for is a gradient: at ten times the rise a raised-cosine ramp peaks at
+/// 15.7%, which is inside [`ribbon::MAX_GRADE`] with enough left over for the
+/// ground it is built on to be sloping too.
+const DECK_SPAN: f32 = 3.0 * profile::EDGE;
+const RAMP_PER_RISE: f32 = 10.0;
+/// How far out from the centreline the lookup will consider a stretch of road
+/// to be under the car. The cross-section, and the wall's own slack beyond it.
+const UNDER_THE_CAR: f32 = profile::EDGE + WALL_INSET;
+/// The furthest round the lap the car can have got since the last time it was
+/// asked, for the purpose of believing it is still on the same deck.
+///
+/// Generous: the car does 28 m/s at the very most and is asked at least once a
+/// frame, so this is a third of a second at a standstill-to-flat-out pace it
+/// does not have. It only has to be small against the distance between the two
+/// decks of a crossing, which is most of a lap — at Suzuka it is 370 m.
+///
+/// What it is for is the difference between the car driving and the car being
+/// put somewhere: a reset, a rescue, a change of circuit, a ghost being placed
+/// at a saved pose. Those are not continuous, and reading them as continuous
+/// would hold the car to a deck it is no longer anywhere near.
+const A_STEP_ALONG: f32 = 12.0;
+/// How near the start/finish line, measured round the lap, the car has to be
+/// for crossing the start plane to be crossing the *line*.
+///
+/// The plane is infinite and the line is not. Without this, a car on the lower
+/// road of a bridge that happens to sit under the start plane completes a lap
+/// by driving under one, and so does a car cutting across a hairpin whose two
+/// legs the plane runs through. The lateral test either side of this was doing
+/// the same job in plan; this does it along the lap.
+const ON_THE_LINE: f32 = 20.0;
+/// How far apart in height two stretches of road have to be before they are two
+/// decks rather than the circuit coming close to itself.
+///
+/// Both happen, and only one of them is a question. Baku runs back past itself
+/// within five metres round the old town and Zandvoort within five at Hugenholtz
+/// — near enough that a car in the middle of one road is inside the lookup's
+/// reach of the other — and at both of them the nearest road is simply the road,
+/// as it has always been. A bridge is the other thing: two roads at one point of
+/// the map with air between them. Half of the shallowest bridge the game builds.
+const A_DECK_APART: f32 = 1.0;
+
 /// How far inside the edge of the loft the car is held. It may run wide onto the
 /// verge, but not off into the sky.
 const WALL_INSET: f32 = 0.6;
@@ -229,6 +290,9 @@ pub(crate) use profile::HALF_WIDTH as ROAD_HALF;
 /// markers themselves read it.
 #[cfg(test)]
 pub(crate) use ribbon::MIN_RADIUS;
+/// A circuit that passes over itself, for anything that needs one to hand.
+#[cfg(test)]
+pub(crate) use tests::figure_of_eight;
 
 #[derive(Resource)]
 pub struct Track {
@@ -253,7 +317,31 @@ impl Track {
             .iter()
             .map(|p| Vec3::new(p[0] * plan, p[1] * HEIGHT_SCALE, p[2] * plan))
             .collect();
-        let ribbon = Ribbon::new(&control, circuit.corners);
+        // What a crossing is in the trace's terms, put into the ribbon's. The
+        // rise is the clearance the crossing asked for plus the deck that
+        // carries it; the deck span and the ramps follow from the road and from
+        // that rise, so a circuit says only where its bridge is and how much
+        // air it wants under it.
+        let over: Vec<Overpass> = circuit
+            .crossings
+            .iter()
+            .map(|c| {
+                // What the two centrelines have to be apart for the two roads
+                // to be `clearance` apart. The lowest thing about the road on
+                // top is the outer edge of its verge and the highest thing
+                // about the road below is the lip of its kerb, so the deck they
+                // are measured between is not the whole of it.
+                let rise = c.clearance + DECK + profile::SECTION_DEEP;
+                Overpass {
+                    at: Vec3::new(c.at[0] * plan, 0.0, c.at[1] * plan),
+                    over: c.over,
+                    rise,
+                    deck: DECK_SPAN,
+                    ramp: RAMP_PER_RISE * rise,
+                }
+            })
+            .collect();
+        let ribbon = Ribbon::new(&control, circuit.corners, &over);
         assert!(
             ribbon.kept() > LEAST_KEPT,
             "{} does not survive Todora's scale: opening its corners left \
@@ -295,6 +383,13 @@ impl Track {
         Transform::from_translation(grid.pos).looking_to(grid.tangent, Vec3::Y)
     }
 
+    /// How far round the lap the grid slot is. What a car put down on the grid
+    /// knows about itself before it has moved, so that the first thing it is
+    /// asked is answered by continuity like every one after it.
+    pub(crate) fn start_along_lap(&self) -> f32 {
+        self.ribbon.before_start(RUN_UP).s
+    }
+
     /// Signed distance past the start/finish plane, along the circuit.
     pub(crate) fn start_along(&self, pos: Vec3) -> f32 {
         let start = self.ribbon.start();
@@ -309,13 +404,17 @@ impl Track {
     /// Written against the car rather than as a distance, because the road is
     /// less than half the width it was and this has to keep meaning the same
     /// thing after it moved.
-    pub(crate) fn on_start_gate(&self, pos: Vec3) -> bool {
+    pub(crate) fn on_start_gate(&self, pos: Vec3, was: Option<f32>) -> bool {
         let start = self.ribbon.start();
-        (pos - start.pos)
-            .reject_from(Vec3::Y)
-            .dot(start.right)
-            .abs()
-            < HALF_WIDTH + 2.0 * crate::car::HALF_TRACK
+        let across = (pos - start.pos).reject_from(Vec3::Y).dot(start.right);
+        if across.abs() >= HALF_WIDTH + 2.0 * crate::car::HALF_TRACK {
+            return false;
+        }
+        // And on the road the line is on, which is not the same question: the
+        // start plane goes on for ever, and the car may be under it rather than
+        // over it.
+        let along = self.fix(pos, was).s;
+        along.min(self.ribbon.length() - along) < ON_THE_LINE
     }
 
     /// A cheap hash of the shape the car actually drives on.
@@ -353,8 +452,83 @@ impl Track {
     }
 
     /// 0 at start/finish, approaching 1 at the end of the lap.
-    pub(crate) fn progress(&self, pos: Vec3) -> f32 {
-        self.ribbon.locate(pos).s / self.ribbon.length()
+    pub(crate) fn progress(&self, pos: Vec3, was: Option<f32>) -> f32 {
+        self.fix(pos, was).s / self.ribbon.length()
+    }
+
+    /// Which piece of road `pos` is on, and where on it.
+    ///
+    /// Almost always there is one piece of road at a point of the map and this
+    /// is the ribbon's own answer. Where the circuit passes over itself there
+    /// are two, and something has to choose. Two things do, in this order.
+    ///
+    /// **Continuity.** `was` is how far round the lap the asker was the last
+    /// time it asked. A car cannot get from one deck of a bridge to the other
+    /// without driving most of a lap, so a deck within [`A_STEP_ALONG`] of
+    /// where the car already was is the deck the car is still on — and that
+    /// holds on a ramp, off the centreline, and while the wall is pushing the
+    /// car sideways, none of which height can be relied on for.
+    ///
+    /// **Height.** With no history, or with history that cannot be reconciled
+    /// — the car has been put somewhere rather than driven there — the deck
+    /// whose surface is nearest the height asked about wins. That is the
+    /// documented answer to the arbitrary query, and it is why a ghost dropped
+    /// onto a saved pose lands on the right road: the pose carries its height.
+    ///
+    /// Ties go to the earlier station, as everywhere else in the lookup.
+    fn fix(&self, pos: Vec3, was: Option<f32>) -> ribbon::Fix {
+        // A circuit that does not pass over itself has one road at a point of
+        // the map, and the nearest of it is it. Thirty-eight of the thirty-nine
+        // take this line and are answered exactly as they were before there
+        // were bridges at all.
+        if self.circuit.crossings.is_empty() {
+            return self.ribbon.locate(pos);
+        }
+        let mut decks = self.ribbon.nearby(pos, UNDER_THE_CAR);
+        let surface =
+            |fix: &ribbon::Fix| fix.point.y + self.profile.height(fix.at, fix.t, fix.lateral);
+        let across = |fix: &ribbon::Fix| (pos - fix.point).reject_from(Vec3::Y).length();
+        let nearest = decks
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| across(a).total_cmp(&across(b)))
+            .map(|(at, _)| at)
+            .expect("at least one deck");
+        // Only what is vertically clear of the nearest road counts as another
+        // deck. The rest is the circuit running back past itself in plan, and
+        // Suzuka does that in places that are not its bridge.
+        let mine = surface(&decks[nearest]);
+        let contenders: Vec<usize> = (0..decks.len())
+            .filter(|&i| i == nearest || (surface(&decks[i]) - mine).abs() > A_DECK_APART)
+            .collect();
+        if contenders.len() == 1 {
+            return decks.swap_remove(nearest);
+        }
+        let lap = self.ribbon.length();
+        let round = |a: f32, b: f32| {
+            let d = (a - b).abs();
+            d.min(lap - d)
+        };
+        let picked = was
+            .and_then(|was| {
+                contenders
+                    .iter()
+                    .copied()
+                    .filter(|&i| round(decks[i].s, was) < A_STEP_ALONG)
+                    .min_by(|&a, &b| round(decks[a].s, was).total_cmp(&round(decks[b].s, was)))
+            })
+            .unwrap_or_else(|| {
+                contenders
+                    .iter()
+                    .copied()
+                    .min_by(|&a, &b| {
+                        (surface(&decks[a]) - pos.y)
+                            .abs()
+                            .total_cmp(&(surface(&decks[b]) - pos.y).abs())
+                    })
+                    .expect("at least one deck")
+            });
+        decks.swap_remove(picked)
     }
 
     /// How sharply the circuit turns `by` metres further along the lap.
@@ -385,7 +559,7 @@ impl Track {
     /// reaches the car through [`Track::ground`], so the driving model stays in
     /// one place.
     pub(crate) fn hold(&self, transform: &mut Transform, car: &mut Car, dt: f32) {
-        let mut ground = self.ground(transform.translation);
+        let mut ground = self.ground_from(transform.translation, car.along);
         // Off the road and going nowhere: a spin into the barrier leaves the car
         // nose-first against it, where everything it does is outward and
         // everything outward is taken away.
@@ -410,8 +584,12 @@ impl Track {
             if outward > 0.0 {
                 car.velocity -= ground.right * (outward * (1.0 + BOUNCE) * side);
             }
-            ground = self.ground(transform.translation);
+            ground = self.ground_from(transform.translation, car.along);
         }
+        // Read back after the wall has moved the car, and before the height is
+        // applied, so that what the car is put down on and what it is recorded
+        // as being on are the same road.
+        car.along = Some(ground.s);
 
         transform.translation.y = ground.height;
         // Sit the car on the slope rather than level on top of it. On the steep
@@ -426,11 +604,17 @@ impl Track {
     /// pointing the way the lap runs. What the driver gets from the reset key,
     /// and what [`Track::hold`] does for a car that has stranded itself.
     pub(crate) fn rescue(&self, transform: &mut Transform, car: &mut Car) {
-        let ground = self.ground(transform.translation);
+        let ground = self.ground_from(transform.translation, car.along);
         *transform = Transform::from_translation(ground.centre)
             .looking_to(ground.tangent, Vec3::Y)
             .with_scale(transform.scale);
-        *car = Car::default();
+        *car = Car {
+            // Everything about the lap the car was having is thrown away; where
+            // it is is not, because it has been put back on the road it was
+            // taken off and it is still on that road.
+            along: Some(ground.s),
+            ..Car::default()
+        };
     }
 
     /// What the car is standing on. The loft is the only surface in the world,
@@ -438,7 +622,14 @@ impl Track {
     /// rides the kerb because the kerb is 5 cm proud in the profile, not because
     /// anything says so twice.
     pub(crate) fn ground(&self, pos: Vec3) -> Ground {
-        let fix = self.ribbon.locate(pos);
+        self.ground_from(pos, None)
+    }
+
+    /// The same, for something that knows where it was last time. See
+    /// [`Track::fix`]: on a circuit that passes over itself, that is the
+    /// difference between the road the car is on and the one under it.
+    pub(crate) fn ground_from(&self, pos: Vec3, was: Option<f32>) -> Ground {
+        let fix = self.fix(pos, was);
         Ground {
             centre: fix.point,
             height: fix.point.y + self.profile.height(fix.at, fix.t, fix.lateral),
@@ -680,11 +871,11 @@ mod tests {
             let mut crossings = 0;
             let mut wraps = 0;
             let mut climbed = 0.0f32;
-            let mut was_progress = track.progress(off_line(last));
+            let mut was_progress = track.progress(off_line(last), None);
             let mut was_along = track.start_along(off_line(last));
             for station in stations {
                 let pos = off_line(station);
-                let progress = track.progress(pos);
+                let progress = track.progress(pos, None);
                 let step = progress - was_progress;
                 if step < -0.5 {
                     wraps += 1;
@@ -699,7 +890,7 @@ mod tests {
                 was_progress = progress;
 
                 let along = track.start_along(pos);
-                if was_along <= 0.0 && along > 0.0 && track.on_start_gate(pos) {
+                if was_along <= 0.0 && along > 0.0 && track.on_start_gate(pos, None) {
                     crossings += 1;
                 }
                 was_along = along;
@@ -879,7 +1070,7 @@ mod tests {
             assert!(fix.lateral.abs() < 0.01, "{name}");
             let lap = track.ribbon.length();
             assert!(
-                track.progress(pose.translation) > 1.0 - (RUN_UP + 1.0) / lap,
+                track.progress(pose.translation, None) > 1.0 - (RUN_UP + 1.0) / lap,
                 "{name} sets the car down further back than the run-up"
             );
         }
@@ -912,7 +1103,7 @@ mod tests {
     fn the_grid_is_a_run_up_to_the_line() {
         for (name, track) in every_track() {
             let pose = track.start_transform();
-            let back = (1.0 - track.progress(pose.translation)) * track.ribbon.length();
+            let back = (1.0 - track.progress(pose.translation, None)) * track.ribbon.length();
             assert!(
                 (RUN_UP - 1.0..RUN_UP + 1.0).contains(&back),
                 "{name} sets the car down {back:.1} m back along the road, not {RUN_UP}"
@@ -1250,6 +1441,391 @@ mod tests {
         );
     }
 
+    /// A circuit that passes over itself, built to order.
+    ///
+    /// A lemniscate: two lobes meeting at the origin at right angles, which is
+    /// the smallest honest figure of eight there is. `turn` rolls the start
+    /// line round it, so that the crossing can be put a long way from the line
+    /// or right on top of it. Flat, because the point of it is the bridge and a
+    /// bridge the elevation model helped with would prove less.
+    ///
+    /// This is the fixture the bridge was built against, before Suzuka. A real
+    /// circuit brings a surveyed layout, a real elevation model and one
+    /// crossing whose geometry is whatever it is; this brings a crossing at a
+    /// known place, at a known angle, with known heights either side of it, and
+    /// it can be asked for another one somewhere else.
+    pub(crate) fn figure_of_eight(turn: f32, over: f32, clearance: f32) -> &'static Circuit {
+        const FIXES: usize = 240;
+        const REACH: f32 = 950.0;
+        // A negative turn runs the same shape the other way round, which is a
+        // circuit whose bridge is met from the other end and whose lap counts
+        // the other way. Everything about the crossing is the same; everything
+        // about arriving at it is reversed.
+        let (turn, widdershins) = (turn.abs(), turn < 0.0);
+        let plan: Vec<[f32; 3]> = (0..FIXES)
+            .map(|k| {
+                let k = if widdershins { FIXES - k - 1 } else { k };
+                let t = turn + std::f32::consts::TAU * k as f32 / FIXES as f32;
+                let (sin, cos) = t.sin_cos();
+                let below = 1.0 + sin * sin;
+                [REACH * cos / below, 0.0, REACH * sin * cos / below]
+            })
+            .collect();
+        Box::leak(Box::new(Circuit {
+            id: "figure-of-eight",
+            name: "Figure of Eight",
+            corners: 1.0,
+            lap: 0.0,
+            plan_scale: 1.0,
+            centreline: Box::leak(plan.into_boxed_slice()),
+            crossings: Box::leak(Box::new([circuits::Crossing {
+                at: [0.0, 0.0],
+                over,
+                clearance,
+                provenance: "a fixture: the crossing is where the shape puts it",
+            }])),
+        }))
+    }
+
+    /// A bridge has the air under it that was asked for, everywhere the two
+    /// roads are one above the other.
+    ///
+    /// Measured over the whole of the overlapping footprint rather than at the
+    /// point where the centrelines cross, because the roads are 7.3 m wide and
+    /// they cross at an angle: the tightest place is out at the edge of one of
+    /// them, not in the middle. Every rib of the upper deck, at every station
+    /// of it that has road underneath, against the surface of whatever is
+    /// underneath at that point of the map.
+    ///
+    /// The clearance is measured to the *underside* of the deck, which is
+    /// [`DECK`] below the road. That is what a car driving under it has over
+    /// its head, and it is the only part of the two numbers that a driver ever
+    /// sees.
+    #[test]
+    fn a_bridge_has_the_air_under_it_that_was_asked_for() {
+        for circuit in bridged() {
+            air_under(circuit);
+        }
+    }
+
+    /// A bridge says where it came from, and says which half of it is which.
+    ///
+    /// The only thing in a circuit module that is not a fact about the real
+    /// circuit is the clearance: a 90 m ground model has nothing to say about
+    /// how far a road deck is above the road under it, and an authored number
+    /// dressed up as a measured one would be the worst kind of thing to leave
+    /// in a data file. So every crossing carries a line about where each half
+    /// of it came from, and this is what stops that line being dropped.
+    #[test]
+    fn a_bridge_says_where_it_came_from() {
+        let mut found = 0;
+        for circuit in circuits::all() {
+            for crossing in circuit.crossings {
+                found += 1;
+                assert!(
+                    crossing.provenance.contains("authored"),
+                    "{}: a crossing whose clearance does not say it was authored: {}",
+                    circuit.name,
+                    crossing.provenance
+                );
+                assert!(
+                    crossing.clearance > 0.0 && crossing.clearance < 10.0,
+                    "{}: a clearance of {} m",
+                    circuit.name,
+                    crossing.clearance
+                );
+                assert!((0.0..1.0).contains(&crossing.over));
+            }
+        }
+        assert_eq!(found, 1, "the game has {found} crossings, not one");
+    }
+
+    /// Every circuit that passes over itself: the one in the game, and the
+    /// fixture the feature was built against before there was one.
+    fn bridged() -> impl Iterator<Item = &'static Circuit> {
+        circuits::all()
+            .iter()
+            .filter(|circuit| !circuit.crossings.is_empty())
+            .chain([figure_of_eight(0.0, 0.75, 1.6)])
+    }
+
+    /// Where a circuit's declared crossings are, in the finished plan.
+    fn crossings_of(circuit: &'static Circuit) -> Vec<Vec3> {
+        let plan = PLAN_SCALE * circuit.plan_scale;
+        circuit
+            .crossings
+            .iter()
+            .map(|c| Vec3::new(c.at[0] * plan, 0.0, c.at[1] * plan))
+            .collect()
+    }
+
+    fn air_under(circuit: &'static Circuit) {
+        let track = Track::new(circuit);
+        let at = crossings_of(circuit);
+        let wanted = circuit
+            .crossings
+            .iter()
+            .map(|c| c.clearance)
+            .fold(f32::MAX, f32::min);
+        let stations = track.ribbon.stations();
+        let lap = track.ribbon.length();
+        let mut tightest = f32::MAX;
+        let mut measured = 0;
+        for (i, station) in stations.iter().enumerate() {
+            // Only at a bridge. Elsewhere a circuit can perfectly well have one
+            // stretch a couple of metres above another and a few metres to the
+            // side of it — Suzuka's esses do, on the slope they are cut into —
+            // and nothing about that is a span with air under it.
+            if !at
+                .iter()
+                .any(|at| (station.pos - *at).reject_from(Vec3::Y).length() < ribbon::AT_CROSSING)
+            {
+                continue;
+            }
+            for rib in track.profile.at(i) {
+                let on_top = station.pos + station.right * rib.0 + Vec3::Y * rib.1;
+                for below in track.ribbon.nearby(on_top, UNDER_THE_CAR) {
+                    let apart = (below.s - station.s).abs();
+                    // The road this rib was swept from is not underneath it.
+                    if apart.min(lap - apart) < A_STEP_ALONG {
+                        continue;
+                    }
+                    let under =
+                        below.point.y + track.profile.height(below.at, below.t, below.lateral);
+                    // Only where this rib really is above the other road, and
+                    // not beside it: a bridge is not asked to clear its own
+                    // approach.
+                    if on_top.y - under < A_DECK_APART {
+                        continue;
+                    }
+                    measured += 1;
+                    tightest = tightest.min(on_top.y - DECK - under);
+                }
+            }
+        }
+        assert!(
+            measured > 100,
+            "{}: only {measured} places where one road is over another, so it is \
+             not crossing itself",
+            circuit.name
+        );
+        assert!(
+            tightest > wanted - 0.01,
+            "{}: the tightest place under the bridge has {tightest:.2} m of air, \
+             against the {wanted:.2} m it was built with",
+            circuit.name
+        );
+    }
+
+    /// A bridge is road, so it obeys the same rules the rest of the road does:
+    /// the grade cap, and one lap's worth of everything.
+    ///
+    /// The cap is the one worth saying out loud, because the bridge is built
+    /// *after* the cap has run — it has to be, or the cap takes it straight
+    /// back off — so nothing downstream is checking it and the ramps have to be
+    /// right by construction. A raised cosine's steepest point is half of π
+    /// times its average, so a rise of `r` over a ramp of [`RAMP_PER_RISE`]
+    /// times `r` peaks at 15.7% however big the bridge is, on top of whatever
+    /// the ground was doing — which the lift levels to a straight line first,
+    /// so that "whatever the ground was doing" is a number and not a worry.
+    #[test]
+    fn a_bridge_is_a_piece_of_road_like_any_other() {
+        for circuit in bridged().chain([figure_of_eight(1.4, 0.0, 1.6)]) {
+            let track = Track::new(circuit);
+            let stations = track.ribbon.stations();
+            let n = stations.len();
+            let step = track.ribbon.length() / n as f32;
+            let mut steepest = 0.0f32;
+            for i in 0..n {
+                let (a, b) = (stations[i].pos, stations[(i + 1) % n].pos);
+                let run = (b - a).reject_from(Vec3::Y).length().max(1e-4);
+                steepest = steepest.max((b.y - a.y).abs() / run);
+            }
+            assert!(
+                steepest <= ribbon::MAX_GRADE,
+                "{}: the bridge ramp reaches {steepest:.3}, past the cap of {}",
+                circuit.name,
+                ribbon::MAX_GRADE
+            );
+            // There is a deck, it is a deck's worth thick at the middle, and
+            // it is drawn for exactly as long as its span and its ramps say.
+            // Both come out of `Crossing`, so a bridge is described rather than
+            // drawn by hand.
+            let thickest = stations.iter().map(|s| s.deck).fold(0.0f32, f32::max);
+            assert!(
+                (thickest - 1.0).abs() < 1e-3,
+                "{}: the deck is {thickest:.2} of a deck thick at its middle",
+                circuit.name
+            );
+            let drawn = stations.iter().filter(|s| s.deck > 0.0).count() as f32 * step;
+            let mut span = 0.0f32;
+            for crossing in circuit.crossings {
+                let rise = crossing.clearance + DECK + profile::SECTION_DEEP;
+                span += 2.0 * (DECK_SPAN + RAMP_PER_RISE * rise);
+            }
+            assert!(
+                (drawn - span).abs() < 2.0 * step,
+                "{}: there is {drawn:.0} m of deck where its span and ramps come \
+                 to {span:.0} m",
+                circuit.name
+            );
+
+            // And the two roads that meet are as far apart as the clearance
+            // needs, however much of that the elevation model had already given
+            // and however much had to be added. Suzuka's model gives all of it
+            // and more; the figure of eight is flat and is given none.
+            for (crossing, at) in circuit.crossings.iter().zip(crossings_of(circuit)) {
+                let rise = crossing.clearance + DECK + profile::SECTION_DEEP;
+                let mut heights: Vec<f32> = stations
+                    .iter()
+                    .filter(|s| {
+                        (s.pos - at).reject_from(Vec3::Y).length() < 2.0 * profile::HALF_WIDTH
+                    })
+                    .map(|s| s.pos.y)
+                    .collect();
+                heights.sort_by(f32::total_cmp);
+                let apart = heights[heights.len() - 1] - heights[0];
+                assert!(
+                    apart > rise - 0.01,
+                    "{}: the two roads that meet are {apart:.2} m apart where the \
+                     clearance needs {rise:.2} m",
+                    circuit.name
+                );
+            }
+        }
+    }
+
+    /// What the car stands on over a bridge is the deck it is on, and the two
+    /// things that decide that both work.
+    ///
+    /// Walked over every station of both decks, on the centreline and out at
+    /// both wheels, which is where a lookup by height alone is least reliable —
+    /// the outer wheel on the deck is lower than the middle of it, and on a
+    /// ramp it is lower still.
+    ///
+    /// Three questions, and the third is the one worth having. Told where it
+    /// was, the lookup keeps the car on the road it was on. Told nothing, it
+    /// picks by height and gets the same answer, which is what a ghost dropped
+    /// onto a saved pose relies on. Told that it was on the *other* deck, it
+    /// says the other deck — because if it did not, continuity would not be
+    /// deciding anything and the first answer would be luck.
+    #[test]
+    fn what_the_car_stands_on_over_a_bridge_is_the_deck_it_is_on() {
+        let track = Track::new(figure_of_eight(0.0, 0.75, 1.6));
+        let stations = track.ribbon.stations();
+        let lap = track.ribbon.length();
+        let wheel = crate::car::HALF_TRACK;
+        let round = |a: f32, b: f32| {
+            let d = (a - b).abs();
+            d.min(lap - d)
+        };
+        let mut crossed = 0;
+        for (i, station) in stations.iter().enumerate() {
+            for across in [-wheel, 0.0, wheel] {
+                let lateral = across;
+                let on = station.pos
+                    + station.right * lateral
+                    + Vec3::Y * track.profile.height(i, 0.0, lateral);
+                // Told where it was.
+                let kept = track.fix(on, Some(station.s));
+                assert!(
+                    round(kept.s, station.s) < 1.0,
+                    "at s={} and {across:.1} m across, the car reads as being at \
+                     s={} — it has changed decks standing still",
+                    station.s,
+                    kept.s
+                );
+                // Told nothing.
+                let guessed = track.fix(on, None);
+                assert!(
+                    round(guessed.s, station.s) < 1.0,
+                    "at s={} and {across:.1} m across, a lookup with no history \
+                     reads s={}",
+                    station.s,
+                    guessed.s
+                );
+                // Told it was on the other deck, where there is one.
+                let others: Vec<f32> = track
+                    .ribbon
+                    .nearby(on, UNDER_THE_CAR)
+                    .iter()
+                    .map(|fix| fix.s)
+                    .filter(|s| round(*s, station.s) > A_STEP_ALONG)
+                    .collect();
+                for other in others {
+                    crossed += 1;
+                    let swapped = track.fix(on, Some(other));
+                    assert!(
+                        round(swapped.s, other) < 1.0,
+                        "told it was at s={other}, the lookup put the car at \
+                         s={} instead",
+                        swapped.s
+                    );
+                }
+            }
+        }
+        assert!(
+            crossed > 20,
+            "only {crossed} places with two roads to choose between: the fixture \
+             is not crossing itself"
+        );
+    }
+
+    /// Driving under the start line is not a lap.
+    ///
+    /// The start plane goes on for ever and the start line does not. With the
+    /// crossing a few metres past the line, the lower road passes under the
+    /// plane, across it, and within a road's width of the middle of it — every
+    /// test the gate used to make — and it is not the line, because it is nine
+    /// metres below it and half a lap away.
+    #[test]
+    fn driving_under_the_start_line_is_not_a_lap() {
+        // The crossing put within half a metre of the start line, which is the
+        // only place this question can be asked from.
+        let track = Track::new(figure_of_eight(1.5, 0.0, 1.6));
+        let stations = track.ribbon.stations();
+        let lap = track.ribbon.length();
+        let start = stations[0];
+        let round = |a: f32| {
+            let d = (a - start.s).abs();
+            d.min(lap - d)
+        };
+        // The stretch that goes under, where it passes beneath the line.
+        let below: Vec<&ribbon::Station> = stations
+            .iter()
+            .filter(|s| {
+                round(s.s) > A_STEP_ALONG && (s.pos - start.pos).reject_from(Vec3::Y).length() < 2.0
+            })
+            .collect();
+        assert!(
+            !below.is_empty(),
+            "nothing passes under the line, so there is nothing to refuse"
+        );
+        for station in &below {
+            assert!(
+                start.pos.y - station.pos.y > A_DECK_APART,
+                "the road under the line is not under it"
+            );
+            // It crosses the plane, it is beside the middle of the line, and it
+            // is still not the line.
+            let across = (station.pos - start.pos)
+                .reject_from(Vec3::Y)
+                .dot(start.right);
+            assert!(across.abs() < HALF_WIDTH + 2.0 * crate::car::HALF_TRACK);
+            assert!(
+                !track.on_start_gate(station.pos, Some(station.s)),
+                "a lap was completed on the road under the line"
+            );
+            assert!(
+                !track.on_start_gate(station.pos, None),
+                "a lap was completed on the road under the line, with no history"
+            );
+        }
+        // And the line itself still opens, which is the other half of it.
+        assert!(track.on_start_gate(start.pos, Some(start.s)));
+        assert!(track.on_start_gate(start.pos, None));
+    }
+
     /// A lap is a lap of the surface it was driven on, and the fingerprint has
     /// to move when that surface does — in any of the ways it can.
     ///
@@ -1303,7 +1879,7 @@ mod tests {
                 )
             })
             .collect();
-        let taller = Ribbon::new(&taller, circuit.corners);
+        let taller = Ribbon::new(&taller, circuit.corners, &[]);
         let fitted = Profile::fit(&taller).expect("the same circuit still carries a road");
         assert_ne!(
             mine,

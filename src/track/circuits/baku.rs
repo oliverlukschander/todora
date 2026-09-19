@@ -24,6 +24,7 @@ pub(super) const CIRCUIT: Circuit = Circuit {
     lap: 1930.2,
     plan_scale: 2.45,
     centreline: CENTRELINE,
+    crossings: &[],
 };
 
 /// Metres from the circuit centroid. Y is height above the lowest point.

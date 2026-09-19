@@ -19,6 +19,13 @@ questions that come first:
     finished_crossings          does the centreline still cross itself after
                                 splining, exaggerating and opening
 
+The cross-section columns are a *plan* answer and heights are zero here, so a
+circuit that crosses itself comes out wanting a cross-section of less than
+nothing however good a bridge the engine would build it. Read the two together:
+`carries false` with `finished_crossings 0` is a circuit that will not fit,
+and `carries false` with `finished_crossings 1` is a circuit that needs a
+`Crossing` in its module and then will.
+
 The cross-section columns reproduce `Profile::fit`: the same per-station,
 per-side room, the same two bounds, the same taper. The constants come out of
 `src/track/profile.rs` by name rather than being copied here, so the probe
@@ -172,7 +179,10 @@ min_radius,narrowest,widest,carries");
             .iter()
             .map(|p| Vec3::new(p[0] * (0.4 / 3.0) * scale, 0.0, p[2] * (0.4 / 3.0) * scale))
             .collect();
-        let r = ribbon::Ribbon::new(&control, *corners);
+        // No bridges. Heights are zero here, so a bridge would have nothing to
+        // lift the road over; what the screen reports instead is that one is
+        // needed, in `finished_crossings`.
+        let r = ribbon::Ribbon::new(&control, *corners, &[]);
         let line: Vec<Vec3> = r.stations().iter().map(|s| s.pos).collect();
         let (narrowest, widest) = fit(&r);
         let carries = narrowest >= HALF_WIDTH + LEAST_VERGE;

@@ -323,6 +323,15 @@
     "fixes": 152,
     "lap_km": 6.986
   },
+  "suzuka": {
+    "source_id": "jp-1962",
+    "name": "Suzuka",
+    "source": "bacinger/f1-circuits",
+    "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
+    "heights": "Open-Meteo DEM",
+    "fixes": 171,
+    "lap_km": 5.818
+  },
   "watkins_glen": {
     "source_id": "us-1956",
     "name": "Watkins Glen",

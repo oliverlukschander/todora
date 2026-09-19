@@ -100,7 +100,10 @@ fn lay(track: Res<Track>, mut marks: ResMut<Marks>, cars: Query<(&Transform, &Ca
 
     for (i, side) in [-1.0f32, 1.0].into_iter().enumerate() {
         let hub = axle + right * (side * HALF_TRACK);
-        let height = track.ground(hub).height + LIFT;
+        // The deck the car is on. A tyre mark laid on the road under a bridge
+        // while the car is on top of it would be a mark nobody can see, drawn
+        // through the span.
+        let height = track.ground_from(hub, car.along).height + LIFT;
         let edge = [
             Vec3::new(hub.x, height, hub.z) - right * (WHEEL_WIDTH * 0.5),
             Vec3::new(hub.x, height, hub.z) + right * (WHEEL_WIDTH * 0.5),

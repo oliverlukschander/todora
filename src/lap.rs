@@ -19,7 +19,7 @@
 use bevy::prelude::*;
 
 use crate::Reset;
-use crate::car::{DriveSet, Player};
+use crate::car::{Car, DriveSet, Player};
 use crate::input::InputSet;
 use crate::track::{Track, TrackSet};
 
@@ -129,14 +129,19 @@ fn gate(
     track: Res<Track>,
     mut timer: ResMut<LapTimer>,
     mut finished: MessageWriter<LapFinished>,
-    cars: Query<&Transform, With<Player>>,
+    cars: Query<(&Transform, &Car), With<Player>>,
 ) {
-    let Ok(car) = cars.single() else {
+    let Ok((at, car)) = cars.single() else {
         return;
     };
-    let pos = car.translation;
+    let pos = at.translation;
     let along = track.start_along(pos);
-    let progress = track.progress(pos);
+    // Where the car says it is round the lap, which on a circuit that passes
+    // over itself is the difference between the lap the driver is on and the
+    // road underneath it. The clock reads the car's own answer rather than
+    // asking the map again, so that a lap is timed on the road it was driven
+    // on — see `Track::fix`.
+    let progress = track.progress(pos, car.along);
     if let Some(previous) = timer.prev_progress {
         // Unwrap the closed circuit, retaining direction. Reversing across the
         // line spends progress rather than instantly qualifying most of a lap.
@@ -147,7 +152,7 @@ fn gate(
         timer.prev_along = Some(along);
         return;
     };
-    if prev <= 0.0 && along > 0.0 && track.on_start_gate(pos) {
+    if prev <= 0.0 && along > 0.0 && track.on_start_gate(pos, car.along) {
         if !timer.running {
             // The end of the run-up. Everything before this is the driver's own
             // time, spent getting up to speed, and none of it is the lap.

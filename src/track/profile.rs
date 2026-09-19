@@ -27,7 +27,7 @@ use bevy::{
 };
 
 use super::markers;
-use super::ribbon::Ribbon;
+use super::ribbon::{Ribbon, Station};
 
 /// Half of the 3.3 m road, kerbs and edge lines included.
 ///
@@ -165,6 +165,49 @@ const STRIPE: usize = 2;
 /// Fraction of tarmac grip the kerbs and the grass give back.
 pub(super) const KERB_GRIP: f32 = 0.72;
 pub(super) const GRASS_GRIP: f32 = 0.38;
+
+/// How far a cross-section reaches from the top of its kerb to the bottom of
+/// its verge, on a circuit with room for all of it.
+///
+/// What a bridge has to be raised by, over and above the air it is meant to
+/// leave and the deck that carries it: the lowest thing about the road on top
+/// is the outer edge of its verge and the highest thing about the road below is
+/// the lip of its kerb, and the clearance a driver sees is between those two
+/// rather than between two centrelines.
+pub(super) const SECTION_DEEP: f32 =
+    GRASS_FALL * GRASS_OF_VERGE * VERGE + SKIRT_FALL * (VERGE - GRASS_OF_VERGE * VERGE);
+
+/// How thick the deck of a bridge is, from the road on top of it to the soffit
+/// underneath. The same figure [`super::DECK`] reserves when it decides how far
+/// the road has to be lifted, so what is drawn and what was cleared for are one
+/// number.
+pub(super) const DECK: f32 = super::DECK;
+/// Strips the structure under a bridge is made of: a soffit, and a fascia down
+/// each side of it. Counted only by the tests; the loft writes them out as it
+/// goes.
+#[cfg(test)]
+pub(super) const UNDER: usize = 3;
+/// How far the road has to be off the ground before anything is drawn holding
+/// it up.
+///
+/// A ramp leaves the ground at nothing a station, so without a floor the first
+/// strip of structure is a strip of no width and two triangles of no area — a
+/// thing that renders as nothing, shades as nothing, and shows up in
+/// `no_triangle_of_the_loft_is_degenerate` as a defect, which is what it is.
+/// Under five centimetres the road is on its embankment and there is nothing to
+/// hold up.
+const SHOWS: f32 = 0.05;
+
+/// How deep the structure under a station is: a deck's worth over the span of a
+/// bridge, tapering out with its ramps, and nothing at all where the taper has
+/// got thin enough that a strip of it would be a strip of nothing.
+fn deep(station: &Station) -> f32 {
+    let deep = DECK * station.deck;
+    if deep <= SHOWS { 0.0 } else { deep }
+}
+/// Concrete. Not a [`Band`], because a band is a strip of the sweep and this is
+/// not swept — it exists only where the road is off the ground.
+const STRUCTURE: (f32, f32, f32) = (0.46, 0.45, 0.43);
 
 /// Ribs in one cross-section, and strips between them.
 pub(super) const RIBS: usize = 10;
@@ -407,6 +450,18 @@ impl Profile {
         }
     }
 
+    /// How many quads of structure this circuit's loft carries under its
+    /// bridges. None at all on thirty-nine of the forty.
+    #[cfg(test)]
+    pub(super) fn structure(&self, ribbon: &Ribbon) -> usize {
+        let stations = ribbon.stations();
+        let n = stations.len();
+        UNDER
+            * (0..n)
+                .filter(|&i| deep(&stations[i]) > 0.0 && deep(&stations[(i + 1) % n]) > 0.0)
+                .count()
+    }
+
     /// The narrowest and widest the cross-section gets on this circuit, either
     /// side. What the report prints, and the one number that used to be the
     /// whole answer — the game itself never asks now, because nothing about the
@@ -513,6 +568,63 @@ impl Profile {
                 }
                 let base = (positions.len() - 3) as u32;
                 indices.extend_from_slice(&[base, base + 1, base + 2]);
+            }
+        }
+
+        // What holds a bridge up, where there is one. Not part of the sweep:
+        // the sweep makes one surface seen from above, and this is the only
+        // thing in the mesh that is meant to be seen from below. Drawn only
+        // where the road was lifted off the ground to get over something — see
+        // `Station::lifted` — and as deep there as the road was lifted, up to
+        // the thickness of a deck, so that a bridge comes out of its own
+        // embankment rather than beginning in mid-air.
+        //
+        // Three strips: a soffit across the underside, and a fascia down each
+        // side from the edge of the road to meet it. Between them they close
+        // the one place a one-sided road would be seen through, which is from
+        // underneath a bridge, which is exactly where a driver on the lower
+        // road is looking.
+        let under = paint(STRUCTURE.0, STRUCTURE.1, STRUCTURE.2);
+        for i in 0..n {
+            let j = (i + 1) % n;
+            if deep(&stations[i]) <= 0.0 || deep(&stations[j]) <= 0.0 {
+                continue;
+            }
+            let rim = |at: usize, side: usize| {
+                let ribs = &sections[at];
+                let rib = if side == 0 { ribs[0] } else { ribs[RIBS - 1] };
+                stations[at].pos + stations[at].right * rib.0 + Vec3::Y * rib.1
+            };
+            let sink = |at: usize, side: usize| rim(at, side) - Vec3::Y * deep(&stations[at]);
+            // Each quad is given in the same order the swept ones are — this
+            // station's two corners, then the next station's — and which way it
+            // ends up facing is which way round those two corners go. The
+            // soffit is the road's own order reversed, so it looks down where
+            // the road looks up; a fascia runs from the road's edge down to the
+            // soffit, so it looks out.
+            for corners in [
+                [sink(i, 1), sink(i, 0), sink(j, 1), sink(j, 0)],
+                [sink(i, 0), rim(i, 0), sink(j, 0), rim(j, 0)],
+                [rim(i, 1), sink(i, 1), rim(j, 1), sink(j, 1)],
+            ] {
+                let normal = (corners[1] - corners[0])
+                    .cross(corners[2] - corners[0])
+                    .normalize_or(Vec3::Y)
+                    .to_array();
+                for corner in corners {
+                    positions.push(corner.to_array());
+                    normals.push(normal);
+                    colors.push(under);
+                }
+                let base = (positions.len() - 4) as u32;
+                indices.extend_from_slice(&[
+                    base,
+                    base + 1,
+                    base + 2,
+                    base + 1,
+                    base + 3,
+                    base + 2,
+                ]);
             }
         }
 
@@ -818,8 +930,12 @@ mod tests {
                         .lerp(next.right, t)
                         .normalize_or(station.right);
                     for rib in track.profile.between(i, t) {
-                        let at = along + across * rib.0;
-                        let found = track.ribbon.locate(at);
+                        // The rib in the world, height and all. The height is
+                        // what tells a bridge from the road under it, and the
+                        // plan cannot: at a crossing the two are the same point
+                        // of the map on purpose.
+                        let at = along + across * rib.0 + Vec3::Y * rib.1;
+                        let found = track.fix(at, None);
                         worst = worst.max((found.lateral - rib.0).abs());
                         assert!(
                             (found.lateral - rib.0).abs() < 0.05,
@@ -847,7 +963,8 @@ mod tests {
     /// nothing. A verge narrowing to a line would make a strip of them.
     #[test]
     fn no_triangle_of_the_loft_is_degenerate() {
-        for (name, track) in every_track() {
+        let over = Track::new(super::super::figure_of_eight(0.0, 0.75, 1.6));
+        for (name, track) in every_track().chain([("a figure of eight", over)]) {
             let mesh = track.profile.loft(&track.ribbon);
             let positions = mesh
                 .attribute(Mesh::ATTRIBUTE_POSITION)
@@ -910,6 +1027,103 @@ mod tests {
                  drawn are {worst:.4} m apart, which is more than the kerb is proud"
             );
         }
+    }
+
+    /// What holds a bridge up faces away from the road, and stays out of the
+    /// air the bridge was built to leave.
+    ///
+    /// The other half of `loft_faces_up`, for the one part of the mesh that is
+    /// meant to be seen from below. Every face of the structure points out of
+    /// the solid it is a face of: the soffit down, the two fascias out to their
+    /// own sides. A fascia wound the other way would be a bridge you could see
+    /// into from beside it, and a soffit wound the other way would be a bridge
+    /// that was not there at all when you drove under it, which is the thing
+    /// this whole strip exists to prevent.
+    ///
+    /// And it takes nothing from the clearance: the soffit is where the deck
+    /// was reserved to be, [`DECK`] under the road and no further, so the air
+    /// measured in `a_bridge_has_the_air_under_it_that_was_asked_for` is air the
+    /// structure does not come down into.
+    #[test]
+    fn what_holds_a_bridge_up_faces_away_from_the_road() {
+        let circuit = super::super::figure_of_eight(0.0, 0.75, 1.6);
+        let track = Track::new(circuit);
+        let quads = track.profile.structure(&track.ribbon);
+        assert!(quads > 0, "the bridge has nothing holding it up");
+        assert_eq!(quads % UNDER, 0, "a soffit without both of its fascias");
+
+        let mesh = track.profile.loft(&track.ribbon);
+        let positions = mesh
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .expect("the loft has positions")
+            .as_float3()
+            .expect("positions are float3");
+        let Some(Indices::U32(indices)) = mesh.indices() else {
+            panic!("loft lost its indices");
+        };
+        let from = indices.len() - quads * 6;
+        let mut soffits = 0;
+        let mut sides = 0;
+        for face in indices[from..].chunks_exact(3) {
+            let [a, b, c] = [0, 1, 2].map(|k| Vec3::from(positions[face[k] as usize]));
+            let normal = (b - a).cross(c - a);
+            assert!(
+                normal.length_squared() > 1e-10,
+                "a face of the structure has no area"
+            );
+            let normal = normal.normalize();
+            // Out of the road: either down, or sideways. Never up, which is
+            // where the road already is.
+            assert!(
+                normal.y < 0.01,
+                "a face of the structure at {a} points upward"
+            );
+            if normal.y < -0.9 {
+                soffits += 1;
+            } else {
+                sides += 1;
+                assert!(
+                    normal.y.abs() < 0.5,
+                    "a fascia at {a} lies down rather than standing up"
+                );
+            }
+        }
+        assert_eq!(soffits, quads / UNDER * 2, "the soffit is not flat");
+        assert_eq!(sides, quads / UNDER * 4, "there are not two fascias");
+
+        // The structure hangs from the road by exactly what was reserved for
+        // it, which is what makes the clearance measured elsewhere the
+        // clearance a driver gets. The lowest thing about a bridge is the
+        // soffit under the outer edge of its verge; `a_bridge_has_the_air_under
+        // _it_that_was_asked_for` measures to that same point, because it
+        // measures from every rib and takes the worst.
+        let stations = track.ribbon.stations();
+        let mut lifted = 0;
+        for (i, station) in stations.iter().enumerate() {
+            if deep(station) <= 0.0 {
+                assert!(
+                    DECK * station.deck <= SHOWS,
+                    "a station {:.2} m off the ground has nothing holding it up",
+                    station.deck
+                );
+                continue;
+            }
+            lifted += 1;
+            assert!(
+                deep(station) <= DECK + 1e-6,
+                "the deck is {:.2} m thick where the clearance reserved {DECK}",
+                deep(station)
+            );
+            let ribs = track.profile.at(i);
+            let soffit = ribs[0].1.min(ribs[RIBS - 1].1) - deep(station);
+            assert!(
+                soffit >= -(SECTION_DEEP + DECK) - 1e-6,
+                "the soffit hangs {soffit:.2} m under the centreline, past the \
+                 {:.2} m the rise allowed for it",
+                SECTION_DEEP + DECK
+            );
+        }
+        assert!(lifted > 40, "only {lifted} stations of bridge");
     }
 
     /// A closed oval: two straights `gap` apart, joined by half circles. The
@@ -1071,9 +1285,10 @@ mod tests {
             };
             let swept = stations.len() * BANDS * 4;
             let standing = markers::FACES * 3;
+            let holding_up = track.profile.structure(&track.ribbon) * 4;
             assert_eq!(
                 colors.len(),
-                swept + diamonds.len() * standing,
+                swept + diamonds.len() * standing + holding_up,
                 "{}: the diamonds did not reach the mesh",
                 circuit.name
             );
@@ -1134,7 +1349,8 @@ mod tests {
             let verts = mesh.count_vertices();
             // Two kinds of thing in one mesh: quads swept along the circuit, and
             // the triangles the markers standing on it are made of.
-            let quads = track.ribbon.stations().len() * BANDS;
+            let quads =
+                track.ribbon.stations().len() * BANDS + track.profile.structure(&track.ribbon);
             let faces =
                 markers::diamonds(track.ribbon.stations(), &track.profile).len() * markers::FACES;
             assert_eq!(verts, quads * 4 + faces * 3);
@@ -1159,9 +1375,20 @@ mod tests {
     /// of its height and none of a wall's, every face still leaning further up
     /// than sideways. Give one a vertical side and this is what says so, which
     /// is the check being here at all.
+    ///
+    /// What it is *not* held over is the structure under a bridge, and that is
+    /// not a weakening of it. A soffit is a surface meant to be seen from
+    /// below; asking it to face up would be asking it not to exist. It is the
+    /// last thing in the mesh and it has a check of its own —
+    /// `what_holds_a_bridge_up_faces_away_from_the_road` — which asks of it the
+    /// thing this asks of the road: that every face points out of the solid it
+    /// is a face of.
     #[test]
     fn loft_faces_up() {
-        for circuit in circuits::all() {
+        for circuit in circuits::all()
+            .iter()
+            .chain([super::super::figure_of_eight(0.0, 0.75, 1.6)])
+        {
             let track = Track::new(circuit);
             let mesh = track.profile.loft(&track.ribbon);
             let Some(positions) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else {
@@ -1171,7 +1398,8 @@ mod tests {
             let Some(Indices::U32(indices)) = mesh.indices() else {
                 panic!("loft lost its indices");
             };
-            for face in indices.chunks_exact(3) {
+            let road = indices.len() - track.profile.structure(&track.ribbon) * 6;
+            for face in indices[..road].chunks_exact(3) {
                 let [a, b, c] = [0, 1, 2].map(|k| Vec3::from(positions[face[k] as usize]));
                 let normal = (b - a).cross(c - a);
                 // The steepest strip in the profile still leans far more up than

@@ -297,7 +297,7 @@ mod tests {
         let mut car = Car::default();
         let dt = 1.0 / 120.0;
         let mut lap = Lap::default();
-        let mut previous = track.progress(transform.translation);
+        let mut previous = track.progress(transform.translation, car.along);
 
         for _ in 0..(seconds / dt) as usize {
             let controls = driver.decide(track, &handling, &transform, &car);
@@ -305,7 +305,7 @@ mod tests {
             advance(track, &handling, controls, &mut transform, &mut car, dt);
 
             lap.distance += speed * dt;
-            let ground = track.ground(transform.translation);
+            let ground = track.ground_from(transform.translation, car.along);
             let heading = level(*transform.forward());
             // Off the road is past the kerb, and in the weeds is most of the
             // way out to where the car is held. Both read off the road rather
@@ -328,7 +328,7 @@ mod tests {
             if speed < 1.5 {
                 lap.stopped += dt;
             }
-            let progress = track.progress(transform.translation);
+            let progress = track.progress(transform.translation, car.along);
             lap.progress += (progress - previous + 0.5).rem_euclid(1.0) - 0.5;
             previous = progress;
         }
@@ -346,20 +346,20 @@ mod tests {
         let mut car = Car::default();
         let dt = 1.0 / 120.0;
         let mut was = track.start_along(transform.translation);
-        let mut previous = track.progress(transform.translation);
+        let mut previous = track.progress(transform.translation, car.along);
         let (mut running, mut clock, mut round) = (false, 0.0f32, 0.0f32);
         // Three laps' worth of time at PACE before giving up on one.
         for _ in 0..(3.0 * track.length() / PACE / dt) as usize {
             let controls = driver.decide(track, &handling, &transform, &car);
             advance(track, &handling, controls, &mut transform, &mut car, dt);
-            let progress = track.progress(transform.translation);
+            let progress = track.progress(transform.translation, car.along);
             round += (progress - previous + 0.5).rem_euclid(1.0) - 0.5;
             previous = progress;
             if running {
                 clock += dt;
             }
             let along = track.start_along(transform.translation);
-            if was <= 0.0 && along > 0.0 && track.on_start_gate(transform.translation) {
+            if was <= 0.0 && along > 0.0 && track.on_start_gate(transform.translation, car.along) {
                 if !running {
                     running = true;
                     clock = 0.0;
@@ -450,6 +450,103 @@ mod tests {
                 "{}: going nowhere {:.0} s of {budget:.0}",
                 circuit.name,
                 lap.stopped
+            );
+        }
+    }
+
+    /// A circuit that passes over itself is driven round it, not through it.
+    ///
+    /// The plain driver takes the synthetic figure of eight both ways round,
+    /// and three things are watched all the way.
+    ///
+    /// It never changes deck. The car's own idea of how far round the lap it is
+    /// moves by centimetres a step; if the lookup ever handed it the road
+    /// underneath instead, that number would jump by most of a lap, and it is
+    /// the number the clock, the ghost and the wall all read.
+    ///
+    /// It is always standing on the road it thinks it is on. The two decks are
+    /// metres apart in height at the crossing, so a car on the wrong one is a
+    /// car in the air or a car in the deck.
+    ///
+    /// And the lap turns over exactly once. A figure of eight passes its own
+    /// crossing twice a lap, and a progress reading that took the other deck
+    /// either time would count most of a lap in one step.
+    #[test]
+    fn a_plain_driver_gets_round_a_circuit_that_crosses_itself() {
+        let eights = [1.0f32, -1.0].map(|turn| crate::track::figure_of_eight(turn, 0.75, 1.6));
+        let crossers = all_circuits()
+            .iter()
+            .filter(|circuit| !circuit.crossings.is_empty())
+            .chain(eights);
+        for circuit in crossers {
+            let track = Track::new(circuit);
+            let handling = Handling::SHOOTING_BRAKE;
+            let mut driver = Driver::new(Style::Plain);
+            let mut transform = track.start_transform().with_scale(Vec3::splat(SCALE));
+            let mut car = Car {
+                along: Some(track.start_along_lap()),
+                ..Car::default()
+            };
+            let dt = 1.0 / 120.0;
+            let lap = track.length();
+            let mut round = 0.0f32;
+            let mut previous = track.progress(transform.translation, car.along);
+            let mut wraps = 0;
+            let mut furthest = 0.0f32;
+            for _ in 0..(4.0 * lap / PACE / dt) as usize {
+                let was = car
+                    .along
+                    .expect("the car was put on the grid knowing where");
+                let controls = driver.decide(&track, &handling, &transform, &car);
+                advance(&track, &handling, controls, &mut transform, &mut car, dt);
+                let now = car.along.expect("the car is still on the circuit");
+                let moved = (now - was).abs();
+                furthest = furthest.max(moved.min(lap - moved));
+                // Standing on what it thinks it is standing on.
+                let ground = track.ground_from(transform.translation, Some(now));
+                assert!(
+                    (transform.translation.y - ground.height).abs() < 0.05,
+                    "the car is {:.2} m off the deck it says it is on",
+                    transform.translation.y - ground.height
+                );
+                let progress = track.progress(transform.translation, car.along);
+                let step = progress - previous;
+                if step < -0.5 {
+                    wraps += 1;
+                    // The lap proper is between one crossing of the line and
+                    // the next, so the count starts at the first of them.
+                    if wraps == 1 {
+                        round = 0.0;
+                    }
+                } else {
+                    assert!(
+                        step.abs() < 0.02,
+                        "progress jumped from {previous} to {progress} in one step"
+                    );
+                    round += step;
+                }
+                previous = progress;
+                if wraps == 2 {
+                    break;
+                }
+            }
+            assert!(
+                furthest < 1.0,
+                "{}: the car moved {furthest:.1} m round the lap in one step of \
+                 1/120 s, which is a change of deck rather than a change of place",
+                circuit.name
+            );
+            assert_eq!(
+                wraps, 2,
+                "{}: the line went by {wraps} times rather than twice",
+                circuit.name
+            );
+            // Between the two crossings is one lap of progress and no more —
+            // and a figure of eight passes its own bridge twice in it.
+            assert!(
+                (round - 1.0).abs() < 0.02,
+                "{}: one lap between two crossings of the line came to {round:.3}",
+                circuit.name
             );
         }
     }
@@ -737,7 +834,7 @@ mod tests {
             let g = track.ground(here);
             radii.push((1.0 / g.curvature.abs().max(1e-4)).min(1e4));
             here = g.centre + g.tangent * step;
-            if radii.len() > 40 && track.progress(here) < 0.01 {
+            if radii.len() > 40 && track.progress(here, None) < 0.01 {
                 break;
             }
         }

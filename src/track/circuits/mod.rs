@@ -45,6 +45,7 @@ mod shanghai;
 mod silverstone;
 mod sochi;
 mod spa_francorchamps;
+mod suzuka;
 mod watkins_glen;
 mod yas_marina;
 mod zandvoort;
@@ -119,6 +120,47 @@ pub(crate) struct Circuit {
     /// Metres from the circuit centroid, at full size. Y is height above the
     /// lowest point on the lap. The last sample joins back to the first.
     pub(crate) centreline: &'static [[f32; 3]],
+    /// Where this circuit passes over itself, if it does. Almost none do.
+    pub(crate) crossings: &'static [Crossing],
+}
+
+/// A place where a circuit passes over itself.
+///
+/// Anchored to the trace rather than to the finished circuit: `at` is in the
+/// same metres-from-the-centroid frame as [`Circuit::centreline`], and `over`
+/// is how far round that trace the stretch on top is. Both survive everything
+/// downstream of them. A finished station number would not — it moves when the
+/// spline moves, when the corner target moves, when the plan scale moves.
+///
+/// The height is the part that is *not* surveyed, and saying so is the point of
+/// this comment. The elevation model behind [`Circuit::centreline`] is a 90 m
+/// ground model read at the trace's own fixes: it reads both stretches of a
+/// crossing at the height of the ground between them, because ground is what it
+/// measures. It has nothing to say about a road deck. So `clearance` is
+/// authored for the game — enough air under the span for the car to go through
+/// it and see that it did — and what comes from the source is the *topology*:
+/// that there is a crossing here, where it is, and which of the two stretches
+/// is the one on top.
+#[derive(Clone, Copy)]
+pub(crate) struct Crossing {
+    /// Where the two stretches cross, in the trace's own metres: east and
+    /// south of the centroid, the same frame the centreline is in.
+    pub(crate) at: [f32; 2],
+    /// How far round the trace the stretch that goes over is, as a fraction of
+    /// its length.
+    pub(crate) over: f32,
+    /// Clear air between the road below and the underside of the span above,
+    /// in finished metres. Authored. Not from the elevation model.
+    pub(crate) clearance: f32,
+    /// Where the fact of the crossing came from, and where the clearance came
+    /// from. One line, so that a reader can tell the two apart.
+    ///
+    /// Nothing in the game reads it, which is the point: it is here for the
+    /// person who finds a number in a data file and wants to know whether
+    /// anybody measured it. `a_bridge_says_where_it_came_from` is what keeps it
+    /// from quietly going missing.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) provenance: &'static str,
 }
 
 /// Every circuit, in the order the menu lists them, which is alphabetical:
@@ -162,6 +204,7 @@ const ALL: &[Circuit] = &[
     silverstone::CIRCUIT,
     sochi::CIRCUIT,
     spa_francorchamps::CIRCUIT,
+    suzuka::CIRCUIT,
     watkins_glen::CIRCUIT,
     yas_marina::CIRCUIT,
     zandvoort::CIRCUIT,

@@ -76,6 +76,62 @@ const RELAX_RATE: f32 = 0.5;
 /// saves.
 const LEAF: usize = 8;
 
+/// A place where the circuit passes over itself, in the ribbon's own units.
+///
+/// One closed centreline carrying one road can still have two roads at a point
+/// of the map, so long as they are at different heights. That is the whole of
+/// what a bridge is here: no second ribbon and no second surface, just a
+/// stretch of the one road lifted over another stretch of the same road, with
+/// the lookup taught to ask which of the two the car is on.
+///
+/// The two stretches are found rather than named. `at` is where they cross in
+/// plan and `over` is how far round the lap the one that goes over is, as a
+/// fraction — both properties of the layout, which survive the spline, the
+/// corner opening and the smoothing. A station number would not: it moves
+/// whenever anything upstream of it does.
+pub struct Overpass {
+    /// Where the two stretches cross, in plan. Height ignored.
+    pub at: Vec3,
+    /// How far round the lap the stretch that goes over is, as a fraction of
+    /// the lap. It only has to be nearer the right stretch than the wrong one,
+    /// and the two are most of a lap apart.
+    pub over: f32,
+    /// How far the deck is lifted above what the elevation model gave it.
+    pub rise: f32,
+    /// Metres of road held level at the top of the lift, either side of the
+    /// crossing, and metres of ramp beyond that.
+    pub deck: f32,
+    pub ramp: f32,
+}
+
+/// How near the crossing point a station has to be to belong to one of the two
+/// stretches that meet there. Wide enough to catch both sides of the widest
+/// cross-section and the road either side of it, narrow enough that a third
+/// stretch of circuit is not swept up with them.
+pub(crate) const AT_CROSSING: f32 = 12.0;
+/// How far from a declared crossing the two-storey exemption below applies.
+///
+/// Tight on purpose. Away from a bridge, two roads at one point of the map is
+/// the thing the fit exists to prevent, and it prevents it in plan because that
+/// is where the lookup asks: Miami has two stretches nearly two metres apart in
+/// height and a few metres apart in plan, and nothing about that is a bridge —
+/// a rib of the lower one has to belong to the lower one. So the exemption is
+/// not "different heights are different roads", which would quietly unfit half
+/// the circuits in the game. It is "here, where a bridge was declared,
+/// different heights are different roads".
+const NEAR_A_CROSSING: f32 = 20.0;
+/// How far apart in height two stretches of circuit have to be before neither
+/// can reach the other, whatever their plans do.
+///
+/// The cross-section is 0.62 m deep from the kerb's lip to the bottom of the
+/// verge, so two roads further apart than that cannot touch even where one is
+/// directly above the other. Twice that, and then some, because it is also the
+/// figure [`Ribbon::room`] uses to decide that a stretch of circuit is not in
+/// its way — and a fit is a claim about clear air, not about the absence of a
+/// collision. Every bridge the game builds rises by more than this; that is
+/// checked rather than assumed.
+pub(crate) const CLEAR_ABOVE: f32 = 1.5;
+
 /// One cross-section of the circuit.
 #[derive(Clone, Copy)]
 pub struct Station {
@@ -94,11 +150,27 @@ pub struct Station {
     pub curvature: f32,
     /// Rise over run along `tangent`. What gravity pulls against on a climb.
     pub slope: f32,
+    /// How thick the structure under this station is: a deck's worth over a
+    /// bridge, tapering to nothing at the ends of its ramps, and zero
+    /// everywhere else — which is everywhere, on thirty-nine of the forty.
+    ///
+    /// The road does not care: a bridge is road and is swept like road. What
+    /// reads this is the structure under it, which is drawn only where there is
+    /// something to hold up. See `Profile::loft`.
+    ///
+    /// It is set over the declared span of a bridge whether or not the heights
+    /// had to be moved to build one. They often do not: the elevation model
+    /// reads Suzuka's back straight six metres above the road it crosses, which
+    /// is more than the clearance asks for, so nothing is raised there and
+    /// there is still a bridge to draw the underside of.
+    pub deck: f32,
 }
 
 /// The closed centreline, ready to loft.
 pub struct Ribbon {
     stations: Vec<Station>,
+    /// Where this circuit passes over itself, in plan. Empty for all but one.
+    crossings: Vec<Vec3>,
     index: Index,
     length: f32,
     kept: f32,
@@ -145,7 +217,7 @@ pub struct Fix {
 impl Ribbon {
     /// Build the centreline from raw control points: spline, open the corners
     /// that are too tight to loft, then settle the elevation.
-    pub fn new(control: &[Vec3], corners: f32) -> Self {
+    pub fn new(control: &[Vec3], corners: f32, over: &[Overpass]) -> Self {
         let mut line = resample(&spline(control), STEP);
         exaggerate_corners(&mut line, corners);
         // Measured after exaggerating, because `kept` is about what opening the
@@ -168,7 +240,20 @@ impl Ribbon {
         #[cfg(test)]
         let smoothed = relief(&line);
         cap_grade(&mut line);
+        // After the cap and not before it. The cap shaves crests down to what
+        // the grade allows, so a bridge built before it is a bridge the cap
+        // takes straight back off. A bridge built after it has to come with its
+        // own promise about grade instead, which is what the ramps are, and
+        // `the_bridge_stays_inside_the_grade_cap` is what holds them to it.
+        let mut deck = vec![0.0f32; line.len()];
+        for pass in over {
+            lift(&mut line, &mut deck, pass);
+        }
         let mut ribbon = Self::from_polyline(line);
+        for (station, thick) in ribbon.stations.iter_mut().zip(deck) {
+            station.deck = thick;
+        }
+        ribbon.crossings = over.iter().map(|pass| flat(pass.at)).collect();
         ribbon.kept = ribbon.length / before.max(1e-4);
         #[cfg(test)]
         {
@@ -303,8 +388,19 @@ impl Ribbon {
     /// line, or caps `w` at `|d|² / (2 * side * d·right)`.
     pub fn room(&self, i: usize, side: f32, cap: f32) -> f32 {
         let mut best = cap;
-        self.index.narrow_room(&self.stations, i, side, &mut best);
+        self.index
+            .narrow_room(&self.stations, i, side, self.two_storey(i), &mut best);
         best
+    }
+
+    /// Whether station `i` is somewhere the circuit was declared to pass over
+    /// itself, and so somewhere a stretch of road at another height is a road
+    /// on another deck rather than a road in the way.
+    fn two_storey(&self, i: usize) -> bool {
+        let here = flat(self.stations[i].pos);
+        self.crossings
+            .iter()
+            .any(|at| (here - *at).length() < NEAR_A_CROSSING)
     }
 
     /// The same widest disc, measured against every station in turn. The
@@ -314,6 +410,9 @@ impl Ribbon {
         let here = &self.stations[i];
         let mut best = cap;
         for station in &self.stations {
+            if self.two_storey(i) && (station.pos.y - here.pos.y).abs() > CLEAR_ABOVE {
+                continue;
+            }
             let d = flat(station.pos - here.pos);
             let across = d.dot(here.right) * side;
             if across > 0.0 {
@@ -348,6 +447,56 @@ impl Ribbon {
                 s: 0.0,
             },
         }
+    }
+
+    /// Every stretch of circuit within `within` of `pos` in plan, as a fix
+    /// apiece, in the order the lap runs.
+    ///
+    /// One answer per stretch and not per segment: the fifty segments a car
+    /// sits over are one piece of road and one answer, and the point of asking
+    /// is the day there are two. Where the circuit passes over itself both come
+    /// back, and something that knows which deck the car is on picks between
+    /// them — see [`super::Track::ground`].
+    ///
+    /// Always at least one, whatever `within` is: a car out beyond everything
+    /// still has a nearest piece of road, and returning nothing would only move
+    /// the question somewhere else.
+    pub fn nearby(&self, pos: Vec3, within: f32) -> Vec<Fix> {
+        let n = self.stations.len();
+        let mut found = self.index.within(&self.stations, pos, within);
+        if found.is_empty() {
+            return vec![self.locate(pos)];
+        }
+        found.sort_by_key(|&(at, _, _)| at);
+        // Runs of consecutive segments are one stretch of road, and the best of
+        // each run is that stretch's answer.
+        let mut runs: Vec<(usize, f32, f32)> = Vec::new();
+        let mut ends: Vec<usize> = Vec::new();
+        for &(at, t, d) in &found {
+            match (runs.last_mut(), ends.last_mut()) {
+                (Some(run), Some(end)) if at == *end + 1 => {
+                    *end = at;
+                    if d < run.2 {
+                        *run = (at, t, d);
+                    }
+                }
+                _ => {
+                    runs.push((at, t, d));
+                    ends.push(at);
+                }
+            }
+        }
+        // A run that wraps past the start/finish line arrives as two, one at
+        // each end of the array. It is one stretch of road.
+        if runs.len() > 1 && found[0].0 == 0 && ends[ends.len() - 1] == n - 1 {
+            let last = runs.pop().expect("more than one run");
+            if last.2 < runs[0].2 {
+                runs[0] = last;
+            }
+        }
+        runs.into_iter()
+            .map(|(at, t, _)| self.fix(pos, at, t))
+            .collect()
     }
 
     /// The same nearest point, found by projecting onto every segment in turn.
@@ -440,12 +589,14 @@ impl Ribbon {
                     s: step * i as f32,
                     curvature: curvature_at(&line, i),
                     slope: (ahead.y - behind.y) / flat(ahead - behind).length().max(1e-4),
+                    deck: 0.0,
                 }
             })
             .collect();
         Self {
             index: Index::new(&stations),
             stations,
+            crossings: Vec::new(),
             length,
             kept: 1.0,
             #[cfg(test)]
@@ -503,6 +654,47 @@ struct Bounds {
 }
 
 impl Index {
+    /// Every segment whose nearest point is within `within` of `pos` in plan,
+    /// as `(segment, how far along it, squared distance)`.
+    fn within(&self, stations: &[Station], pos: Vec3, within: f32) -> Vec<(usize, f32, f32)> {
+        let mut out = Vec::new();
+        self.gather(stations, pos, within * within, 0, &mut out);
+        out
+    }
+
+    fn gather(
+        &self,
+        stations: &[Station],
+        pos: Vec3,
+        reach: f32,
+        at: usize,
+        out: &mut Vec<(usize, f32, f32)>,
+    ) {
+        let node = &self.nodes[at];
+        if outside(node, pos) > reach {
+            return;
+        }
+        if node.right == 0 {
+            let n = stations.len();
+            for i in node.from as usize..node.to as usize {
+                let (a, b) = (stations[i].pos, stations[(i + 1) % n].pos);
+                let ab = flat(b - a);
+                let len2 = ab.length_squared();
+                if len2 < 1e-9 {
+                    continue;
+                }
+                let t = (flat(pos - a).dot(ab) / len2).clamp(0.0, 1.0);
+                let d = flat(pos - (a + (b - a) * t)).length_squared();
+                if d <= reach {
+                    out.push((i, t, d));
+                }
+            }
+            return;
+        }
+        self.gather(stations, pos, reach, at + 1, out);
+        self.gather(stations, pos, reach, node.right as usize, out);
+    }
+
     /// Index every segment of the closed centreline, the closing one included.
     fn new(stations: &[Station]) -> Self {
         let mut index = Self { nodes: Vec::new() };
@@ -607,11 +799,26 @@ impl Index {
     /// same point from the same side, so a smaller radius is a disc inside a
     /// larger one. Pruning against the disc for the best radius so far is
     /// therefore sound, and it tightens as the walk goes on.
-    fn narrow_room(&self, stations: &[Station], i: usize, side: f32, best: &mut f32) {
-        self.walk_room(stations, i, side, 0, best);
+    fn narrow_room(
+        &self,
+        stations: &[Station],
+        i: usize,
+        side: f32,
+        two_storey: bool,
+        best: &mut f32,
+    ) {
+        self.walk_room(stations, i, side, two_storey, 0, best);
     }
 
-    fn walk_room(&self, stations: &[Station], i: usize, side: f32, at: usize, best: &mut f32) {
+    fn walk_room(
+        &self,
+        stations: &[Station],
+        i: usize,
+        side: f32,
+        two_storey: bool,
+        at: usize,
+        best: &mut f32,
+    ) {
         let here = &stations[i];
         let centre = here.pos + here.right * (side * *best);
         let node = &self.nodes[at];
@@ -620,6 +827,14 @@ impl Index {
         }
         if node.right == 0 {
             for other in &stations[node.from as usize..node.to as usize] {
+                // A stretch of circuit passing over or under this one is not
+                // in its way — but only where the circuit was said to do that.
+                // This is the whole of what a bridge costs the fit: a plan
+                // measure being asked to notice that the map has two storeys,
+                // in the one place it has two storeys.
+                if two_storey && (other.pos.y - here.pos.y).abs() > CLEAR_ABOVE {
+                    continue;
+                }
                 let d = flat(other.pos - here.pos);
                 let across = d.dot(here.right) * side;
                 // Behind the tangent line, so outside every one of the discs:
@@ -637,8 +852,8 @@ impl Index {
             } else {
                 (right, left)
             };
-        self.walk_room(stations, i, side, near, best);
-        self.walk_room(stations, i, side, far, best);
+        self.walk_room(stations, i, side, two_storey, near, best);
+        self.walk_room(stations, i, side, two_storey, far, best);
     }
 }
 
@@ -810,6 +1025,122 @@ fn smooth_heights(line: &mut [Vec3]) {
     for (point, y) in line.iter_mut().zip(heights) {
         point.y = y;
     }
+}
+
+/// Carry one stretch of the circuit over another.
+///
+/// What this has to deliver is a separation, not a height: `pass.rise` between
+/// the two centrelines, which is what the clearance under the span comes to
+/// once the deck and the depth of a cross-section are taken off it. How much of
+/// that the elevation model already gave is not the same question, and it
+/// varies — the figure of eight is flat and needs all of it, while Suzuka's
+/// model reads the back straight six metres above the road it crosses, which is
+/// more than enough on its own. So what is added is the shortfall, and a
+/// circuit whose model already separates its two roads is left alone.
+///
+/// Where a lift is needed, three things happen and the order matters.
+///
+/// The ground under it is levelled first: between the far ends of the two ramps
+/// the height becomes a straight line from one to the other. A bridge is a
+/// structure and a structure does not follow the field it crosses — and
+/// levelling it is also what makes the grade of the finished thing knowable,
+/// because everything the ramps then add is added to a constant slope.
+///
+/// Then the deck goes up by the shortfall, held level for `deck` metres either
+/// side of the crossing, so that the road below passes under a flat span rather
+/// than under the point of a roof.
+///
+/// Then the ramps, which are a raised cosine rather than a wedge so the car
+/// meets a slope that starts at nothing and ends at nothing instead of two
+/// creases. That costs gradient: the steepest part of a raised cosine is half
+/// of π times its average, so a ramp has to be that much longer than a wedge
+/// would be for the same rise.
+///
+/// The structure is written down either way, over the whole span and tapering
+/// out with the ramps. A bridge that needed no raising is still a bridge, and
+/// still has an underside a driver passes beneath.
+fn lift(line: &mut [Vec3], deck: &mut [f32], pass: &Overpass) {
+    let n = line.len();
+    let step = closed_length(line) / n as f32;
+    let Some((middle, under)) = crossing_stations(line, pass) else {
+        return;
+    };
+    let flat_for = (pass.deck / step).round() as usize;
+    let ramp = (pass.ramp / step).round().max(1.0) as usize;
+    let span = flat_for + ramp;
+    let short = (pass.rise - (line[middle].y - line[under].y)).max(0.0);
+    // How much of the deck there is to draw, and how much of it has to be put
+    // there: the first is the span, the second is the shortfall.
+    let along = |d: usize| -> f32 {
+        if d <= flat_for {
+            1.0
+        } else {
+            let t = (d - flat_for) as f32 / ramp as f32;
+            0.5 * (1.0 + (t * std::f32::consts::PI).cos())
+        }
+    };
+    if short > 0.0 {
+        // Level the ground the bridge stands on, end to end.
+        let (from, to) = (line[(middle + n - span) % n].y, line[(middle + span) % n].y);
+        for d in 0..=2 * span {
+            let t = d as f32 / (2 * span) as f32;
+            line[(middle + n + d - span) % n].y = from.lerp(to, t);
+        }
+    }
+    // Out from the middle in both directions. The middle itself is one station
+    // and is dealt with once.
+    for d in 0..=span {
+        for at in [(middle + d) % n, (middle + n - d) % n] {
+            line[at].y += short * along(d);
+            deck[at] = deck[at].max(along(d));
+            if d == 0 {
+                break;
+            }
+        }
+    }
+}
+
+/// The middles of the two stretches that meet at a crossing: the one that goes
+/// over, and the one that goes under.
+///
+/// Two stretches of circuit come within [`AT_CROSSING`] of the crossing
+/// point, and they are two runs of consecutive stations with the whole rest of
+/// the lap between them. Take the nearest station of each run; the one that
+/// goes over is the one whose distance round the lap is nearer the fraction the
+/// crossing was given.
+fn crossing_stations(line: &[Vec3], pass: &Overpass) -> Option<(usize, usize)> {
+    let n = line.len();
+    let near = |i: usize| flat(line[i] - pass.at).length() < AT_CROSSING;
+    let mut runs: Vec<usize> = Vec::new();
+    for head in 0..n {
+        if !near(head) || near((head + n - 1) % n) {
+            continue;
+        }
+        let mut best = (f32::MAX, head);
+        let mut d = 0;
+        while d < n && near((head + d) % n) {
+            let at = (head + d) % n;
+            let far = flat(line[at] - pass.at).length();
+            if far < best.0 {
+                best = (far, at);
+            }
+            d += 1;
+        }
+        runs.push(best.1);
+    }
+    // Two stretches, or this is not a crossing and nothing is lifted.
+    if runs.len() != 2 {
+        return None;
+    }
+    let howfar = |i: usize| {
+        let round = (i as f32 / n as f32 - pass.over).abs();
+        round.min(1.0 - round)
+    };
+    Some(if howfar(runs[0]) <= howfar(runs[1]) {
+        (runs[0], runs[1])
+    } else {
+        (runs[1], runs[0])
+    })
 }
 
 /// Shave the crests until no step exceeds [`MAX_GRADE`]. Sweeping forward then

@@ -1,12 +1,16 @@
-> **Where this stands.** The prerequisite and stages 1 and 2 have landed; stage
-> 3, the bridge feature and Suzuka, has not. The screening runs this plan refers
-> to as `baseline`, `radius-5` and `radius-5-scales` were replaced once the
-> engine moved under them: `docs/track-screening` now holds `as-built`,
-> `shared-scale` and `corners-at-10`, which ask the same questions of the
-> circuits as they are now built. Two of this plan's figures were superseded by
-> what the implementation measured, and both are recorded where they were
-> changed: the 3.3 m road needs four plan multipliers rather than three, and
-> they are larger than the seeds here.
+> **Where this stands.** All four stages have landed, and all forty circuits are
+> in the game. The screening runs this plan refers to as `baseline`, `radius-5`
+> and `radius-5-scales` were replaced once the engine moved under them:
+> `docs/track-screening` now holds `as-built`, `shared-scale` and
+> `corners-at-10`, which ask the same questions of the circuits as they are now
+> built. Three of this plan's figures were superseded by what the implementation
+> measured, and each is recorded where it was changed. The 3.3 m road needs five
+> plan multipliers rather than three, and they are larger than the seeds here.
+> Suzuka needs one too, for a pinch that is not its crossing. And the bridge
+> rise is solved as a shortfall rather than added outright, because the
+> elevation model already separates Suzuka's two decks by more than the
+> clearance asks for — which is also why the structure under a bridge is drawn
+> from its declared span rather than from how far anything was lifted.
 
 Todora should admit all 40 source layouts through the same geometry and driving contracts. Do the lookup work first, then variable verges, then road proportions, then bridges. Keep the 75% retention bar. Each admission must pass the whole suite, not just construction.
 

@@ -168,6 +168,10 @@ pub(super) const CIRCUIT: Circuit = Circuit {{
     // `Circuit::plan_scale` for what a multiplier gives up.
     plan_scale: 1.0,
     centreline: CENTRELINE,
+    // Where the circuit passes over itself. Almost none do; see `Crossing`, and
+    // `screen_tracks.py`, whose `finished_crossings` column is what says
+    // whether this one needs a line here.
+    crossings: &[],
 }};
 
 /// Metres from the circuit centroid. Y is height above the lowest point.

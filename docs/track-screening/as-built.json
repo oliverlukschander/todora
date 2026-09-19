@@ -1,5 +1,5 @@
 {
-  "todora_commit": "2abdb21940c1fe99c4882c33c01acf75a27797b0",
+  "todora_commit": "44ba65c451edbf23dd9a1bfafdc043942689879d",
   "source_commit": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
   "source_pinned_at": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
   "radius_override": null,
@@ -29,6 +29,7 @@
     "it-1953": 1.0,
     "es-2026": 1.0,
     "sa-2021": 1.2,
+    "jp-1962": 1.1,
     "nl-1948": 1.0,
     "qa-2004": 1.0,
     "tr-2005": 1.0,

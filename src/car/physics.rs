@@ -230,6 +230,17 @@ pub(crate) struct Car {
     /// Seconds spent off the circuit getting nowhere. The track uses it to
     /// decide when to fetch the car back.
     pub stranded: f32,
+    /// How far round the lap the car was last found, and `None` before it has
+    /// been found at all.
+    ///
+    /// Carried by the car rather than worked out from where it is, because
+    /// where it is does not always answer: a circuit that passes over itself
+    /// has two roads at a point of the map, and which of them the car is on is
+    /// a fact about the last frame rather than about this one. The track reads
+    /// it and writes it back — see `Track::fix`. Nothing in the engine touches
+    /// it; it is here for the same reason `stranded` is, which is that it
+    /// belongs to this car and to no other.
+    pub along: Option<f32>,
 
     /// Acceleration in g, in the car's own frame: x to the right, y forward.
     /// What an accelerometer bolted to the seat would read.
