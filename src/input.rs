@@ -44,9 +44,8 @@ fn read(
     mut chosen: ResMut<Setup>,
     mut players: Query<&mut Controls, With<Player>>,
 ) {
-    // The setup slider. Number keys pick a notch outright; the pad slides along
-    // it. Only written when it actually moves, so the car is not re-leaned every
-    // frame the key is held.
+    // Number keys pick a setup outright; the garage also exposes it.
+    // Only write a change, so holding a key does not re-lean the car each frame.
     let mut wanted = *chosen;
     for (key, notch) in [
         (KeyCode::Digit1, Setup::Understeer),
@@ -87,32 +86,37 @@ fn read(
         } else {
             0.0
         };
+        let dpad_steer = f32::from(pad.pressed(GamepadButton::DPadLeft))
+            - f32::from(pad.pressed(GamepadButton::DPadRight));
+        let steer = if dpad_steer.abs() > steer.abs() {
+            dpad_steer
+        } else {
+            steer
+        };
         if steer.abs() > asked.steer.abs() {
             asked.steer = steer;
         }
         asked.throttle = asked
             .throttle
             .max(pad.get(GamepadButton::RightTrigger2).unwrap_or(0.0))
-            .max(if pad.pressed(GamepadButton::South) {
-                1.0
-            } else {
-                0.0
-            });
+            .max(
+                if pad.pressed(GamepadButton::South) || pad.pressed(GamepadButton::DPadUp) {
+                    1.0
+                } else {
+                    0.0
+                },
+            );
         asked.brake = asked
             .brake
             .max(pad.get(GamepadButton::LeftTrigger2).unwrap_or(0.0))
-            .max(if pad.pressed(GamepadButton::West) {
-                1.0
-            } else {
-                0.0
-            });
+            .max(
+                if pad.pressed(GamepadButton::West) || pad.pressed(GamepadButton::DPadDown) {
+                    1.0
+                } else {
+                    0.0
+                },
+            );
         asked.handbrake |= pad.pressed(GamepadButton::East);
-        if pad.just_pressed(GamepadButton::DPadLeft) {
-            wanted = wanted.slid(-1);
-        }
-        if pad.just_pressed(GamepadButton::DPadRight) {
-            wanted = wanted.slid(1);
-        }
     }
 
     if wanted != *chosen {
@@ -135,6 +139,47 @@ fn held<const N: usize>(keys: &ButtonInput<KeyCode>, any: [KeyCode; N]) -> f32 {
 mod tests {
     use super::*;
     use crate::pause::Halt;
+
+    #[test]
+    fn the_dpad_drives_exactly_like_arrows_without_changing_setup() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Setup>()
+            .init_resource::<Halt>()
+            .add_message::<Reset>()
+            .add_plugins(InputPlugin);
+        let player = app.world_mut().spawn((Player, Controls::default())).id();
+        let controller = app.world_mut().spawn(Gamepad::default()).id();
+        for (key, button) in [
+            (KeyCode::ArrowUp, GamepadButton::DPadUp),
+            (KeyCode::ArrowDown, GamepadButton::DPadDown),
+            (KeyCode::ArrowLeft, GamepadButton::DPadLeft),
+            (KeyCode::ArrowRight, GamepadButton::DPadRight),
+        ] {
+            app.world_mut()
+                .get_mut::<Gamepad>(controller)
+                .unwrap()
+                .digital_mut()
+                .reset_all();
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(key);
+            app.update();
+            let keyboard = *app.world().get::<Controls>(player).unwrap();
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .reset_all();
+            app.world_mut()
+                .get_mut::<Gamepad>(controller)
+                .unwrap()
+                .digital_mut()
+                .press(button);
+            app.update();
+            assert_eq!(*app.world().get::<Controls>(player).unwrap(), keyboard);
+            assert_eq!(*app.world().resource::<Setup>(), Setup::Balanced);
+        }
+    }
 
     #[test]
     fn right_bumper_resets_once_per_press_and_only_while_driving() {

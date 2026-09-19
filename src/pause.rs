@@ -1,6 +1,6 @@
 //! Stopping the world, and letting it go again.
 //!
-//! `Esc` stops the game where it stands and `Enter` starts it moving again.
+//! `Esc` stops the game; arrows select an action and `Enter` confirms it.
 //! There is no second, slower simulation running behind the pause and no state
 //! machine deciding which systems are allowed to think this frame. The whole
 //! game is driven by Bevy's virtual clock: driving steps `Time<Fixed>`, which is
@@ -24,7 +24,9 @@
 use bevy::prelude::*;
 
 use crate::car::{Controls, Player};
+use crate::ghost::clear::{ResetGhosts, ResetRequest};
 use crate::hud::{AMBER, AMBER_DIM, FRONT};
+use crate::ui::Navigation;
 
 /// What is standing in front of the game, if anything.
 #[derive(Resource, Clone, Copy, Default, PartialEq, Eq, Debug)]
@@ -32,7 +34,7 @@ pub(crate) enum Halt {
     /// The game is being played.
     #[default]
     Nothing,
-    /// `Esc`. `Enter` lets the game go again.
+    /// The pause dialog; Resume lets the game go again.
     Pause,
     /// A menu is up over the game. It owns both keys while it is, and closes
     /// itself — see [`crate::menu`].
@@ -65,15 +67,21 @@ pub struct PausePlugin;
 impl Plugin for PausePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Halt>()
+            .init_resource::<Selection>()
+            .add_message::<ResetRequest>()
+            .add_message::<bevy::window::CursorMoved>()
             .add_systems(Startup, setup)
             .add_systems(
                 PreUpdate,
                 (
-                    watch.in_set(HaltSet).after(bevy::input::InputSystems),
+                    watch
+                        .in_set(HaltSet)
+                        .after(bevy::input::InputSystems)
+                        .after(bevy::ui::UiSystems::Focus),
                     hold_the_clock.after(HaltSet).after(crate::menu::MenuSet),
                 ),
             )
-            .add_systems(Update, show);
+            .add_systems(Update, (show, highlight));
     }
 }
 
@@ -81,8 +89,23 @@ impl Plugin for PausePlugin {
 #[derive(Component)]
 struct Banner;
 
-#[derive(Component)]
-struct Resume;
+#[derive(Component, Clone, Copy, Default, PartialEq, Eq, Debug)]
+enum Action {
+    #[default]
+    Resume,
+    ResetCurrent,
+    ResetAll,
+    Quit,
+}
+impl Action {
+    const ALL: [Self; 4] = [Self::Resume, Self::ResetCurrent, Self::ResetAll, Self::Quit];
+}
+
+#[derive(Resource, Default)]
+struct Selection {
+    action: Action,
+    navigation: Navigation,
+}
 
 fn setup(mut commands: Commands) {
     use crate::ui::{LINE, TEXT, label};
@@ -120,40 +143,24 @@ fn setup(mut commands: Commands) {
                     panel.spawn(label("TODORA  /  SESSION PAUSED", 12.0, AMBER));
                     panel.spawn(label("Take a breather.", 36.0, TEXT));
                     panel.spawn(label("Your lap will be right here.", 17.0, AMBER_DIM));
-                    panel
-                        .spawn((
-                            Button,
-                            Resume,
-                            Node {
-                                padding: UiRect::all(px(14)),
-                                margin: UiRect::top(px(8)),
-                                border_radius: BorderRadius::all(px(8)),
-                                justify_content: JustifyContent::Center,
-                                ..default()
-                            },
-                            BackgroundColor(AMBER),
-                        ))
-                        .with_children(|button| {
-                            button.spawn(label("Resume  /  A · Start · Enter", 17.0, FRONT));
-                        });
-                    for (scope, title) in [
-                        (
-                            crate::ghost::clear::ResetGhosts::Current,
-                            "Reset this ghost",
-                        ),
-                        (crate::ghost::clear::ResetGhosts::All, "Reset all ghosts"),
+                    for (action, title) in [
+                        (Action::Resume, "Resume"),
+                        (Action::ResetCurrent, "Reset this ghost"),
+                        (Action::ResetAll, "Reset all ghosts"),
+                        (Action::Quit, "Quit game"),
                     ] {
                         panel
                             .spawn((
                                 Button,
-                                scope,
+                                action,
                                 Node {
                                     padding: UiRect::all(px(12)),
-                                    border: UiRect::all(px(1)),
+                                    border: UiRect::all(px(2)),
                                     border_radius: BorderRadius::all(px(8)),
                                     justify_content: JustifyContent::Center,
                                     ..default()
                                 },
+                                BackgroundColor(crate::ui::SURFACE),
                                 BorderColor::all(LINE),
                             ))
                             .with_children(|button| {
@@ -168,57 +175,116 @@ fn setup(mut commands: Commands) {
                             AMBER_DIM,
                         ),
                     ));
-                    panel
-                        .spawn((
-                            Button,
-                            crate::Quit,
-                            Node {
-                                padding: UiRect::all(px(12)),
-                                justify_content: JustifyContent::Center,
-                                ..default()
-                            },
-                        ))
-                        .with_children(|button| {
-                            button.spawn(label("Quit game", 17.0, AMBER_DIM));
-                        });
+                    panel.spawn(label(
+                        "↑ ↓ / D-pad / Stick  Select\nEnter / A  Confirm · Esc / B / Start  Resume",
+                        13.0,
+                        AMBER_DIM,
+                    ));
                 });
         });
 }
 
-/// `Esc` stops a running game, `Enter` lets a paused one go. Not one key
-/// toggling: two keys, each with one job, is the rule that still works when
-/// something else is standing in front of the game. Both transitions are
-/// written from a named state rather than from any state, so while a menu is up
-/// neither of them fires and both keys are the menu's — which is the whole of
-/// the arrangement between the two modules, stated here and again there.
-///
-/// Letting go of the controls belongs here rather than to whatever stopped the
-/// game, because it is true of every way of stopping it.
+/// Pause input runs before driving input and uses the same repeat timing as
+/// the garage and circuit menus. Mouse, keyboard and pad activate one action.
+#[allow(clippy::too_many_arguments)]
 fn watch(
     keys: Res<ButtonInput<KeyCode>>,
     mut halt: ResMut<Halt>,
     pads: Query<&Gamepad>,
     mut players: Query<&mut Controls, With<Player>>,
-    buttons: Query<&Interaction, (With<Resume>, Changed<Interaction>)>,
+    buttons: Query<(&Action, Ref<Interaction>)>,
+    mut cursor: MessageReader<bevy::window::CursorMoved>,
+    mut selected: ResMut<Selection>,
+    time: Res<Time<Real>>,
+    mut resets: MessageWriter<ResetRequest>,
+    mut exits: MessageWriter<AppExit>,
 ) {
-    let resume_clicked = buttons.iter().any(|i| *i == Interaction::Pressed);
+    let mouse_moved = cursor
+        .read()
+        .any(|event| event.delta.is_none_or(|delta| delta != Vec2::ZERO));
     let start = pads
         .iter()
         .any(|pad| pad.just_pressed(GamepadButton::Start));
-    let confirm = pads
-        .iter()
-        .any(|pad| pad.just_pressed(GamepadButton::South));
-    let wanted = match *halt {
-        Halt::Nothing if keys.just_pressed(KeyCode::Escape) || start => Halt::Pause,
-        Halt::Pause if keys.just_pressed(KeyCode::Enter) || start || confirm || resume_clicked => {
-            Halt::Nothing
-        }
-        _ => return,
-    };
-    *halt = wanted;
-    if halt.stopped() {
+    if *halt == Halt::Nothing && (keys.just_pressed(KeyCode::Escape) || start) {
+        *halt = Halt::Pause;
+        *selected = Selection::default();
+        resets.write(ResetRequest(None));
         for mut controls in &mut players {
             *controls = Controls::default();
+        }
+        return;
+    }
+    if *halt != Halt::Pause {
+        return;
+    }
+    if keys.just_pressed(KeyCode::Escape)
+        || start
+        || pads.iter().any(|pad| pad.just_pressed(GamepadButton::East))
+    {
+        *halt = Halt::Nothing;
+        resets.write(ResetRequest(None));
+        return;
+    }
+    let previous = selected.action;
+    let mut clicked = false;
+    // Opening the overlay can change hover without any mouse movement.
+    // Only deliberate pointer movement or a new click takes navigation focus.
+    for (&action, interaction) in &buttons {
+        let pressed = interaction.is_changed() && *interaction == Interaction::Pressed;
+        if pressed || (mouse_moved && *interaction == Interaction::Hovered) {
+            selected.action = action;
+        }
+        clicked |= pressed;
+    }
+    let nudge = selected
+        .navigation
+        .read(&keys, &pads, time.elapsed_secs_f64());
+    if nudge.y != 0 && !clicked {
+        let at = Action::ALL
+            .iter()
+            .position(|a| *a == selected.action)
+            .unwrap();
+        selected.action = Action::ALL[(at as i32 + nudge.y).clamp(0, 3) as usize];
+    }
+    if previous != selected.action {
+        resets.write(ResetRequest(None));
+    }
+    if clicked
+        || keys.just_pressed(KeyCode::Enter)
+        || pads
+            .iter()
+            .any(|pad| pad.just_pressed(GamepadButton::South))
+    {
+        match selected.action {
+            Action::Resume => {
+                *halt = Halt::Nothing;
+            }
+            Action::ResetCurrent => {
+                resets.write(ResetRequest(Some(ResetGhosts::Current)));
+            }
+            Action::ResetAll => {
+                resets.write(ResetRequest(Some(ResetGhosts::All)));
+            }
+            Action::Quit => {
+                exits.write(AppExit::Success);
+            }
+        }
+    }
+}
+
+fn highlight(
+    selected: Res<Selection>,
+    mut buttons: Query<(&Action, &Children, &mut BackgroundColor, &mut BorderColor)>,
+    mut labels: Query<&mut TextColor>,
+) {
+    for (action, children, mut background, mut border) in &mut buttons {
+        let active = *action == selected.action;
+        background.0 = if active { AMBER } else { crate::ui::SURFACE };
+        *border = BorderColor::all(if active { AMBER } else { crate::ui::LINE });
+        for child in children.iter() {
+            if let Ok(mut color) = labels.get_mut(child) {
+                color.0 = if active { FRONT } else { crate::ui::TEXT };
+            }
         }
     }
 }
@@ -275,6 +341,144 @@ mod tests {
     use crate::car::{Car, CarPlugin, Handling};
     use crate::lap::{LapPlugin, LapTimer};
     use crate::track::Track;
+
+    fn tap(app: &mut App, key: KeyCode) {
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(key);
+        run(app, 1);
+    }
+
+    fn pad_tap(app: &mut App, controller: Entity, button: GamepadButton) {
+        app.world_mut()
+            .get_mut::<Gamepad>(controller)
+            .unwrap()
+            .digital_mut()
+            .reset_all();
+        app.world_mut()
+            .get_mut::<Gamepad>(controller)
+            .unwrap()
+            .digital_mut()
+            .press(button);
+        run(app, 1);
+        app.world_mut()
+            .get_mut::<Gamepad>(controller)
+            .unwrap()
+            .digital_mut()
+            .clear();
+    }
+
+    #[test]
+    fn keyboard_and_dpad_select_and_activate_each_pause_action() {
+        for gamepad in [false, true] {
+            let mut app = game();
+            let controller = app.world_mut().spawn(Gamepad::default()).id();
+            let press = |app: &mut App, key, button| {
+                if gamepad {
+                    pad_tap(app, controller, button);
+                } else {
+                    tap(app, key);
+                }
+            };
+            press(&mut app, KeyCode::Escape, GamepadButton::Start);
+            assert_eq!(app.world().resource::<Selection>().action, Action::Resume);
+            for (wanted, scope) in [
+                (Action::ResetCurrent, ResetGhosts::Current),
+                (Action::ResetAll, ResetGhosts::All),
+            ] {
+                press(&mut app, KeyCode::ArrowDown, GamepadButton::DPadDown);
+                assert_eq!(app.world().resource::<Selection>().action, wanted);
+                app.world_mut()
+                    .resource_mut::<Messages<ResetRequest>>()
+                    .clear();
+                for _ in 0..2 {
+                    press(&mut app, KeyCode::Enter, GamepadButton::South);
+                    assert_eq!(*app.world().resource::<Halt>(), Halt::Pause);
+                    let requests: Vec<_> = app
+                        .world_mut()
+                        .resource_mut::<Messages<ResetRequest>>()
+                        .drain()
+                        .map(|r| r.0)
+                        .collect();
+                    assert_eq!(requests, vec![Some(scope)]);
+                }
+            }
+            press(&mut app, KeyCode::ArrowDown, GamepadButton::DPadDown);
+            assert_eq!(app.world().resource::<Selection>().action, Action::Quit);
+            press(&mut app, KeyCode::Enter, GamepadButton::South);
+            assert!(app.should_exit().is_some());
+        }
+    }
+
+    #[test]
+    fn pause_navigation_clamps_and_back_resumes_then_reopens_on_resume() {
+        let mut app = game();
+        tap(&mut app, KeyCode::Escape);
+        tap(&mut app, KeyCode::ArrowUp);
+        assert_eq!(app.world().resource::<Selection>().action, Action::Resume);
+        for _ in 0..8 {
+            tap(&mut app, KeyCode::ArrowDown);
+        }
+        assert_eq!(app.world().resource::<Selection>().action, Action::Quit);
+        tap(&mut app, KeyCode::Escape);
+        assert_eq!(*app.world().resource::<Halt>(), Halt::Nothing);
+        tap(&mut app, KeyCode::Escape);
+        assert_eq!(app.world().resource::<Selection>().action, Action::Resume);
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(*app.world().resource::<Halt>(), Halt::Nothing);
+        let controller = app.world_mut().spawn(Gamepad::default()).id();
+        pad_tap(&mut app, controller, GamepadButton::Start);
+        pad_tap(&mut app, controller, GamepadButton::DPadDown);
+        pad_tap(&mut app, controller, GamepadButton::East);
+        assert_eq!(*app.world().resource::<Halt>(), Halt::Nothing);
+    }
+
+    #[test]
+    fn mouse_focus_does_not_override_keyboard_and_click_uses_the_same_action() {
+        let mut app = game();
+        tap(&mut app, KeyCode::Escape);
+        let button = app
+            .world_mut()
+            .spawn((Action::ResetCurrent, Interaction::Hovered))
+            .id();
+        run(&mut app, 1);
+        assert_eq!(
+            app.world().resource::<Selection>().action,
+            Action::Resume,
+            "a stationary pointer must not steal initial focus"
+        );
+        app.world_mut().write_message(bevy::window::CursorMoved {
+            window: Entity::PLACEHOLDER,
+            position: Vec2::ONE,
+            delta: Some(Vec2::ONE),
+        });
+        run(&mut app, 1);
+        assert_eq!(
+            app.world().resource::<Selection>().action,
+            Action::ResetCurrent
+        );
+        tap(&mut app, KeyCode::ArrowDown);
+        run(&mut app, 1);
+        assert_eq!(app.world().resource::<Selection>().action, Action::ResetAll);
+        app.world_mut()
+            .resource_mut::<Messages<ResetRequest>>()
+            .clear();
+        app.world_mut()
+            .entity_mut(button)
+            .insert(Interaction::Pressed);
+        run(&mut app, 1);
+        let requests: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<ResetRequest>>()
+            .drain()
+            .map(|r| r.0)
+            .collect();
+        assert_eq!(requests, vec![None, Some(ResetGhosts::Current)]);
+        assert_eq!(*app.world().resource::<Halt>(), Halt::Pause);
+    }
 
     /// The production schedules, without the rendered model.
     fn game() -> App {
