@@ -30,7 +30,7 @@ mod markers;
 mod profile;
 mod ribbon;
 
-use bevy::prelude::*;
+use bevy::{light::NotShadowCaster, prelude::*};
 
 use crate::Reset;
 use crate::car::{Car, level};
@@ -711,7 +711,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    commands.spawn((
+    let mut loft = commands.spawn((
         Loft,
         Mesh3d(meshes.add(track.profile.loft(&track.ribbon))),
         MeshMaterial3d(materials.add(StandardMaterial {
@@ -720,6 +720,11 @@ fn setup(
             ..default()
         })),
     ));
+    // Keep the lower road readable beneath a crossing. The car and markers
+    // still cast their own shadows; only the continuous track mesh opts out.
+    if !track.circuit.crossings.is_empty() {
+        loft.insert(NotShadowCaster);
+    }
 }
 
 /// Go where the menu said.
@@ -729,10 +734,11 @@ fn setup(
 /// anyway, and the game is stopped behind the menu while it happens. The old
 /// mesh goes when the last handle to it does.
 fn switch(
+    mut commands: Commands,
     mut asked: MessageReader<GoTo>,
     mut track: ResMut<Track>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut loft: Query<&mut Mesh3d, With<Loft>>,
+    mut loft: Query<(Entity, &mut Mesh3d), With<Loft>>,
     mut reset: MessageWriter<Reset>,
 ) {
     let Some(GoTo(next)) = asked.read().last() else {
@@ -742,8 +748,13 @@ fn switch(
         return;
     }
     *track = Track::new(next);
-    if let Ok(mut mesh) = loft.single_mut() {
+    if let Ok((entity, mut mesh)) = loft.single_mut() {
         mesh.0 = meshes.add(track.profile.loft(&track.ribbon));
+        if next.crossings.is_empty() {
+            commands.entity(entity).remove::<NotShadowCaster>();
+        } else {
+            commands.entity(entity).insert(NotShadowCaster);
+        }
     }
     // Everything that owns a piece of the old lap puts it back itself.
     reset.write(Reset);
@@ -1439,6 +1450,16 @@ mod tests {
             track.profile.loft(&track.ribbon).count_vertices(),
             "the loft drawn is not the one this circuit sweeps"
         );
+
+        // The same mesh entity is reused, so its shadow setting must follow
+        // the circuit both into a bridge and back out of one.
+        let suzuka = circuits::all().iter().find(|c| c.id == "suzuka").unwrap();
+        app.world_mut().write_message(GoTo(suzuka));
+        app.update();
+        assert!(app.world().get::<NotShadowCaster>(loft).is_some());
+        app.world_mut().write_message(GoTo(circuits::first()));
+        app.update();
+        assert!(app.world().get::<NotShadowCaster>(loft).is_none());
     }
 
     /// A circuit that passes over itself, built to order.
