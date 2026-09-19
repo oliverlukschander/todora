@@ -471,8 +471,8 @@ fn circuits(
 fn character(spec: Spec) -> (&'static str, &'static str) {
     match spec {
         Spec::Tourer => (
-            "THE ALL-ROUNDER",
-            "A composed balance of grip and straight-line pace.",
+            "LE MANS 2014 · GTE AM",
+            "DHH’s class-winning Aston Martin V8 Vantage.",
         ),
         Spec::Clubman => (
             "THE CORNER CARVER",

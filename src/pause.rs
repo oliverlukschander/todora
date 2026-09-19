@@ -136,6 +136,72 @@ fn setup(mut commands: Commands) {
                         .with_children(|button| {
                             button.spawn(label("Resume  /  A · Start · Enter", 17.0, FRONT));
                         });
+                    for which in [
+                        crate::sound::SoundToggle::Music,
+                        crate::sound::SoundToggle::Effects,
+                    ] {
+                        panel
+                            .spawn((
+                                Button,
+                                which,
+                                Node {
+                                    padding: UiRect::all(px(12)),
+                                    border: UiRect::all(px(1)),
+                                    border_radius: BorderRadius::all(px(8)),
+                                    justify_content: JustifyContent::Center,
+                                    ..default()
+                                },
+                                BorderColor::all(LINE),
+                            ))
+                            .with_children(|button| {
+                                button.spawn(label("", 17.0, TEXT));
+                            });
+                    }
+                    for (scope, title) in [
+                        (
+                            crate::ghost::clear::ResetGhosts::Current,
+                            "Reset this ghost",
+                        ),
+                        (crate::ghost::clear::ResetGhosts::All, "Reset all ghosts"),
+                    ] {
+                        panel
+                            .spawn((
+                                Button,
+                                scope,
+                                Node {
+                                    padding: UiRect::all(px(12)),
+                                    border: UiRect::all(px(1)),
+                                    border_radius: BorderRadius::all(px(8)),
+                                    justify_content: JustifyContent::Center,
+                                    ..default()
+                                },
+                                BorderColor::all(LINE),
+                            ))
+                            .with_children(|button| {
+                                button.spawn(label(title, 17.0, TEXT));
+                            });
+                    }
+                    panel.spawn((
+                        crate::ghost::clear::Notice,
+                        label(
+                            "Reset removes saved best times and restarts the lap.",
+                            14.0,
+                            AMBER_DIM,
+                        ),
+                    ));
+                    panel
+                        .spawn((
+                            Button,
+                            crate::Quit,
+                            Node {
+                                padding: UiRect::all(px(12)),
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                        ))
+                        .with_children(|button| {
+                            button.spawn(label("Quit game", 17.0, AMBER_DIM));
+                        });
                 });
         });
 }
