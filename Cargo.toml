@@ -1,6 +1,6 @@
 [package]
 name = "todora"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 description = "A 3rd-person arcade racer around forty scaled real circuits"
 license = "MIT"
@@ -8,6 +8,8 @@ repository = "https://github.com/oliverlukschander/todora"
 
 [dependencies]
 bevy = "0.19"
+rodio = { version = "0.22.2", default-features = false, features = ["symphonia-mp3"] }
+ureq = { version = "2.12", default-features = false, features = ["tls"] }
 
 # Playable debug builds: cheap crate code, optimized engine.
 [profile.dev]

@@ -28,7 +28,7 @@ pub(crate) use physics::{
 };
 pub(crate) use setup::Setup;
 
-pub(crate) const MODEL: &str = "models/shooting_brake.glb";
+pub(crate) const MODEL: &str = "models/omarchy_gt_95.glb";
 /// The engine steps at this rate whatever the frame rate, so the car handles
 /// the same at 30 frames a second as at 144. Bevy carries leftover frame time
 /// into the next frame instead of using a shorter final step.
@@ -143,7 +143,7 @@ fn attach_wheels(
         let Ok(name) = names.get(entity) else {
             continue;
         };
-        // `make_shooting_brake.py` names the hubs WheelFL, WheelFR, WheelRL, WheelRR.
+        // `make_omarchy_gt.py` names the hubs WheelFL, WheelFR, WheelRL, WheelRR.
         let Some(corner) = name.as_str().strip_prefix("Wheel") else {
             continue;
         };
@@ -238,7 +238,7 @@ fn tune(
 }
 
 /// Which parts of the model are painted, taken once as the glTF arrives. The
-/// name comes from the material in `make_shooting_brake.py`, so the model says
+/// name comes from the material in `make_omarchy_gt.py`, so the model says
 /// what its own bodywork is rather than this guessing from a colour.
 fn find_the_bodywork(
     ready: On<WorldInstanceReady>,

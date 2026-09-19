@@ -1,12 +1,20 @@
 # Todora
 
-A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy.org/). Drive a comic shooting-brake around forty scaled real circuits, with **T** for the list of them.
+A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy.org/). Drive an Omarchy GT around forty scaled real circuits, with **T** for the list of them.
 
-[Download Todora 0.6.0 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.6.0/Todora.dmg) · [Release notes](docs/releases/v0.6.0.md)
+[Download Todora 0.7.0 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.7.0/Todora.dmg) · [Release notes](docs/releases/v0.7.0.md)
 
-Cars are now **25% smaller**, with matching wheel contacts and ghost models. Every road is **3.6 m wide** including kerbs (previously 3.3 m), with 2.94 m of asphalt. Runoff and corner plaques are sized for the smaller cars.
+The default garage choice is **OMARCHY GT #95**, a Blender-built recreation of the car David Heinemeier Hansson and his co-drivers drove to the **2014 Le Mans GTE Am class win**. It has the pale-blue and orange livery, yellow endurance lights, animated race wheels, rear wing and diffuser. Clubman and Express remain handling and colour variants of the shared model. [Model, reference sources and rebuild instructions](docs/models/omarchy-gt-95.md).
+
+The GT measures about **1.06 game units long and 0.45 across the body**, with matching wheel contacts and ghost models. Every road is **3.6 m wide** including kerbs (previously 3.3 m), with 2.94 m of asphalt. Its aerodynamic grip contribution is twice the earlier estate car's, with the garage variants retaining their different setups.
+
+Acceleration builds more gradually: the default GT on flat road reaches displayed 150 km/h in about 2.9 seconds and 200 in 5.0 seconds. It approaches 95% of its roughly 230 km/h top speed after 6.8 seconds.
+
+**Sound:** [CLIamp's Omarchy station](https://radio.cliamp.stream/omarchy/stream.pls) plays quietly in the background. **M** switches music on or off; **F8** mutes or restores all sound. There is no motor sound. Recorded wheel contact stays audible whenever the car moves, including coasting, with a quiet rolling texture that grows with speed. Rubber squeal builds near the grip limit and becomes brighter during a slide. Wheels go quiet at rest and on pause; grass keeps the rolling texture without tarmac squeal. Music continues through menus. [Tyre sample credits and license](assets/audio/CREDITS.md). All sound fades out when the window loses focus. Radio needs an internet connection and reconnects automatically; tyre feedback works offline. Music is streamed live, not bundled with the app.
 
 All forty laps are shorter: most by about 10%, with smaller reductions on the tightest circuits to keep the roads separate. Finished laps range from 446 m at Magny-Cours to 1,807 m at Baku. The shared plan scale is 0.12 and the elevation scale is 0.252; corner opening targets 4.5 m. The menu lists the rebuilt lengths. Surface fingerprints automatically reject ghosts recorded on the previous layouts.
+
+**Ghost reset:** press **Esc**, then **Reset this ghost** (current circuit and driving mode) or **Reset all ghosts**. Click the same button again to confirm. This removes the corresponding saved best times and restarts your lap. **Cmd+Q** on macOS, **Ctrl+Q** elsewhere, or **Quit game** in the pause menu exits with audio stopped and radio shutdown signalled; native window/menu quit also cleans up sound.
 
 ## Design history
 
@@ -190,10 +198,10 @@ tools/package_macos.sh
 
 Builds a release binary, wraps it in `dist/Todora.app` with its icon, and puts that in `dist/Todora.dmg` next to an Applications shortcut. It uses only what macOS ships with: QuickLook renders the icon from `art/icon/todora.svg`, `iconutil` packs it, `hdiutil` makes the disk image. The app is signed ad hoc, which is all this Mac needs; another Mac will ask for right-click → Open the first time, because there is no Developer ID behind it.
 
-Rebuild the shooting-brake from Blender:
+Rebuild the Omarchy GT from Blender:
 
 ```sh
-/Applications/Blender.app/Contents/MacOS/Blender --background --python tools/make_shooting_brake.py
+/Applications/Blender.app/Contents/MacOS/Blender --background --python tools/make_omarchy_gt.py
 ```
 
 ## Circuit data and thanks
