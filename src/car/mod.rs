@@ -11,6 +11,7 @@
 
 mod driver;
 mod garage;
+mod mode;
 mod physics;
 mod setup;
 
@@ -21,6 +22,7 @@ use crate::input::InputSet;
 use crate::menu::MenuSet;
 use crate::track::{Track, TrackSet};
 pub(crate) use garage::Spec;
+pub(crate) use mode::Mode;
 pub(crate) use physics::{
     Car, Controls, HALF_TRACK, Handling, REAR_AXLE, SCALE, Surface, WHEEL_WIDTH,
 };
@@ -74,6 +76,7 @@ impl Plugin for CarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Setup>()
             .init_resource::<Spec>()
+            .init_resource::<Mode>()
             .insert_resource(Time::<Fixed>::from_hz(240.0))
             .add_systems(Startup, setup)
             // After the input, which is what asks for both; after the menus,
@@ -99,6 +102,7 @@ fn setup(
     track: Res<Track>,
     chosen: Res<Setup>,
     spec: Res<Spec>,
+    mode: Res<Mode>,
     asset_server: Res<AssetServer>,
 ) {
     commands
@@ -110,7 +114,7 @@ fn setup(
                 along: Some(track.start_along_lap()),
                 ..Car::default()
             },
-            chosen.applied_to(spec.handling()),
+            mode.applied_to(chosen.applied_to(spec.handling())),
             Controls::default(),
             Player,
             track.start_transform().with_scale(Vec3::splat(SCALE)),
@@ -218,15 +222,18 @@ fn drive(
 
 /// The car that is being driven, leaned the way the slider says.
 ///
-/// Two preferences meeting in one place, and in one order: the car is the
-/// baseline and the slider is the lean on it. Both survive a restart, and both
-/// are applied the moment either moves.
-fn tune(chosen: Res<Setup>, spec: Res<Spec>, mut cars: Query<&mut Handling, With<Player>>) {
-    if !chosen.is_changed() && !spec.is_changed() {
+/// The car, handling setup and speed mode survive restarts and apply together.
+fn tune(
+    chosen: Res<Setup>,
+    spec: Res<Spec>,
+    mode: Res<Mode>,
+    mut cars: Query<&mut Handling, With<Player>>,
+) {
+    if !chosen.is_changed() && !spec.is_changed() && !mode.is_changed() {
         return;
     }
     for mut handling in &mut cars {
-        *handling = chosen.applied_to(spec.handling());
+        *handling = mode.applied_to(chosen.applied_to(spec.handling()));
     }
 }
 
@@ -443,6 +450,25 @@ mod tests {
         assert_eq!(app.world().get::<Car>(entity).unwrap().velocity, Vec3::ZERO);
         assert_eq!(app.world().resource::<crate::lap::LapTimer>().current, 0.0);
         assert_eq!(app.world().resource::<crate::lap::LapTimer>().completed, 0);
+    }
+
+    #[test]
+    fn speed_mode_applies_before_driving_and_survives_a_reset() {
+        let (mut app, entity) = simulation();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release_all();
+        app.insert_resource(Mode::Beginner);
+        app.world_mut().write_message(Reset);
+        app.update();
+        assert_eq!(
+            *app.world().get::<Handling>(entity).unwrap(),
+            Mode::Beginner.applied_to(Handling::SHOOTING_BRAKE)
+        );
+        app.world_mut().write_message(Reset);
+        app.update();
+        assert_eq!(*app.world().resource::<Mode>(), Mode::Beginner);
+        assert_eq!(app.world().get::<Car>(entity).unwrap().velocity, Vec3::ZERO);
     }
 
     /// A body leans *out* of a corner and dips its nose under the brakes. Get

@@ -21,6 +21,7 @@ use std::{fs, io, path::PathBuf};
 use bevy::prelude::*;
 
 use super::Recording;
+use crate::car::Mode;
 use crate::track::Track;
 
 /// `TODORA LAP`, version 1. A file that does not start with this is not ours.
@@ -40,9 +41,14 @@ pub(super) struct Saved {
 impl Saved {
     /// Where this circuit's lap lives, or `None` on a machine that will not say
     /// where a game may keep things.
-    pub(super) fn of(track: &Track) -> Option<Self> {
+    pub(super) fn of(track: &Track, mode: Mode) -> Option<Self> {
+        let filename = if mode == Mode::Regular {
+            format!("{}.lap", track.circuit().id)
+        } else {
+            format!("{}-{}.lap", track.circuit().id, mode.name().to_lowercase())
+        };
         Some(Self {
-            path: folder()?.join(format!("{}.lap", track.circuit().id)),
+            path: folder()?.join(filename),
             fingerprint: track.fingerprint(),
         })
     }
@@ -298,18 +304,34 @@ mod tests {
 
     /// Every circuit files its lap somewhere of its own.
     #[test]
-    fn each_circuit_has_its_own_file() {
+    fn each_circuit_and_mode_has_its_own_file() {
         let Some(folder) = folder() else {
             return;
         };
         assert!(folder.is_absolute(), "{} is not a place", folder.display());
         let mut paths: Vec<PathBuf> = crate::track::all_circuits()
             .iter()
-            .filter_map(|circuit| Saved::of(&Track::new(circuit)).map(|saved| saved.path))
+            .flat_map(|circuit| {
+                let track = Track::new(circuit);
+                Mode::ALL
+                    .into_iter()
+                    .filter_map(move |mode| Saved::of(&track, mode).map(|saved| saved.path))
+            })
             .collect();
         let filed = paths.len();
         paths.sort();
         paths.dedup();
-        assert_eq!(paths.len(), filed, "two circuits share a file");
+        assert_eq!(filed, crate::track::all_circuits().len() * 3);
+        assert_eq!(
+            paths.len(),
+            filed,
+            "two circuit/mode combinations share a file"
+        );
+        let track = Track::any();
+        assert_eq!(
+            Saved::of(&track, Mode::Regular).unwrap().path,
+            folder.join(format!("{}.lap", track.circuit().id)),
+            "Regular must keep the existing saved laps"
+        );
     }
 }

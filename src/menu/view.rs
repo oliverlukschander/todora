@@ -216,9 +216,9 @@ pub(super) fn draw(
             }, BorderColor::all(LINE))).with_children(|footer| {
                 footer.spawn(Node { row_gap: px(4), ..column() }).with_children(|hint| {
                     hint.spawn(label(if page == Page::Circuit { "Stick / D-pad / Arrows  Browse     PgUp / PgDn  Page     A / Enter  Drive" }
-                        else { "Stick up/down  Car     Left/right  Setup     A / Enter  Apply" }, 13.0, TEXT));
+                        else { "↑↓  Car     ←→  Setup     Y / M  Mode     A / Enter  Apply" }, 13.0, TEXT));
                     hint.spawn(label(if page == Page::Circuit { "Changing circuit starts a new session. Start / B / Esc returns to your current lap." }
-                        else { "Applying a different car or setup restarts this lap. Your best time stays." }, 12.0, MUTED));
+                        else { "Apply restarts the lap. Best times and ghosts are saved separately for each mode." }, 12.0, MUTED));
                 });
                 if selected {
                     footer.spawn((button(Action::Apply), Primary)).with_children(|b| {
@@ -605,13 +605,51 @@ fn garage(body: &mut ChildSpawnerCommands, menu: &Menu, current: &Spec) {
         BackgroundColor(SURFACE),
     ))
     .with_children(|setup| {
+        setup.spawn(label("DRIVING MODE", 11.0, ACCENT));
+        setup
+            .spawn(Node {
+                column_gap: px(6),
+                ..default()
+            })
+            .with_children(|modes| {
+                for mode in Mode::ALL {
+                    let selected = menu.mode == mode;
+                    let mut choice = modes.spawn(card(
+                        Action::Mode(mode),
+                        selected,
+                        Node {
+                            flex_basis: percent(0),
+                            flex_grow: 1.0,
+                            padding: UiRect::axes(px(8), px(10)),
+                            border: UiRect::all(px(1)),
+                            border_radius: BorderRadius::all(px(8)),
+                            align_items: AlignItems::Center,
+                            row_gap: px(3),
+                            ..column()
+                        },
+                    ));
+                    if selected {
+                        choice.insert(Selected);
+                    }
+                    choice.with_children(|choice| {
+                        choice.spawn(label(
+                            mode.name(),
+                            15.0,
+                            if selected { ACCENT } else { TEXT },
+                        ));
+                        choice.spawn(label(
+                            match mode {
+                                Mode::Beginner => "−20% speed",
+                                Mode::Regular => "100% speed",
+                                Mode::Pro => "+20% speed",
+                            },
+                            12.0,
+                            MUTED,
+                        ));
+                    });
+                }
+            });
         setup.spawn(label("HANDLING SETUP", 11.0, ACCENT));
-        setup.spawn(label("Find your balance.", 28.0, TEXT));
-        setup.spawn(label(
-            "Tune how your car turns and holds a slide.",
-            14.0,
-            MUTED,
-        ));
         for (at, wanted) in Setup::ALL.into_iter().enumerate() {
             let (title, hint) = match wanted {
                 Setup::Understeer => ("Stable", "Gentler rotation. Easier to catch."),
@@ -652,8 +690,8 @@ fn garage(body: &mut ChildSpawnerCommands, menu: &Menu, current: &Spec) {
             });
         }
         setup.spawn(label(
-            "Applies to the selected car. You can also adjust it while driving with 1 / 2 / 3.",
-            13.0,
+            "1 / 2 / 3 changes handling while driving.",
+            12.0,
             MUTED,
         ));
     });

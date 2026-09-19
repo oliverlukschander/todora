@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::car::{Car, Setup, Spec};
+use crate::car::{Car, Mode, Setup, Spec};
 use crate::ghost::Ghost;
 use crate::lap::{LapTimer, format_time};
 use crate::track::Track;
@@ -242,7 +242,7 @@ fn draw_controls(pads: Query<&Gamepad>, mut text: Query<&mut Text, With<ControlH
     let hint = if pads.is_empty() {
         "WASD / Arrows  Drive    Space  Handbrake    R  Restart\nG  Ghost    Scroll  Zoom    Esc  Pause"
     } else {
-        "Left stick  Steer    A  Gas    X  Brake    B  Handbrake\nStart  Pause    LB  Garage    View  Circuits    Y  Ghost"
+        "Left stick  Steer    A  Gas    X  Brake    B  Handbrake    RB  Reset\nStart  Pause    LB  Garage    View  Circuits    Y  Ghost"
     };
     if let Ok(mut text) = text.single_mut()
         && text.0 != hint
@@ -303,12 +303,12 @@ fn draw_setup(
 /// Name the car being driven. It sits over the meter rather than in the menu,
 /// because which car you are in is a thing you want to know while driving it and
 /// the menu is only up when you are not.
-fn draw_car(spec: Res<Spec>, mut readout: Query<&mut Text, With<CarName>>) {
-    if !spec.is_changed() {
+fn draw_car(spec: Res<Spec>, mode: Res<Mode>, mut readout: Query<&mut Text, With<CarName>>) {
+    if !spec.is_changed() && !mode.is_changed() {
         return;
     }
     if let Ok(mut text) = readout.single_mut() {
-        text.0 = spec.name().into();
+        text.0 = format!("{} / {}", spec.name(), mode.name().to_uppercase());
     }
 }
 

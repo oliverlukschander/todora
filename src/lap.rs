@@ -19,7 +19,7 @@
 use bevy::prelude::*;
 
 use crate::Reset;
-use crate::car::{Car, DriveSet, Player};
+use crate::car::{Car, DriveSet, Mode, Player};
 use crate::input::InputSet;
 use crate::track::{Track, TrackSet};
 
@@ -179,15 +179,21 @@ fn gate(
     timer.prev_along = Some(along);
 }
 
-/// A new circuit has no history on it; a restart on the one being driven gives
+/// A new circuit or driving mode starts a fresh board; a restart gives
 /// up the lap in progress and nothing else.
 ///
 /// The track key builds the circuit before this runs, so a changed [`Track`] is
-/// how a switch tells itself apart from a restart — including the first frame of
+/// how a circuit switch tells itself apart from a restart. A mode change also
+/// clears the board before the ghost loads its saved best — including the first frame of
 /// all, where the board is empty anyway.
-fn start_again(mut resets: MessageReader<Reset>, track: Res<Track>, mut timer: ResMut<LapTimer>) {
+fn start_again(
+    mut resets: MessageReader<Reset>,
+    track: Res<Track>,
+    mode: Res<Mode>,
+    mut timer: ResMut<LapTimer>,
+) {
     let restarted = resets.read().next().is_some();
-    if track.is_changed() {
+    if track.is_changed() || mode.is_changed() {
         *timer = LapTimer::default();
     } else if restarted {
         timer.abandon();
@@ -220,6 +226,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn changing_mode_clears_the_current_lap_and_board() {
+        let mut app = App::new();
+        app.add_message::<Reset>()
+            .insert_resource(Track::any())
+            .init_resource::<Mode>()
+            .init_resource::<LapTimer>()
+            .add_systems(Update, start_again);
+        app.update();
+        app.insert_resource(mid_lap());
+        app.insert_resource(Mode::Pro);
+        app.world_mut().write_message(Reset);
+        app.update();
+        let timer = app.world().resource::<LapTimer>();
+        assert_eq!(timer.current, 0.0);
+        assert_eq!(timer.completed, 0);
+        assert!(!timer.running);
+        assert!(timer.best.is_none() && timer.last.is_none());
+    }
+
     /// A restart puts the clock back to the line and leaves the board alone.
     /// The best lap is what the driver is chasing; taking it away for pressing
     /// `R` would punish the restart rather than the lap that went wrong.
@@ -228,6 +254,7 @@ mod tests {
         let mut app = App::new();
         app.add_message::<Reset>()
             .insert_resource(Track::any())
+            .init_resource::<Mode>()
             .insert_resource(mid_lap())
             .add_systems(Update, start_again);
 
@@ -261,6 +288,7 @@ mod tests {
         let mut app = App::new();
         app.add_message::<Reset>()
             .insert_resource(Track::any())
+            .init_resource::<Mode>()
             .insert_resource(mid_lap())
             .add_systems(Update, start_again);
         app.update();

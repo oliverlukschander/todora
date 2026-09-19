@@ -74,9 +74,11 @@ fn read(
             - held(&keys, [KeyCode::KeyD, KeyCode::ArrowRight]),
         handbrake: keys.pressed(KeyCode::Space),
     };
-    let restart = keys.just_pressed(KeyCode::KeyR);
+    let mut restart = keys.just_pressed(KeyCode::KeyR);
 
     for pad in &pads {
+        // Bevy's RightTrigger is the bumper (RB); RightTrigger2 is RT.
+        restart |= pad.just_pressed(GamepadButton::RightTrigger);
         // Stick right is steer right, which is negative here. Past the deadzone
         // the travel is rescaled so full stick is still full lock.
         let stick = -pad.left_stick().x;
@@ -133,6 +135,44 @@ fn held<const N: usize>(keys: &ButtonInput<KeyCode>, any: [KeyCode; N]) -> f32 {
 mod tests {
     use super::*;
     use crate::pause::Halt;
+
+    #[test]
+    fn right_bumper_resets_once_per_press_and_only_while_driving() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<Setup>()
+            .init_resource::<Halt>()
+            .add_message::<Reset>()
+            .add_plugins(InputPlugin);
+        let mut pad = Gamepad::default();
+        pad.digital_mut().press(GamepadButton::RightTrigger);
+        let controller = app.world_mut().spawn(pad).id();
+        app.update();
+        assert_eq!(app.world().resource::<Messages<Reset>>().len(), 1);
+        app.world_mut().resource_mut::<Messages<Reset>>().clear();
+        app.world_mut()
+            .get_mut::<Gamepad>(controller)
+            .unwrap()
+            .digital_mut()
+            .clear();
+        app.update();
+        assert!(
+            app.world().resource::<Messages<Reset>>().is_empty(),
+            "holding RB repeated the reset"
+        );
+        for halt in [Halt::Pause, Halt::Menu, Halt::Nothing] {
+            app.insert_resource(halt);
+            let mut pad = app.world_mut().get_mut::<Gamepad>(controller).unwrap();
+            pad.digital_mut().release(GamepadButton::RightTrigger);
+            pad.digital_mut().press(GamepadButton::RightTrigger);
+            app.update();
+            assert_eq!(
+                app.world().resource::<Messages<Reset>>().len(),
+                usize::from(halt == Halt::Nothing)
+            );
+        }
+    }
 
     #[test]
     fn xbox_face_buttons_drive_without_handbraking_or_restarting() {

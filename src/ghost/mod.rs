@@ -12,7 +12,7 @@
 //!
 //! `G` shows and hides it. A restart leaves it alone — it is the lap you are
 //! chasing, and you restart because the lap you are driving went wrong. It goes
-//! when the circuit does, and is replaced by the one saved for the new circuit.
+//! when the circuit or driving mode changes, and loads that combination’s best lap.
 //!
 //! The best lap outlives the session, in [`store`]. Beat your own time and the
 //! lap is written out; come back tomorrow, or switch away and back, and it is
@@ -23,7 +23,7 @@ mod store;
 use bevy::{light::NotShadowCaster, prelude::*, world_serialization::WorldInstanceReady};
 
 use crate::Reset;
-use crate::car::{MODEL, Player, SCALE};
+use crate::car::{MODEL, Mode, Player, SCALE};
 use crate::input::InputSet;
 use crate::lap::{ClockSet, LapFinished, LapSet, LapTimer};
 use crate::pause::running;
@@ -244,8 +244,8 @@ fn finish(
     }
 }
 
-/// A restart gives up the lap being recorded. A new circuit gives up the ghost
-/// too, and takes up the lap saved for the circuit it has arrived at — which on
+/// A restart gives up the lap being recorded. Changing circuit or driving mode
+/// loads the best lap saved for that combination — which on
 /// the first frame of all is how the ghost gets there at startup.
 ///
 /// The best time goes on the board with it. A saved lap was driven round this
@@ -254,12 +254,13 @@ fn finish(
 fn reset(
     mut resets: MessageReader<Reset>,
     track: Res<Track>,
+    mode: Res<Mode>,
     mut timer: ResMut<LapTimer>,
     mut ghost: ResMut<Ghost>,
 ) {
     let restarted = resets.read().next().is_some();
-    if track.is_changed() {
-        ghost.saved = Saved::of(&track);
+    if track.is_changed() || mode.is_changed() {
+        ghost.saved = Saved::of(&track, *mode);
         ghost.best = ghost.saved.as_ref().and_then(Saved::read);
         if let Some(best) = &ghost.best {
             timer.remember(best.duration());
@@ -471,6 +472,7 @@ mod tests {
         app.add_message::<Reset>()
             .insert_resource(Track::any())
             .init_resource::<LapTimer>()
+            .init_resource::<Mode>()
             .add_systems(Update, reset);
         let player = app.world_mut().spawn((Player, Transform::IDENTITY)).id();
         app.insert_resource(Ghost {
@@ -488,6 +490,21 @@ mod tests {
         ghost.recording = lap_of(4);
         ghost.delta = Some(1.5);
         app
+    }
+
+    #[test]
+    fn changing_mode_loads_its_own_ghost_and_discards_the_partial_lap() {
+        let mut app = mid_session();
+        let expected = Saved::of(app.world().resource::<Track>(), Mode::Beginner)
+            .and_then(|saved| saved.read())
+            .map(|lap| lap.duration());
+        app.insert_resource(Mode::Beginner);
+        app.world_mut().write_message(Reset);
+        app.update();
+        let ghost = app.world().resource::<Ghost>();
+        assert!(ghost.recording.samples.is_empty());
+        assert_eq!(ghost.delta, None);
+        assert_eq!(ghost.best.as_ref().map(Recording::duration), expected);
     }
 
     /// A restart gives up the lap being recorded and leaves the ghost alone. It

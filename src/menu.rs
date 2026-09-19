@@ -4,7 +4,7 @@ mod view;
 
 use crate::{
     Reset,
-    car::{Setup, Spec},
+    car::{Mode, Setup, Spec},
     input::InputSet,
     pause::{Halt, HaltSet},
     track::{GoTo, Track, all_circuits, circuit_at},
@@ -43,6 +43,7 @@ pub(crate) struct Menu {
     page: Option<Page>,
     at: usize,
     setup: Setup,
+    mode: Mode,
     search: String,
 }
 
@@ -144,6 +145,7 @@ enum Action {
     Open(Page),
     Select(usize),
     Tune(Setup),
+    Mode(Mode),
     Previous,
     Next,
     Clear,
@@ -178,12 +180,14 @@ fn pressed(
     keys.just_pressed(key) || pads.iter().any(|pad| pad.just_pressed(button))
 }
 
+#[allow(clippy::too_many_arguments)] // Bevy-managed input and selection resources.
 fn open(
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
     track: Res<Track>,
     spec: Res<Spec>,
     setup: Res<Setup>,
+    mode: Res<Mode>,
     mut menu: ResMut<Menu>,
     mut halt: ResMut<Halt>,
 ) {
@@ -197,12 +201,21 @@ fn open(
     } else {
         return;
     };
-    enter(page, &mut menu, &mut halt, &spec, &setup, &track);
+    enter(page, &mut menu, &mut halt, &spec, &setup, &mode, &track);
 }
 
-fn enter(page: Page, menu: &mut Menu, halt: &mut Halt, spec: &Spec, setup: &Setup, track: &Track) {
+fn enter(
+    page: Page,
+    menu: &mut Menu,
+    halt: &mut Halt,
+    spec: &Spec,
+    setup: &Setup,
+    mode: &Mode,
+    track: &Track,
+) {
     menu.at = page.chosen(spec, track);
     menu.setup = *setup;
+    menu.mode = *mode;
     menu.search.clear();
     menu.page = Some(page);
     *halt = Halt::Menu;
@@ -250,6 +263,7 @@ fn walk(
     mut halt: ResMut<Halt>,
     mut spec: ResMut<Spec>,
     mut setup: ResMut<Setup>,
+    mut mode: ResMut<Mode>,
     mut reset: MessageWriter<Reset>,
     mut go: MessageWriter<GoTo>,
 ) {
@@ -328,6 +342,9 @@ fn walk(
             menu.move_by(all_circuits().len() as i32);
         }
     } else {
+        if pressed(&keys, &pads, KeyCode::KeyM, GamepadButton::North) {
+            menu.mode = menu.mode.next();
+        }
         for (key, wanted) in [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3]
             .into_iter()
             .zip(Setup::ALL)
@@ -345,7 +362,7 @@ fn walk(
         close(&mut menu, &mut halt);
     } else if pressed(&keys, &pads, KeyCode::Enter, GamepadButton::South) {
         apply(
-            &mut menu, &mut halt, &mut spec, &mut setup, &mut reset, &mut go,
+            &mut menu, &mut halt, &mut spec, &mut setup, &mut mode, &mut reset, &mut go,
         );
     }
 }
@@ -359,6 +376,7 @@ fn clicks(
     track: Res<Track>,
     mut spec: ResMut<Spec>,
     mut setup: ResMut<Setup>,
+    mut mode: ResMut<Mode>,
     mut reset: MessageWriter<Reset>,
     mut go: MessageWriter<GoTo>,
 ) {
@@ -368,7 +386,7 @@ fn clicks(
         }
         if let Action::Open(page) = action {
             if *halt != Halt::Pause && menu.page != Some(*page) {
-                enter(*page, &mut menu, &mut halt, &spec, &setup, &track);
+                enter(*page, &mut menu, &mut halt, &spec, &setup, &mode, &track);
             }
             continue;
         }
@@ -378,6 +396,7 @@ fn clicks(
         match action {
             Action::Select(at) => menu.at = *at,
             Action::Tune(wanted) => menu.setup = *wanted,
+            Action::Mode(wanted) => menu.mode = *wanted,
             Action::Previous => menu.move_by(-(PAGE_SIZE as i32)),
             Action::Next => menu.move_by(PAGE_SIZE as i32),
             Action::Clear => {
@@ -385,7 +404,7 @@ fn clicks(
                 menu.filter();
             }
             Action::Apply => apply(
-                &mut menu, &mut halt, &mut spec, &mut setup, &mut reset, &mut go,
+                &mut menu, &mut halt, &mut spec, &mut setup, &mut mode, &mut reset, &mut go,
             ),
             Action::Back => close(&mut menu, &mut halt),
             Action::Open(_) => (),
@@ -398,6 +417,7 @@ fn apply(
     halt: &mut Halt,
     spec: &mut Spec,
     setup: &mut Setup,
+    mode: &mut ResMut<Mode>,
     reset: &mut MessageWriter<Reset>,
     go: &mut MessageWriter<GoTo>,
 ) {
@@ -407,9 +427,10 @@ fn apply(
     match menu.page {
         Some(Page::Car) => {
             let wanted = Spec::ALL[menu.at];
-            if wanted != *spec || menu.setup != *setup {
+            if wanted != *spec || menu.setup != *setup || menu.mode != **mode {
                 *spec = wanted;
                 *setup = menu.setup;
+                mode.set_if_neq(menu.mode);
                 reset.write(Reset);
             }
         }
@@ -454,6 +475,7 @@ mod tests {
             // `TrackPlugin` own in the game.
             .init_resource::<Spec>()
             .init_resource::<Setup>()
+            .init_resource::<Mode>()
             .init_resource::<ButtonInput<MouseButton>>()
             .add_message::<KeyboardInput>()
             .add_message::<MouseWheel>()
@@ -654,6 +676,59 @@ mod tests {
     }
 
     #[test]
+    fn mode_is_a_draft_and_applying_it_restarts_the_lap() {
+        #[derive(Resource, Default)]
+        struct ModeChanges(usize);
+        let mut app = game();
+        app.init_resource::<ModeChanges>().add_systems(
+            Update,
+            |mode: Res<Mode>, mut changes: ResMut<ModeChanges>| {
+                if mode.is_changed() {
+                    changes.0 += 1;
+                }
+            },
+        );
+        app.update();
+        press(&mut app, KeyCode::KeyC);
+        press(&mut app, KeyCode::KeyM);
+        assert_eq!(app.world().resource::<Menu>().mode, Mode::Pro);
+        assert_eq!(*app.world().resource::<Mode>(), Mode::Regular);
+        press(&mut app, KeyCode::Escape);
+        press(&mut app, KeyCode::KeyC);
+        assert_eq!(app.world().resource::<Menu>().mode, Mode::Regular);
+        press(&mut app, KeyCode::KeyM);
+        press(&mut app, KeyCode::KeyM);
+        assert_eq!(app.world().resource::<Menu>().mode, Mode::Beginner);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(*app.world().resource::<Mode>(), Mode::Beginner);
+        assert_eq!(app.world().resource::<Messages<Reset>>().len(), 1);
+        press(&mut app, KeyCode::KeyC);
+        assert_eq!(app.world().resource::<Menu>().mode, Mode::Beginner);
+        let mode_changes = app.world().resource::<ModeChanges>().0;
+        press(&mut app, KeyCode::Digit3);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(
+            app.world().resource::<ModeChanges>().0,
+            mode_changes,
+            "changing handling should not reload the mode's records"
+        );
+    }
+
+    #[test]
+    fn xbox_y_cycles_modes_and_a_applies() {
+        let mut app = game();
+        let pad = app.world_mut().spawn(Gamepad::default()).id();
+        app.update();
+        pad_press(&mut app, pad, GamepadButton::LeftTrigger);
+        pad_press(&mut app, pad, GamepadButton::North);
+        assert_eq!(app.world().resource::<Menu>().mode, Mode::Pro);
+        assert_eq!(*app.world().resource::<Mode>(), Mode::Regular);
+        pad_press(&mut app, pad, GamepadButton::South);
+        assert_eq!(*app.world().resource::<Mode>(), Mode::Pro);
+        assert_eq!(*app.world().resource::<Halt>(), Halt::Nothing);
+    }
+
+    #[test]
     fn search_accepts_accents_and_never_applies_an_empty_result() {
         assert_eq!(searchable("Nürburgring"), searchable("NurburgRing"));
         assert_eq!(searchable("São José"), "sao jose");
@@ -712,9 +787,18 @@ mod tests {
         assert_eq!(app.world().resource::<Menu>().at, 2);
         assert_eq!(*app.world().resource::<Spec>(), Spec::Tourer);
         app.world_mut().despawn(button);
+        let mode_button = app
+            .world_mut()
+            .spawn((Interaction::Pressed, Action::Mode(Mode::Beginner)))
+            .id();
+        app.update();
+        assert_eq!(app.world().resource::<Menu>().mode, Mode::Beginner);
+        assert_eq!(*app.world().resource::<Mode>(), Mode::Regular);
+        app.world_mut().despawn(mode_button);
         app.world_mut().spawn((Interaction::Pressed, Action::Apply));
         app.update();
         assert_eq!(*app.world().resource::<Spec>(), Spec::Express);
+        assert_eq!(*app.world().resource::<Mode>(), Mode::Beginner);
         assert_eq!(*app.world().resource::<Halt>(), Halt::Nothing);
     }
 
