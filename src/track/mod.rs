@@ -27,10 +27,10 @@ mod asphalt;
 // is 3.14 or 6.28 metres from the centroid of its circuit. It is a coordinate.
 #[allow(clippy::approx_constant)]
 mod circuits;
-mod infield;
 mod markers;
 mod profile;
 mod ribbon;
+mod terrain;
 
 use bevy::{light::NotShadowCaster, prelude::*};
 
@@ -254,16 +254,16 @@ impl Plugin for TrackPlugin {
 #[derive(Component)]
 struct Loft;
 
-/// Grass filling the hole inside the loft.
+/// Grass inside and outside the loft, bounded by the course rectangle.
 #[derive(Component)]
-struct Infield;
+struct Terrain;
 
 #[derive(Component)]
 struct Asphalt;
 
-type LoftMesh = (With<Loft>, Without<Infield>, Without<Asphalt>);
-type InfieldMesh = (With<Infield>, Without<Loft>, Without<Asphalt>);
-type AsphaltMesh = (With<Asphalt>, Without<Loft>, Without<Infield>);
+type LoftMesh = (With<Loft>, Without<Terrain>, Without<Asphalt>);
+type TerrainMesh = (With<Terrain>, Without<Loft>, Without<Asphalt>);
+type AsphaltMesh = (With<Asphalt>, Without<Loft>, Without<Terrain>);
 
 /// Every circuit there is, in the order the menu lists them.
 pub(crate) fn all_circuits() -> &'static [Circuit] {
@@ -737,9 +737,9 @@ fn setup(
     if !track.circuit.crossings.is_empty() {
         loft.insert(NotShadowCaster);
     }
-    let mut infield = commands.spawn((
-        Infield,
-        Mesh3d(meshes.add(infield::fill(&track.profile, &track.ribbon))),
+    let mut terrain = commands.spawn((
+        Terrain,
+        Mesh3d(meshes.add(terrain::fill(&track.profile, &track.ribbon))),
         MeshMaterial3d(materials.add(StandardMaterial {
             base_color: Color::WHITE,
             perceptual_roughness: 0.9,
@@ -750,16 +750,14 @@ fn setup(
     // The steep bank joins at an overpass self-shadow into jagged black
     // wedges. As with the bridge loft, keep its lower approach readable.
     if !track.circuit.crossings.is_empty() {
-        infield.insert(NotShadowCaster);
+        terrain.insert(NotShadowCaster);
     }
 }
 
 /// Go where the menu said.
 ///
-/// Building a circuit is a few tens of milliseconds of splining and
-/// corner-opening — a visible hitch, once, at the moment the world is replaced
-/// anyway, and the game is stopped behind the menu while it happens. The old
-/// mesh goes when the last handle to it does.
+/// Rebuild the spline and surrounding terrain once while the game is stopped
+/// behind the menu. The old meshes go when the last handles to them do.
 #[allow(clippy::too_many_arguments)] // Bevy-managed resources and distinct surface queries.
 fn switch(
     mut commands: Commands,
@@ -767,7 +765,7 @@ fn switch(
     mut track: ResMut<Track>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut loft: Query<(Entity, &mut Mesh3d), LoftMesh>,
-    mut bowl: Query<(Entity, &mut Mesh3d), InfieldMesh>,
+    mut ground: Query<(Entity, &mut Mesh3d), TerrainMesh>,
     mut road: Query<(Entity, &mut Mesh3d), AsphaltMesh>,
     mut reset: MessageWriter<Reset>,
 ) {
@@ -795,8 +793,8 @@ fn switch(
             commands.entity(entity).insert(NotShadowCaster);
         }
     }
-    if let Ok((entity, mut mesh)) = bowl.single_mut() {
-        mesh.0 = meshes.add(infield::fill(&track.profile, &track.ribbon));
+    if let Ok((entity, mut mesh)) = ground.single_mut() {
+        mesh.0 = meshes.add(terrain::fill(&track.profile, &track.ribbon));
         if next.crossings.is_empty() {
             commands.entity(entity).remove::<NotShadowCaster>();
         } else {
@@ -1442,7 +1440,7 @@ mod tests {
         };
         let loft = app.world_mut().spawn((Loft, Mesh3d(road.clone()))).id();
         let asphalt = app.world_mut().spawn((Asphalt, Mesh3d(road.clone()))).id();
-        let grass = app.world_mut().spawn((Infield, Mesh3d(road.clone()))).id();
+        let grass = app.world_mut().spawn((Terrain, Mesh3d(road.clone()))).id();
 
         app.update();
         assert_eq!(

@@ -250,6 +250,10 @@ impl Ribbon {
         &self.stations
     }
 
+    pub fn crossings(&self) -> &[Vec3] {
+        &self.crossings
+    }
+
     /// Plan length of one lap.
     pub fn length(&self) -> f32 {
         self.length

@@ -18,7 +18,7 @@ All forty laps are shorter: most by about 10%, with smaller reductions on the ti
 
 **Ghost reset:** press **Esc**, then **Reset this ghost** (current circuit and driving mode) or **Reset all ghosts**. Activate the same button again to confirm; moving selection cancels confirmation. This removes the corresponding saved best times and restarts your lap. **Cmd+Q** on macOS, **Ctrl+Q** elsewhere, or **Quit game** in the pause menu exits with audio stopped and radio shutdown signalled; native window/menu quit also cleans up sound.
 
-The circuit infields have continuous grass surfaces fitted to the verge boundaries, including Suzuka's crossing loops. Shared triangle edges prevent cracks, and the terrain follows the surrounding elevation with smooth shading. The road uses a [fine-grained racing asphalt texture](assets/textures/README.md), filtered for distance, with the painted lines and kerbs kept crisp. Road geometry and saved-ghost fingerprints are unchanged.
+Each circuit sits on a grass rectangle extending 50 metres beyond the outermost verge in every direction. The outer ground and infields share continuous surfaces fitted to the verge boundaries, including Suzuka's crossing loops. Shared triangle edges prevent cracks, and the terrain follows the surrounding elevation with smooth shading. The road uses a [fine-grained racing asphalt texture](assets/textures/README.md), filtered for distance, with the painted lines and kerbs kept crisp. Road geometry and saved-ghost fingerprints are unchanged.
 
 ## Design history
 
