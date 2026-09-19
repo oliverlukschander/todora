@@ -1,407 +1,139 @@
-//! Menus: a list of things, one of them under the cursor.
-//!
-//! A menu stands in front of the game rather than beside it. Opening one stops
-//! the world through the same [`Halt`] the pause key uses, so there is no second
-//! idea of "not driving now" to keep in agreement with the first — the car is
-//! already still, the clock is already held, and the driver's keys are already
-//! not being read, all for the reason they are during a pause. What the menu
-//! adds is somewhere for those keys to go instead.
-//!
-//! The two modules own opposite ends of the same state and never reach into each
-//! other's: [`crate::pause`] takes `Esc` only from a game that is running and
-//! `Enter` only from a game that is paused, so while a menu is up both keys are
-//! the menu's — `Enter` takes what is under the cursor and `Esc` backs out
-//! having changed nothing.
-//!
-//! Two pages, and the difference between them is what is given up. Choosing a
-//! car gives up the lap in progress, because half a lap in one car and half in
-//! another is not a lap in either; it gives up nothing else, because the laps
-//! already driven, the best of them and the ghost belong to the circuit, and the
-//! circuit has not moved. Choosing a circuit gives up all of it, because none of
-//! it means anything about the circuit you have arrived at.
-//!
-//! Neither page does either of those itself. Choosing a car moves the car
-//! resource and writes a [`Reset`]; choosing a circuit writes a [`GoTo`] and
-//! lets [`crate::track`] build it. A menu knows what was chosen and nothing
-//! about what choosing it costs.
+//! Circuit browsing and a garage with draft car/setup choices.
+//! Browsing pauses the game; only Apply commits a selection.
+mod view;
 
-use bevy::prelude::*;
+use crate::{
+    Reset,
+    car::{Setup, Spec},
+    input::InputSet,
+    pause::{Halt, HaltSet},
+    track::{GoTo, Track, all_circuits, circuit_at},
+};
+use bevy::{
+    input::{
+        ButtonState,
+        keyboard::KeyboardInput,
+        mouse::{MouseScrollUnit, MouseWheel},
+    },
+    prelude::*,
+};
 
-use crate::Reset;
-use crate::car::{Spec, Stars};
-use crate::hud::{AMBER, AMBER_DIM, FRONT};
-use crate::input::InputSet;
-use crate::pause::{Halt, HaltSet};
-use crate::track::{GoTo, Track, all_circuits, circuit_at};
-
-/// Opening, moving and choosing all run in here: after the pause, which decides
-/// whether a menu may open at all, and after the driver's own input, which is
-/// not being read while one is up. Everything that acts on what was chosen —
-/// building the circuit, putting the car back — runs after this.
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct MenuSet;
 
-/// One row of a page.
-struct Entry {
-    name: String,
-    /// What it is good at, where that is worth showing. A circuit is not good
-    /// at things — it is a place — so its rows carry none.
-    stars: Option<Stars>,
-    /// A number the row is worth reading with, to the right of the name.
-    aside: String,
-}
-
-/// Which menu is up.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Page {
-    /// `C`, or the pad's west button.
     Car,
-    /// `T`, or the pad's select button.
     Circuit,
 }
 
 impl Page {
-    /// Every page, so the panel can be built once with all of them in it.
-    const ALL: [Page; 2] = [Page::Car, Page::Circuit];
-
-    /// The key and the pad button that open it.
-    fn opened_by(self) -> (KeyCode, GamepadButton) {
-        match self {
-            Page::Car => (KeyCode::KeyC, GamepadButton::West),
-            Page::Circuit => (KeyCode::KeyT, GamepadButton::Select),
-        }
-    }
-
-    /// What the panel is headed with.
-    fn title(self) -> &'static str {
-        match self {
-            Page::Car => "CAR",
-            Page::Circuit => "CIRCUIT",
-        }
-    }
-
-    /// The rows of this page: what each one is called, and what it is good at
-    /// where that is worth showing. A circuit is not good at things — it is a
-    /// place — so its rows carry no rating and its page shows no headings.
-    fn entries(self) -> Vec<Entry> {
-        match self {
-            Page::Car => Spec::ALL
-                .iter()
-                .map(|spec| Entry {
-                    name: spec.name().into(),
-                    stars: Some(spec.sheet().stars),
-                    aside: String::new(),
-                })
-                .collect(),
-            Page::Circuit => all_circuits()
-                .iter()
-                .map(|circuit| Entry {
-                    name: circuit.name.into(),
-                    stars: None,
-                    // How long a lap of it is. The circuits used to be shrunk
-                    // alike, so a longer circuit was a longer lap in the same
-                    // proportion and the list had nothing to add to a name. A
-                    // few of them are not shrunk alike any more — see
-                    // `Circuit::plan_scale` — so the list says: Baku is three
-                    // laps of Spielberg, and nothing about the name says so.
-                    aside: format!("{:.0} m", circuit.lap),
-                })
-                .collect(),
-        }
-    }
-
-    /// Which row is under the cursor when it opens: whatever is already being
-    /// driven, so opening a menu and taking what it offers changes nothing.
     fn chosen(self, spec: &Spec, track: &Track) -> usize {
         match self {
-            Page::Car => spec.at(),
-            Page::Circuit => circuit_at(track.circuit()),
+            Self::Car => spec.at(),
+            Self::Circuit => circuit_at(track.circuit()),
         }
     }
 }
 
-/// The menu as it stands. `None` is no menu, which is most of the time.
+const PAGE_SIZE: usize = 6;
+
 #[derive(Resource, Default)]
 pub(crate) struct Menu {
     page: Option<Page>,
     at: usize,
-    /// The first row of the page that is on screen.
-    ///
-    /// Three cars fit on any screen and thirty-nine circuits do not, so the
-    /// circuit page is a window onto its list rather than the whole of it. The
-    /// window is only ever moved to keep the cursor inside it with [`MARGIN`]
-    /// rows of road ahead, so walking down the list scrolls it and walking back
-    /// up an already-visible row does not — a list that recentred on every step
-    /// would be a list where nothing stays where you last saw it.
-    from: usize,
+    setup: Setup,
+    search: String,
 }
 
-/// Rows a page shows at once.
-///
-/// Thirteen, which is a screenful on anything and a third of the circuits. The
-/// panel is this tall whichever page is up and wherever the cursor is, because
-/// a panel that changed size would move the row under the cursor out from under
-/// it.
-const SHOWN: usize = 13;
-/// Rows kept between the cursor and the edge of the window while there are rows
-/// to spare, so that what is coming is visible before it is reached.
-const MARGIN: usize = 3;
-
 impl Menu {
-    /// Move the window so the cursor is inside it, and no further.
-    fn follow(&mut self, rows: usize) {
-        if rows <= SHOWN {
-            self.from = 0;
-            return;
+    fn entries(&self) -> Vec<usize> {
+        match self.page {
+            Some(Page::Car) => (0..Spec::ALL.len()).collect(),
+            _ => {
+                let needle = searchable(&self.search);
+                all_circuits()
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| searchable(c.name).contains(&needle))
+                    .map(|(i, _)| i)
+                    .collect()
+            }
         }
-        let last = rows - SHOWN;
-        self.from = self
-            .from
-            .min(self.at.saturating_sub(MARGIN))
-            .max((self.at + MARGIN + 1).saturating_sub(SHOWN))
-            .min(last);
     }
 
-    /// Whether row `at` is in the window.
-    fn on_screen(&self, at: usize) -> bool {
-        (self.from..self.from + SHOWN).contains(&at)
+    fn position(&self) -> usize {
+        self.entries()
+            .iter()
+            .position(|i| *i == self.at)
+            .unwrap_or(0)
     }
+
+    fn move_by(&mut self, by: i32) {
+        let entries = self.entries();
+        if !entries.is_empty() {
+            let next = (self.position() as i32 + by).clamp(0, entries.len() as i32 - 1);
+            self.at = entries[next as usize];
+        }
+    }
+
+    fn filter(&mut self) {
+        let entries = self.entries();
+        if !entries.contains(&self.at) {
+            self.at = entries.first().copied().unwrap_or(0);
+        }
+    }
+}
+
+// Searching "nurburg" should find Nürburgring on any keyboard layout.
+fn searchable(text: &str) -> String {
+    text.to_lowercase()
+        .chars()
+        .flat_map(|c| match c {
+            'ä' | 'á' | 'à' | 'â' | 'ã' => "a".chars().collect::<Vec<_>>(),
+            'ö' | 'ó' | 'ò' | 'ô' | 'õ' => vec!['o'],
+            'ü' | 'ú' | 'ù' | 'û' => vec!['u'],
+            'é' | 'è' | 'ê' | 'ë' => vec!['e'],
+            'í' | 'ì' | 'î' | 'ï' => vec!['i'],
+            'ç' => vec!['c'],
+            'ñ' => vec!['n'],
+            'ß' => vec!['s', 's'],
+            '\u{300}'..='\u{36f}' => vec![],
+            _ => vec![c],
+        })
+        .collect()
+}
+
+#[derive(Component, Clone, Copy)]
+enum Action {
+    Open(Page),
+    Select(usize),
+    Tune(Setup),
+    Previous,
+    Next,
+    Clear,
+    Apply,
+    Back,
 }
 
 pub struct MenuPlugin;
-
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Menu>()
-            .add_systems(Startup, setup)
+            .add_systems(Startup, view::setup)
             .add_systems(
                 PreUpdate,
-                (open, walk)
+                (search, open, walk, clicks)
                     .chain()
                     .in_set(MenuSet)
                     .after(HaltSet)
-                    .after(InputSet),
+                    .after(InputSet)
+                    .after(bevy::ui::UiSystems::Focus),
             )
-            .add_systems(Update, draw);
+            .add_systems(Update, (view::draw, view::hover, view::show_launcher));
     }
 }
 
-/// Side of one of the five pips a rating is drawn with, and the gap between
-/// them. Pips rather than text: the setup slider alongside is already drawn out
-/// of little nodes, a rating is the same kind of reading, and five squares need
-/// no glyph the font might not carry.
-const PIP: f32 = 7.0;
-const PIP_GAP: f32 = 3.0;
-const OUT_OF: u8 = 5;
-/// The cursor's gutter, the width a name is given, and one rating's own width.
-/// The name column is wide enough for the longest there is — "Circuit of the
-/// Americas" — because a name that wrapped onto a second line would make one row
-/// twice the height of the others and the list would stop being a list.
-const CURSOR: f32 = 12.0;
-/// Width of the figure beside a circuit's name. Wide enough for "1930 m", which
-/// is Baku.
-const ASIDE: f32 = 56.0;
-const NAME: f32 = 208.0;
-const RATING: f32 = OUT_OF as f32 * (PIP + PIP_GAP) + 14.0;
-/// One row, and the type on it. Small enough that seventeen circuits and the
-/// two lines around them are a panel rather than a page.
-const ROW: f32 = 15.0;
-
-/// A part of the panel that is shown or not shown.
-///
-/// Shown by `display` rather than by `Visibility`, because a hidden node still
-/// takes its place in the layout and a hidden one does not: the panel is built
-/// once with every page's rows in it, and it has to come out the size of the
-/// page that is up rather than the size of all of them stacked.
-#[derive(Component)]
-enum Piece {
-    /// The panel itself.
-    Panel,
-    /// The column headings, which mean something only on a rated page.
-    Heading,
-    /// One row of one page, and where it sits in that page.
-    Row { page: Page, at: usize },
-}
-
-#[derive(Component)]
-struct Title;
-
-/// The name on a row: lit and stepped out of the gutter when it is the one under
-/// the cursor.
-#[derive(Component)]
-struct RowName;
-
-fn setup(mut commands: Commands) {
-    // The panel is centred by a sheet the size of the screen rather than by
-    // being nudged half its own width to the left, because how tall and how wide
-    // it comes out depends on which page is up and how many rows that page has.
-    commands
-        .spawn((
-            Piece::Panel,
-            Node {
-                display: Display::None,
-                position_type: PositionType::Absolute,
-                top: px(0),
-                left: px(0),
-                width: percent(100),
-                height: percent(100),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-        ))
-        .with_children(|sheet| {
-            sheet
-                .spawn((
-                    Node {
-                        // One width whichever page is up: a panel that changed
-                        // size under the cursor would move the row it is on.
-                        min_width: px(CURSOR * 2.0 + NAME + 3.0 * RATING),
-                        padding: UiRect::axes(px(18), px(14)),
-                        border: UiRect::all(px(2)),
-                        flex_direction: FlexDirection::Column,
-                        row_gap: px(4),
-                        ..default()
-                    },
-                    BackgroundColor(FRONT),
-                    BorderColor::all(AMBER_DIM),
-                ))
-                .with_children(|panel| {
-                    panel.spawn((
-                        Title,
-                        Text::new(""),
-                        TextFont {
-                            font_size: FontSize::Px(20.0),
-                            ..default()
-                        },
-                        TextColor(AMBER),
-                        Node {
-                            margin: UiRect::bottom(px(6)),
-                            ..default()
-                        },
-                    ));
-
-                    panel
-                        .spawn((
-                            Piece::Heading,
-                            Node {
-                                flex_direction: FlexDirection::Row,
-                                margin: UiRect::left(px(CURSOR * 2.0 + NAME)),
-                                ..default()
-                            },
-                        ))
-                        .with_children(|heading| {
-                            for label in ["HANDLING", "ACCEL", "TOP"] {
-                                heading.spawn((
-                                    Node {
-                                        width: px(RATING),
-                                        ..default()
-                                    },
-                                    children![(
-                                        Text::new(label),
-                                        TextFont {
-                                            font_size: FontSize::Px(10.0),
-                                            ..default()
-                                        },
-                                        TextColor(AMBER_DIM),
-                                    )],
-                                ));
-                            }
-                        });
-
-                    for page in Page::ALL {
-                        for (at, entry) in page.entries().into_iter().enumerate() {
-                            panel
-                                .spawn((
-                                    Piece::Row { page, at },
-                                    Node {
-                                        display: Display::None,
-                                        flex_direction: FlexDirection::Row,
-                                        align_items: AlignItems::Center,
-                                        padding: UiRect::axes(px(0), px(2)),
-                                        ..default()
-                                    },
-                                ))
-                                .with_children(|row| {
-                                    row.spawn((
-                                        RowName,
-                                        Text::new(entry.name),
-                                        TextFont {
-                                            font_size: FontSize::Px(ROW),
-                                            ..default()
-                                        },
-                                        TextColor(AMBER_DIM),
-                                        Node {
-                                            width: px(CURSOR + NAME),
-                                            margin: UiRect::left(px(CURSOR)),
-                                            ..default()
-                                        },
-                                    ));
-                                    if !entry.aside.is_empty() {
-                                        row.spawn((
-                                            Text::new(entry.aside),
-                                            TextFont {
-                                                font_size: FontSize::Px(ROW),
-                                                ..default()
-                                            },
-                                            TextColor(AMBER_DIM),
-                                            Node {
-                                                width: px(ASIDE),
-                                                justify_content: JustifyContent::End,
-                                                ..default()
-                                            },
-                                        ));
-                                    }
-                                    for (_, out_of_five) in
-                                        entry.stars.into_iter().flat_map(Stars::rows)
-                                    {
-                                        row.spawn((
-                                            Node {
-                                                width: px(RATING),
-                                                flex_direction: FlexDirection::Row,
-                                                align_items: AlignItems::Center,
-                                                ..default()
-                                            },
-                                            Children::spawn(SpawnIter((0..OUT_OF).map(move |i| {
-                                                (
-                                                    Node {
-                                                        width: px(PIP),
-                                                        height: px(PIP),
-                                                        margin: UiRect::right(px(PIP_GAP)),
-                                                        border: UiRect::all(px(1)),
-                                                        ..default()
-                                                    },
-                                                    BackgroundColor(if i < out_of_five {
-                                                        AMBER
-                                                    } else {
-                                                        Color::NONE
-                                                    }),
-                                                    BorderColor::all(AMBER_DIM),
-                                                )
-                                            }))),
-                                        ));
-                                    }
-                                });
-                        }
-                    }
-
-                    panel.spawn((
-                        Text::new("UP / DOWN — MOVE     ENTER — TAKE     ESC — BACK"),
-                        TextFont {
-                            font_size: FontSize::Px(11.0),
-                            ..default()
-                        },
-                        TextColor(AMBER_DIM),
-                        Node {
-                            margin: UiRect::top(px(8)),
-                            ..default()
-                        },
-                    ));
-                });
-        });
-}
-
-/// Whether a key or the pad button that stands in for it has just been pressed.
 fn pressed(
     keys: &ButtonInput<KeyCode>,
     pads: &Query<&Gamepad>,
@@ -411,52 +143,88 @@ fn pressed(
     keys.just_pressed(key) || pads.iter().any(|pad| pad.just_pressed(button))
 }
 
-/// Put a menu up, with its cursor on whatever is already being driven.
-///
-/// Only from a running game. Over a pause it would be a second thing standing
-/// in front of the game, and `Enter` would have two jobs at once.
 fn open(
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
     track: Res<Track>,
     spec: Res<Spec>,
+    setup: Res<Setup>,
     mut menu: ResMut<Menu>,
     mut halt: ResMut<Halt>,
 ) {
     if menu.page.is_some() || *halt != Halt::Nothing {
         return;
     }
-    let Some(wanted) = Page::ALL.into_iter().find(|page| {
-        let (key, button) = page.opened_by();
-        pressed(&keys, &pads, key, button)
-    }) else {
+    let page = if pressed(&keys, &pads, KeyCode::KeyC, GamepadButton::West) {
+        Page::Car
+    } else if pressed(&keys, &pads, KeyCode::KeyT, GamepadButton::Select) {
+        Page::Circuit
+    } else {
         return;
     };
-    menu.at = wanted.chosen(&spec, &track);
-    // Opened afresh each time, so the list arrives with the row being driven a
-    // margin down from the top rather than wherever it was left last time.
-    menu.from = menu.at.saturating_sub(MARGIN);
-    menu.follow(wanted.entries().len());
-    menu.page = Some(wanted);
+    enter(page, &mut menu, &mut halt, &spec, &setup, &track);
+}
+
+fn enter(page: Page, menu: &mut Menu, halt: &mut Halt, spec: &Spec, setup: &Setup, track: &Track) {
+    menu.at = page.chosen(spec, track);
+    menu.setup = *setup;
+    menu.search.clear();
+    menu.page = Some(page);
     *halt = Halt::Menu;
 }
 
-/// Move down the menu that is up, take what is under the cursor, or back out.
-///
-/// `Esc` and `Enter` are the menu's while one is up, which is why [`Halt`] is
-/// only ever moved to and from [`Halt::Menu`] here: the pause key takes `Esc`
-/// from a running game and gives `Enter` back to a paused one, and neither of
-/// those transitions can fire while the halt says a menu is open.
+fn search(
+    mut events: MessageReader<KeyboardInput>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut menu: ResMut<Menu>,
+) {
+    for event in events.read() {
+        if menu.page != Some(Page::Circuit)
+            || event.state != ButtonState::Pressed
+            || keys.any_pressed([
+                KeyCode::ControlLeft,
+                KeyCode::ControlRight,
+                KeyCode::SuperLeft,
+                KeyCode::SuperRight,
+            ])
+        {
+            continue;
+        }
+        if event.key_code == KeyCode::Backspace {
+            menu.search.pop();
+            menu.filter();
+        } else if let Some(text) = &event.text {
+            let text: String = text.chars().filter(|c| !c.is_control()).collect();
+            if !text.is_empty() && menu.search.chars().count() < 60 {
+                menu.search.push_str(&text);
+                menu.filter();
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)] // Each parameter is a Bevy-managed input or game resource.
 fn walk(
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
+    mut wheel: MessageReader<MouseWheel>,
+    mut scroll_remainder: Local<f32>,
     mut menu: ResMut<Menu>,
     mut halt: ResMut<Halt>,
     mut spec: ResMut<Spec>,
+    mut setup: ResMut<Setup>,
     mut reset: MessageWriter<Reset>,
     mut go: MessageWriter<GoTo>,
 ) {
+    let scroll: f32 = wheel
+        .read()
+        .map(|event| match event.unit {
+            MouseScrollUnit::Line => event.y,
+            MouseScrollUnit::Pixel => event.y / 40.0,
+        })
+        .sum();
     let Some(page) = menu.page else {
+        *scroll_remainder = 0.0;
         return;
     };
     let step = i32::from(pressed(
@@ -470,99 +238,157 @@ fn walk(
         KeyCode::ArrowUp,
         GamepadButton::DPadUp,
     ));
+    let horizontal = i32::from(pressed(
+        &keys,
+        &pads,
+        KeyCode::ArrowRight,
+        GamepadButton::DPadRight,
+    )) - i32::from(pressed(
+        &keys,
+        &pads,
+        KeyCode::ArrowLeft,
+        GamepadButton::DPadLeft,
+    ));
     if step != 0 {
-        let rows = page.entries().len();
-        menu.at = (menu.at as i32 + step).clamp(0, rows as i32 - 1) as usize;
-        menu.follow(rows);
+        menu.move_by(step * if page == Page::Circuit { 2 } else { 1 });
     }
-
-    if pressed(&keys, &pads, KeyCode::Enter, GamepadButton::South) {
-        take(page, menu.at, &mut spec, &mut reset, &mut go);
+    if horizontal != 0 {
+        if page == Page::Car {
+            menu.setup = menu.setup.slid(horizontal);
+        } else {
+            menu.move_by(horizontal);
+        }
+    }
+    if page == Page::Circuit {
+        let page_step = i32::from(keys.just_pressed(KeyCode::PageDown))
+            - i32::from(keys.just_pressed(KeyCode::PageUp));
+        if page_step != 0 {
+            menu.move_by(page_step * PAGE_SIZE as i32);
+        }
+        *scroll_remainder += scroll;
+        let rows = scroll_remainder.trunc() as i32;
+        if rows != 0 {
+            menu.move_by(-2 * rows);
+            *scroll_remainder -= rows as f32;
+        }
+        if keys.just_pressed(KeyCode::Home) {
+            menu.move_by(-(all_circuits().len() as i32));
+        }
+        if keys.just_pressed(KeyCode::End) {
+            menu.move_by(all_circuits().len() as i32);
+        }
+    } else {
+        for (key, wanted) in [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3]
+            .into_iter()
+            .zip(Setup::ALL)
+        {
+            if keys.just_pressed(key) {
+                menu.setup = wanted;
+            }
+        }
+    }
+    if pressed(&keys, &pads, KeyCode::Escape, GamepadButton::East) {
         close(&mut menu, &mut halt);
-    } else if pressed(&keys, &pads, KeyCode::Escape, GamepadButton::East) {
-        close(&mut menu, &mut halt);
+    } else if pressed(&keys, &pads, KeyCode::Enter, GamepadButton::South) {
+        apply(
+            &mut menu, &mut halt, &mut spec, &mut setup, &mut reset, &mut go,
+        );
     }
 }
 
-/// What the row under the cursor means.
-fn take(
-    page: Page,
-    at: usize,
+#[allow(clippy::too_many_arguments)]
+fn clicks(
+    mouse: Res<ButtonInput<MouseButton>>,
+    buttons: Query<(&Interaction, &Action), Changed<Interaction>>,
+    mut menu: ResMut<Menu>,
+    mut halt: ResMut<Halt>,
+    track: Res<Track>,
+    mut spec: ResMut<Spec>,
+    mut setup: ResMut<Setup>,
+    mut reset: MessageWriter<Reset>,
+    mut go: MessageWriter<GoTo>,
+) {
+    for (interaction, action) in &buttons {
+        if *interaction != Interaction::Pressed || !mouse.just_pressed(MouseButton::Left) {
+            continue;
+        }
+        if let Action::Open(page) = action {
+            if *halt != Halt::Pause && menu.page != Some(*page) {
+                enter(*page, &mut menu, &mut halt, &spec, &setup, &track);
+            }
+            continue;
+        }
+        if menu.page.is_none() {
+            continue;
+        }
+        match action {
+            Action::Select(at) => menu.at = *at,
+            Action::Tune(wanted) => menu.setup = *wanted,
+            Action::Previous => menu.move_by(-(PAGE_SIZE as i32)),
+            Action::Next => menu.move_by(PAGE_SIZE as i32),
+            Action::Clear => {
+                menu.search.clear();
+                menu.filter();
+            }
+            Action::Apply => apply(
+                &mut menu, &mut halt, &mut spec, &mut setup, &mut reset, &mut go,
+            ),
+            Action::Back => close(&mut menu, &mut halt),
+            Action::Open(_) => (),
+        }
+    }
+}
+
+fn apply(
+    menu: &mut Menu,
+    halt: &mut Halt,
     spec: &mut Spec,
+    setup: &mut Setup,
     reset: &mut MessageWriter<Reset>,
     go: &mut MessageWriter<GoTo>,
 ) {
-    match page {
-        Page::Car => {
-            let Some(&wanted) = Spec::ALL.get(at) else {
-                return;
-            };
-            if wanted != *spec {
+    if menu.entries().is_empty() {
+        return;
+    }
+    match menu.page {
+        Some(Page::Car) => {
+            let wanted = Spec::ALL[menu.at];
+            if wanted != *spec || menu.setup != *setup {
                 *spec = wanted;
-                // The lap so far was driven in the other car.
+                *setup = menu.setup;
                 reset.write(Reset);
             }
         }
-        Page::Circuit => {
-            let Some(wanted) = all_circuits().get(at) else {
-                return;
-            };
-            // Whether this is a change, and what it costs, is the track's
-            // business: it writes the reset that clears the board, because it is
-            // the one that knows the board belonged to the circuit being left.
-            go.write(GoTo(wanted));
+        Some(Page::Circuit) => {
+            go.write(GoTo(&all_circuits()[menu.at]));
         }
+        None => return,
     }
+    close(menu, halt);
 }
 
 fn close(menu: &mut Menu, halt: &mut Halt) {
     menu.page = None;
     *halt = Halt::Nothing;
 }
-
-/// Show the page that is up, with the cursor on its row.
-fn draw(
-    menu: Res<Menu>,
-    mut pieces: Query<(&Piece, &Children, &mut Node)>,
-    mut title: Query<&mut Text, With<Title>>,
-    mut names: Query<(&mut TextColor, &mut Node), Without<Piece>>,
-) {
-    if !menu.is_changed() {
-        return;
-    }
-    if let (Some(page), Ok(mut text)) = (menu.page, title.single_mut()) {
-        text.0 = page.title().into();
-    }
-    for (piece, children, mut node) in &mut pieces {
-        let shown = match (piece, menu.page) {
-            (_, None) => false,
-            (Piece::Panel, Some(_)) => true,
-            // The headings name the three ratings, so they belong to a page
-            // whose rows carry them.
-            (Piece::Heading, Some(up)) => up.entries().iter().any(|row| row.stars.is_some()),
-            (Piece::Row { page, at }, Some(up)) => *page == up && menu.on_screen(*at),
-        };
-        node.display = if shown { Display::Flex } else { Display::None };
-
-        let Piece::Row { page, at } = piece else {
-            continue;
-        };
-        let under = menu.page == Some(*page) && *at == menu.at;
-        for child in children {
-            if let Ok((mut color, mut name)) = names.get_mut(*child) {
-                color.0 = if under { AMBER } else { AMBER_DIM };
-                // The cursor is the name stepping out of its gutter, which needs
-                // no glyph the font might not carry.
-                name.margin.left = px(if under { CURSOR * 2.0 } else { CURSOR });
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::pause::PausePlugin;
+
+    /// Keep the catalogue metadata accurate without building tracks while browsing.
+    #[test]
+    fn the_menu_shows_the_lap_it_will_drive() {
+        for circuit in all_circuits() {
+            let built = Track::new(circuit).length();
+            assert!(
+                (circuit.lap - built).abs() < 0.1,
+                "{}: the module says {:.1} m, but the circuit builds {built:.1} m",
+                circuit.name,
+                circuit.lap,
+            );
+        }
+    }
 
     fn game() -> App {
         let mut app = App::new();
@@ -573,6 +399,10 @@ mod tests {
             // The two resources the pages read, which `CarPlugin` and
             // `TrackPlugin` own in the game.
             .init_resource::<Spec>()
+            .init_resource::<Setup>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .add_message::<KeyboardInput>()
+            .add_message::<MouseWheel>()
             .insert_resource(Track::any())
             .add_plugins((PausePlugin, MenuPlugin));
         app.world_mut().resource_mut::<Schedules>().remove(Startup);
@@ -635,88 +465,6 @@ mod tests {
     /// The cursor opens on what is already chosen, moves one row at a time, and
     /// stops at both ends rather than wrapping — a list this short is read, and
     /// a cursor that reappears at the other end has to be found again.
-    /// A list too long for the screen is a window onto itself, and the window
-    /// follows the cursor rather than the other way round.
-    ///
-    /// Three things. The cursor can still reach both ends, which is what makes
-    /// it a window rather than a limit. The window never shows a row that is
-    /// not there, at either end. And it only moves when it has to: walking back
-    /// up onto a row that is already on screen leaves the list where it is,
-    /// because a list that recentred on every step is a list where nothing
-    /// stays where you last saw it.
-    #[test]
-    fn a_list_too_long_for_the_screen_is_a_window_onto_itself() {
-        let rows = Page::Circuit.entries().len();
-        assert!(rows > SHOWN, "{rows} circuits all fit; nothing scrolls");
-        let mut menu = Menu::default();
-
-        for at in 0..rows {
-            menu.at = at;
-            menu.follow(rows);
-            assert!(menu.on_screen(at), "row {at} walked off the screen");
-            assert!(
-                menu.from + SHOWN <= rows,
-                "the window runs off the end of the list at row {at}"
-            );
-        }
-        // Walking back up: the window comes with the cursor, and stops.
-        for at in (0..rows).rev() {
-            menu.at = at;
-            menu.follow(rows);
-            assert!(
-                menu.on_screen(at),
-                "row {at} walked off the screen going back"
-            );
-        }
-        assert_eq!(menu.from, 0, "the window did not come back to the top");
-
-        // A step that stays inside the window does not move it.
-        menu.at = SHOWN * 2;
-        menu.follow(rows);
-        let settled = menu.from;
-        menu.at = SHOWN * 2 - 1;
-        menu.follow(rows);
-        assert_eq!(
-            menu.from, settled,
-            "the list scrolled for a row already on it"
-        );
-
-        // Three cars need no window at all.
-        let mut cars = Menu {
-            at: 2,
-            ..Menu::default()
-        };
-        cars.follow(Page::Car.entries().len());
-        assert_eq!(cars.from, 0);
-    }
-
-    /// The lap length a circuit's row shows is the lap that circuit builds.
-    ///
-    /// It is written into the module rather than measured, because building
-    /// thirty-nine circuits to fill a menu is four tenths of a second the menu
-    /// does not have — so this is what stops it being four tenths of a second's
-    /// worth of stale. It is also where the figure comes from when a circuit is
-    /// added: the message says what to write down.
-    #[test]
-    fn the_menu_shows_the_lap_it_will_drive() {
-        for (row, circuit) in Page::Circuit.entries().iter().zip(all_circuits()) {
-            let built = Track::new(circuit).length();
-            assert!(
-                (circuit.lap - built).abs() < 0.1,
-                "{}: the module says its lap is {:.1} m and the circuit builds \
-                 {built:.1} m — write `lap: {built:.1},` into its module",
-                circuit.name,
-                circuit.lap
-            );
-            assert_eq!(
-                row.aside,
-                format!("{:.0} m", circuit.lap),
-                "{}: the row shows a lap that is not this circuit's",
-                circuit.name
-            );
-        }
-    }
-
     #[test]
     fn the_cursor_starts_on_the_chosen_row_and_stops_at_both_ends() {
         let mut app = game();
@@ -788,7 +536,7 @@ mod tests {
             .iter_current_update_messages()
             .map(|GoTo(circuit)| circuit.id)
             .collect();
-        let next = (driving + 1).min(all_circuits().len() - 1);
+        let next = (driving + 2).min(all_circuits().len() - 1);
         assert_eq!(asked, vec![all_circuits()[next].id]);
         assert_eq!(
             app.world().resource::<Messages<Reset>>().len(),
@@ -833,5 +581,96 @@ mod tests {
         press(&mut app, KeyCode::KeyC);
         assert!(app.world().resource::<Menu>().page.is_none());
         assert_eq!(*app.world().resource::<Halt>(), Halt::Pause);
+    }
+    #[test]
+    fn setup_is_a_draft_until_applied_and_cancel_discards_it() {
+        let mut app = game();
+        app.update();
+        press(&mut app, KeyCode::KeyC);
+        press(&mut app, KeyCode::Digit3);
+        assert_eq!(app.world().resource::<Menu>().setup, Setup::Oversteer);
+        assert_eq!(*app.world().resource::<Setup>(), Setup::Balanced);
+        press(&mut app, KeyCode::Escape);
+        press(&mut app, KeyCode::KeyC);
+        assert_eq!(app.world().resource::<Menu>().setup, Setup::Balanced);
+        press(&mut app, KeyCode::ArrowRight);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(*app.world().resource::<Setup>(), Setup::Oversteer);
+        assert_eq!(app.world().resource::<Messages<Reset>>().len(), 1);
+    }
+
+    #[test]
+    fn search_accepts_accents_and_never_applies_an_empty_result() {
+        assert_eq!(searchable("Nürburgring"), searchable("NurburgRing"));
+        assert_eq!(searchable("São José"), "sao jose");
+        let mut app = game();
+        app.update();
+        press(&mut app, KeyCode::KeyT);
+        {
+            let mut menu = app.world_mut().resource_mut::<Menu>();
+            menu.search = "no such circuit".into();
+            menu.filter();
+        }
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.world().resource::<Menu>().page, Some(Page::Circuit));
+        assert_eq!(app.world().resource::<Messages<GoTo>>().len(), 0);
+        {
+            let mut menu = app.world_mut().resource_mut::<Menu>();
+            menu.search = "spa".into();
+            menu.filter();
+        }
+        press(&mut app, KeyCode::Enter);
+        assert!(app.world().resource::<Menu>().page.is_none());
+        assert_eq!(app.world().resource::<Messages<GoTo>>().len(), 1);
+    }
+
+    #[test]
+    fn paging_reaches_the_last_circuit_and_respects_filtered_results() {
+        let mut menu = Menu {
+            page: Some(Page::Circuit),
+            ..default()
+        };
+        for _ in 0..all_circuits().len() {
+            menu.move_by(PAGE_SIZE as i32);
+        }
+        assert_eq!(menu.at, all_circuits().len() - 1);
+        menu.search = "spa".into();
+        menu.filter();
+        let first = menu.at;
+        menu.move_by(PAGE_SIZE as i32);
+        assert_eq!(menu.at, first);
+        assert!(all_circuits()[first].name.to_lowercase().contains("spa"));
+    }
+
+    #[test]
+    fn mouse_can_select_a_car_and_apply_its_setup() {
+        let mut app = game();
+        app.update();
+        press(&mut app, KeyCode::KeyC);
+        let button = app
+            .world_mut()
+            .spawn((Interaction::Pressed, Action::Select(2)))
+            .id();
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.update();
+        assert_eq!(app.world().resource::<Menu>().at, 2);
+        assert_eq!(*app.world().resource::<Spec>(), Spec::Tourer);
+        app.world_mut().despawn(button);
+        app.world_mut().spawn((Interaction::Pressed, Action::Apply));
+        app.update();
+        assert_eq!(*app.world().resource::<Spec>(), Spec::Express);
+        assert_eq!(*app.world().resource::<Halt>(), Halt::Nothing);
+    }
+
+    #[test]
+    fn opening_a_menu_holds_the_clock_in_the_same_frame() {
+        let mut app = game();
+        app.update();
+        press(&mut app, KeyCode::KeyT);
+        assert!(app.world().resource::<Time<Virtual>>().is_paused());
+        press(&mut app, KeyCode::Escape);
+        assert!(!app.world().resource::<Time<Virtual>>().is_paused());
     }
 }

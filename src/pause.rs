@@ -68,10 +68,10 @@ impl Plugin for PausePlugin {
             .add_systems(Startup, setup)
             .add_systems(
                 PreUpdate,
-                (watch, hold_the_clock)
-                    .chain()
-                    .in_set(HaltSet)
-                    .after(bevy::input::InputSystems),
+                (
+                    watch.in_set(HaltSet).after(bevy::input::InputSystems),
+                    hold_the_clock.after(HaltSet).after(crate::menu::MenuSet),
+                ),
             )
             .add_systems(Update, show);
     }
@@ -81,44 +81,63 @@ impl Plugin for PausePlugin {
 #[derive(Component)]
 struct Banner;
 
+#[derive(Component)]
+struct Resume;
+
 fn setup(mut commands: Commands) {
-    commands.spawn((
-        Banner,
-        Node {
-            position_type: PositionType::Absolute,
-            top: percent(38),
-            left: percent(50),
-            margin: UiRect::left(px(-96)),
-            width: px(192),
-            padding: UiRect::axes(px(16), px(12)),
-            border: UiRect::all(px(2)),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            row_gap: px(4),
-            ..default()
-        },
-        BackgroundColor(FRONT),
-        BorderColor::all(AMBER_DIM),
-        Visibility::Hidden,
-        children![
-            (
-                Text::new("PAUSED"),
-                TextFont {
-                    font_size: FontSize::Px(28.0),
-                    ..default()
-                },
-                TextColor(AMBER),
-            ),
-            (
-                Text::new("ENTER TO GO ON"),
-                TextFont {
-                    font_size: FontSize::Px(13.0),
-                    ..default()
-                },
-                TextColor(AMBER_DIM),
-            ),
-        ],
-    ));
+    use crate::ui::{LINE, TEXT, label};
+    commands
+        .spawn((
+            Banner,
+            GlobalZIndex(15),
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                height: percent(100),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.018, 0.026, 0.032, 0.82)),
+            Visibility::Hidden,
+        ))
+        .with_children(|overlay| {
+            overlay
+                .spawn((
+                    Node {
+                        width: px(440),
+                        padding: UiRect::all(px(32)),
+                        border: UiRect::all(px(1)),
+                        border_radius: BorderRadius::all(px(16)),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: px(16),
+                        ..default()
+                    },
+                    BackgroundColor(FRONT),
+                    BorderColor::all(LINE),
+                ))
+                .with_children(|panel| {
+                    panel.spawn(label("TODORA  /  SESSION PAUSED", 12.0, AMBER));
+                    panel.spawn(label("Take a breather.", 36.0, TEXT));
+                    panel.spawn(label("Your lap will be right here.", 17.0, AMBER_DIM));
+                    panel
+                        .spawn((
+                            Button,
+                            Resume,
+                            Node {
+                                padding: UiRect::all(px(14)),
+                                margin: UiRect::top(px(8)),
+                                border_radius: BorderRadius::all(px(8)),
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            BackgroundColor(AMBER),
+                        ))
+                        .with_children(|button| {
+                            button.spawn(label("Resume drive  /  Enter", 17.0, FRONT));
+                        });
+                });
+        });
 }
 
 /// `Esc` stops a running game, `Enter` lets a paused one go. Not one key
@@ -134,10 +153,14 @@ fn watch(
     keys: Res<ButtonInput<KeyCode>>,
     mut halt: ResMut<Halt>,
     mut players: Query<&mut Controls, With<Player>>,
+    buttons: Query<&Interaction, (With<Resume>, Changed<Interaction>)>,
 ) {
+    let resume_clicked = buttons.iter().any(|i| *i == Interaction::Pressed);
     let wanted = match (*halt, keys.just_pressed(KeyCode::Escape)) {
         (Halt::Nothing, true) => Halt::Pause,
-        (Halt::Pause, false) if keys.just_pressed(KeyCode::Enter) => Halt::Nothing,
+        (Halt::Pause, false) if keys.just_pressed(KeyCode::Enter) || resume_clicked => {
+            Halt::Nothing
+        }
         _ => return,
     };
     *halt = wanted;
@@ -155,7 +178,16 @@ fn watch(
 /// clock, which counts those steps, does not tick. Everything in `Update` reads
 /// a zero delta and sits still — the chase camera, the wheels, the body on its
 /// springs. One clock, so there is nothing to keep in agreement.
-fn hold_the_clock(halt: Res<Halt>, mut time: ResMut<Time<Virtual>>) {
+fn hold_the_clock(
+    halt: Res<Halt>,
+    mut time: ResMut<Time<Virtual>>,
+    mut players: Query<&mut Controls, With<Player>>,
+) {
+    if halt.stopped() {
+        for mut controls in &mut players {
+            *controls = Controls::default();
+        }
+    }
     if halt.stopped() != time.is_paused() {
         if halt.stopped() {
             time.pause();

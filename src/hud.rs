@@ -5,17 +5,10 @@ use crate::ghost::Ghost;
 use crate::lap::{LapTimer, format_time};
 use crate::track::Track;
 
-/// The instrument palette. Shared, because everything Todora draws over the
-/// world is the same panel seen in different places.
-pub(crate) const AMBER: Color = Color::srgb(1.0, 0.72, 0.12);
-pub(crate) const AMBER_DIM: Color = Color::srgb(0.72, 0.48, 0.08);
-/// An instrument, read *over* the world while driving: translucent, because
-/// what is behind it is the thing being driven at.
-pub(crate) const PANEL: Color = Color::srgba(0.04, 0.03, 0.02, 0.82);
-/// Something standing *in front of* the game rather than over it — a pause, a
-/// menu. Near enough opaque, because there is nothing behind it worth seeing
-/// through it: the world it is covering is stopped.
-pub(crate) const FRONT: Color = Color::srgba(0.05, 0.04, 0.03, 0.97);
+pub(crate) const AMBER: Color = crate::ui::ACCENT;
+pub(crate) const AMBER_DIM: Color = crate::ui::MUTED;
+pub(crate) const PANEL: Color = Color::srgba(0.035, 0.05, 0.065, 0.9);
+pub(crate) const FRONT: Color = Color::srgba(0.045, 0.06, 0.073, 0.98);
 /// The delta to the ghost: green when this lap is ahead of it, red when behind.
 const AHEAD: Color = Color::srgb(0.38, 0.86, 0.42);
 const BEHIND: Color = Color::srgb(0.96, 0.32, 0.26);
@@ -39,6 +32,7 @@ impl Plugin for HudPlugin {
         app.add_systems(Startup, setup).add_systems(
             Update,
             (
+                show,
                 draw_clock,
                 draw_g_meter,
                 draw_setup,
@@ -78,211 +72,173 @@ struct DeltaReadout;
 #[derive(Component)]
 struct CircuitName;
 
+#[derive(Component)]
+struct Instrument;
+
 fn setup(mut commands: Commands) {
-    commands.spawn((
-        Text::new(
-            "W — throttle\nS — brake, reverse at a stop\nA / D — steer\nSpace — handbrake\n1 / 2 / 3 — setup\nC — car\nG — ghost\nT — circuit\nR — restart\nEsc / Enter — pause\nScroll — zoom",
-        ),
-        TextFont {
-            font_size: FontSize::Px(16.0),
-            ..default()
-        },
-        TextColor(Color::srgb(0.82, 0.82, 0.78)),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: px(16),
-            left: px(16),
-            ..default()
-        },
-    ));
-
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(16),
-            left: px(16),
-            padding: UiRect::all(px(8)),
-            border: UiRect::all(px(2)),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            row_gap: px(6),
-            ..default()
-        },
-        BackgroundColor(PANEL),
-        BorderColor::all(AMBER_DIM),
-        children![
-            (
-                Node {
-                    width: px(METER),
-                    height: px(METER),
-                    border: UiRect::all(px(1)),
+    use crate::ui::{LINE, TEXT, label};
+    commands
+        .spawn((
+            Instrument,
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(24),
+                left: px(24),
+                padding: UiRect::axes(px(18), px(14)),
+                border_radius: BorderRadius::all(px(10)),
+                flex_direction: FlexDirection::Column,
+                row_gap: px(5),
+                ..default()
+            },
+            BackgroundColor(PANEL),
+        ))
+        .with_children(|session| {
+            session.spawn(label("TODORA  /  FREE DRIVE", 12.0, AMBER));
+            session.spawn((CircuitName, label("", 23.0, TEXT)));
+        });
+    commands
+        .spawn((
+            Instrument,
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: px(94),
+                left: px(24),
+                padding: UiRect::all(px(18)),
+                border_radius: BorderRadius::all(px(12)),
+                column_gap: px(24),
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(PANEL),
+        ))
+        .with_children(|instruments| {
+            instruments
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(5),
+                    min_width: px(138),
                     ..default()
-                },
-                BorderColor::all(AMBER_DIM),
-                children![
-                    // Crosshair, so a reading can be seen against straight ahead.
-                    (
+                })
+                .with_children(|speed| {
+                    speed.spawn((CarName, label("", 12.0, AMBER_DIM)));
+                    speed.spawn((SpeedReadout, label("0", 48.0, TEXT)));
+                    speed.spawn(label("KM/H", 11.0, AMBER_DIM));
+                    speed.spawn((SetupName, label("", 11.0, AMBER)));
+                });
+            instruments
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: px(9),
+                    ..default()
+                })
+                .with_children(|g| {
+                    g.spawn((
                         Node {
-                            position_type: PositionType::Absolute,
-                            left: px(0),
-                            top: px(METER / 2.0),
                             width: px(METER),
-                            height: px(1),
-                            ..default()
-                        },
-                        BackgroundColor(AMBER_DIM.with_alpha(0.45)),
-                    ),
-                    (
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: px(METER / 2.0),
-                            top: px(0),
-                            width: px(1),
                             height: px(METER),
-                            ..default()
-                        },
-                        BackgroundColor(AMBER_DIM.with_alpha(0.45)),
-                    ),
-                    (
-                        Needle,
-                        Node {
-                            position_type: PositionType::Absolute,
-                            left: px((METER - NEEDLE) / 2.0),
-                            top: px((METER - NEEDLE) / 2.0),
-                            width: px(NEEDLE),
-                            height: px(NEEDLE),
                             border: UiRect::all(px(1)),
-                            border_radius: BorderRadius::all(px(NEEDLE / 2.0)),
+                            border_radius: BorderRadius::all(px(METER / 2.0)),
                             ..default()
                         },
-                        BackgroundColor(AMBER),
-                        BorderColor::all(AMBER_DIM),
-                    ),
-                ],
-            ),
-            (
-                CarName,
-                Text::new(Spec::default().name()),
-                TextFont {
-                    font_size: FontSize::Px(12.0),
-                    ..default()
-                },
-                TextColor(AMBER_DIM),
-            ),
-            (
-                SpeedReadout,
-                Text::new("0 KM/H"),
-                TextFont {
-                    font_size: FontSize::Px(20.0),
-                    ..default()
-                },
-                TextColor(AMBER),
-            ),
-            (
-                GReadout,
-                Text::new("0.00 G"),
-                TextFont {
-                    font_size: FontSize::Px(15.0),
-                    ..default()
-                },
-                TextColor(AMBER_DIM),
-            ),
-            // The setup slider: a track with three notches, and a knob on one.
-            (
-                Node {
-                    width: px(SLIDER),
-                    height: px(TRACK),
-                    border: UiRect::all(px(1)),
-                    border_radius: BorderRadius::all(px(TRACK / 2.0)),
-                    margin: UiRect::top(px(2)),
-                    ..default()
-                },
-                BackgroundColor(AMBER_DIM.with_alpha(0.18)),
-                BorderColor::all(AMBER_DIM),
-                children![
-                    notch_mark(0),
-                    notch_mark(1),
-                    notch_mark(2),
-                    (
-                        SetupKnob,
+                        BorderColor::all(LINE),
+                    ))
+                    .with_children(|meter| {
+                        for horizontal in [true, false] {
+                            meter.spawn((
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    left: px(if horizontal { 8.0 } else { METER / 2.0 }),
+                                    top: px(if horizontal { METER / 2.0 } else { 8.0 }),
+                                    width: px(if horizontal { METER - 16.0 } else { 1.0 }),
+                                    height: px(if horizontal { 1.0 } else { METER - 16.0 }),
+                                    ..default()
+                                },
+                                BackgroundColor(LINE),
+                            ));
+                        }
+                        meter.spawn((
+                            Needle,
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: px((METER - NEEDLE) / 2.0),
+                                top: px((METER - NEEDLE) / 2.0),
+                                width: px(NEEDLE),
+                                height: px(NEEDLE),
+                                border_radius: BorderRadius::all(px(NEEDLE / 2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(AMBER),
+                        ));
+                    });
+                    g.spawn((GReadout, label("0.00 G", 12.0, AMBER_DIM)));
+                    g.spawn((
                         Node {
-                            position_type: PositionType::Absolute,
-                            left: px(knob_left(1)),
-                            top: px(-1),
-                            width: px(KNOB),
+                            width: px(SLIDER),
                             height: px(TRACK),
-                            border: UiRect::all(px(1)),
-                            border_radius: BorderRadius::all(px(TRACK / 2.0)),
+                            border_radius: BorderRadius::all(px(5)),
                             ..default()
                         },
-                        BackgroundColor(AMBER),
-                        BorderColor::all(AMBER_DIM),
-                    ),
-                ],
-            ),
-            (
-                SetupName,
-                Text::new(Setup::default().name()),
-                TextFont {
-                    font_size: FontSize::Px(12.0),
-                    ..default()
-                },
-                TextColor(AMBER_DIM),
-            ),
-        ],
-    ));
-
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(16),
-            right: px(16),
-            padding: UiRect::axes(px(16), px(12)),
-            border: UiRect::all(px(2)),
-            flex_direction: FlexDirection::Column,
-            row_gap: px(2),
-            ..default()
-        },
-        BackgroundColor(PANEL),
-        BorderColor::all(AMBER_DIM),
-        children![
-            (
-                CircuitName,
-                Text::new(""),
-                TextFont {
-                    font_size: FontSize::Px(14.0),
-                    ..default()
-                },
-                TextColor(AMBER_DIM),
-                Node {
-                    margin: UiRect::bottom(px(4)),
-                    ..default()
-                },
-            ),
-            (
+                        BackgroundColor(LINE),
+                    ))
+                    .with_children(|slider| {
+                        for i in 0..3 {
+                            slider.spawn(notch_mark(i));
+                        }
+                        slider.spawn((
+                            SetupKnob,
+                            Node {
+                                position_type: PositionType::Absolute,
+                                width: px(KNOB),
+                                height: px(TRACK),
+                                border_radius: BorderRadius::all(px(5)),
+                                ..default()
+                            },
+                            BackgroundColor(AMBER),
+                        ));
+                    });
+                });
+        });
+    commands
+        .spawn((
+            Instrument,
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(24),
+                right: px(24),
+                padding: UiRect::all(px(20)),
+                border_radius: BorderRadius::all(px(12)),
+                flex_direction: FlexDirection::Column,
+                row_gap: px(10),
+                min_width: px(220),
+                ..default()
+            },
+            BackgroundColor(PANEL),
+        ))
+        .with_children(|timing| {
+            timing.spawn(label("SESSION TIMING", 11.0, AMBER_DIM));
+            timing.spawn((
                 ClockReadout,
-                Text::new(clock_text(&LapTimer::default())),
-                TextFont {
-                    font_size: FontSize::Px(22.0),
-                    ..default()
-                },
-                TextColor(AMBER),
-            ),
-            (
-                DeltaReadout,
-                Text::new("GHOST  --"),
-                TextFont {
-                    font_size: FontSize::Px(26.0),
-                    ..default()
-                },
-                TextColor(AMBER_DIM),
-                Node {
-                    margin: UiRect::top(px(6)),
-                    ..default()
-                },
-            ),
-        ],
-    ));
+                label(clock_text(&LapTimer::default()), 24.0, TEXT),
+            ));
+            timing.spawn((DeltaReadout, label("GHOST  --", 20.0, AMBER_DIM)));
+        });
+    commands.spawn((Instrument, label("WASD / Arrows  Drive    Space  Handbrake    R  Restart\nG  Ghost    Scroll  Zoom    Esc  Pause", 12.0, TEXT), Node {
+        position_type: PositionType::Absolute, bottom: px(24), left: px(24),
+        padding: UiRect::axes(px(14), px(10)), border_radius: BorderRadius::all(px(8)), ..default()
+    }, BackgroundColor(PANEL)));
+}
+
+fn show(halt: Res<crate::pause::Halt>, mut instruments: Query<&mut Visibility, With<Instrument>>) {
+    if halt.is_changed() {
+        for mut visible in &mut instruments {
+            *visible = if halt.stopped() {
+                Visibility::Hidden
+            } else {
+                Visibility::Visible
+            };
+        }
+    }
 }
 
 /// A tick on the slider's track, centred under the notch the knob sits on.
@@ -392,7 +348,7 @@ fn draw_g_meter(
     if let Ok(mut text) = speed.single_mut() {
         // A hill adds a lot of speed, and a corner that will not come round is
         // usually a corner arrived at too fast. Worth being able to see.
-        text.0 = format!("{:.0} KM/H", car.velocity.length() * 3.6);
+        text.0 = format!("{:.0}", car.velocity.length() * 3.6);
     }
     let reading = (car.g_force / FULL_SCALE).clamp_length_max(1.0) * (METER - NEEDLE) / 2.0;
     if let Ok(mut node) = needle.single_mut() {

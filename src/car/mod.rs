@@ -20,7 +20,7 @@ use crate::Reset;
 use crate::input::InputSet;
 use crate::menu::MenuSet;
 use crate::track::{Track, TrackSet};
-pub(crate) use garage::{Spec, Stars};
+pub(crate) use garage::Spec;
 pub(crate) use physics::{
     Car, Controls, HALF_TRACK, Handling, REAR_AXLE, SCALE, Surface, WHEEL_WIDTH,
 };

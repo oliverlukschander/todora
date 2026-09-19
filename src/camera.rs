@@ -24,7 +24,7 @@ pub struct CameraPlugin;
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup)
-            .add_systems(Update, (zoom, follow).chain());
+            .add_systems(Update, (zoom.run_if(crate::pause::running), follow).chain());
     }
 }
 

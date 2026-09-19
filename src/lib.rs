@@ -8,6 +8,7 @@ mod menu;
 mod pause;
 mod skid;
 mod track;
+mod ui;
 mod world;
 
 use bevy::{asset::AssetPlugin, prelude::*};
@@ -65,6 +66,7 @@ pub struct GamePlugin;
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Reset>().add_plugins((
+            ui::UiPlugin,
             world::WorldPlugin,
             track::TrackPlugin,
             input::InputPlugin,
