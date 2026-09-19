@@ -192,7 +192,8 @@ pub(super) fn draw(
                         brand.spawn(label("TODORA", 24.0, TEXT));
                         brand.spawn(label("/   FREE DRIVE", 12.0, MUTED));
                     });
-                    header.spawn(Node { column_gap: px(8), ..default() }).with_children(|tabs| {
+                    header.spawn(Node { column_gap: px(8), align_items: AlignItems::Center, ..default() }).with_children(|tabs| {
+                        tabs.spawn(label("LB / RB  Tabs", 12.0, MUTED));
                         for (tab, title) in [(Page::Circuit, "01   Circuits"), (Page::Car, "02   Garage & setup")] {
                             let mut tab_button = tabs.spawn(button(Action::Open(tab)));
                             if page == tab { tab_button.insert(Selected); }

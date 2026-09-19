@@ -191,7 +191,20 @@ fn open(
     mut menu: ResMut<Menu>,
     mut halt: ResMut<Halt>,
 ) {
-    if menu.page.is_some() || *halt != Halt::Nothing {
+    if let Some(page) = menu.page {
+        if pads.iter().any(|pad| {
+            pad.just_pressed(GamepadButton::LeftTrigger)
+                || pad.just_pressed(GamepadButton::RightTrigger)
+        }) {
+            let next = match page {
+                Page::Car => Page::Circuit,
+                Page::Circuit => Page::Car,
+            };
+            enter(next, &mut menu, &mut halt, &spec, &setup, &mode, &track);
+        }
+        return;
+    }
+    if *halt != Halt::Nothing {
         return;
     }
     let page = if pressed(&keys, &pads, KeyCode::KeyC, GamepadButton::LeftTrigger) {
@@ -726,6 +739,33 @@ mod tests {
         pad_press(&mut app, pad, GamepadButton::South);
         assert_eq!(*app.world().resource::<Mode>(), Mode::Pro);
         assert_eq!(*app.world().resource::<Halt>(), Halt::Nothing);
+    }
+
+    #[test]
+    fn shoulder_buttons_switch_menu_tabs_without_resetting_or_applying() {
+        let mut app = game();
+        app.add_plugins(crate::input::InputPlugin);
+        let controller = app.world_mut().spawn(Gamepad::default()).id();
+        app.update();
+        pad_press(&mut app, controller, GamepadButton::LeftTrigger);
+        assert_eq!(app.world().resource::<Menu>().page, Some(Page::Car));
+        for (button, page) in [
+            (GamepadButton::RightTrigger, Page::Circuit),
+            (GamepadButton::RightTrigger, Page::Car),
+            (GamepadButton::LeftTrigger, Page::Circuit),
+            (GamepadButton::LeftTrigger, Page::Car),
+        ] {
+            pad_press(&mut app, controller, button);
+            assert_eq!(app.world().resource::<Menu>().page, Some(page));
+            assert_eq!(*app.world().resource::<Halt>(), Halt::Menu);
+            assert_eq!(*app.world().resource::<Spec>(), Spec::Tourer);
+            assert_eq!(*app.world().resource::<Mode>(), Mode::Regular);
+            assert!(app.world().resource::<Messages<Reset>>().is_empty());
+            assert!(app.world().resource::<Messages<GoTo>>().is_empty());
+        }
+        pad_press(&mut app, controller, GamepadButton::Start);
+        pad_press(&mut app, controller, GamepadButton::RightTrigger);
+        assert_eq!(app.world().resource::<Messages<Reset>>().len(), 1);
     }
 
     #[test]
