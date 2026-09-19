@@ -66,7 +66,7 @@
 
 use bevy::prelude::*;
 
-use super::profile::{EDGE, HALF_WIDTH, Profile, paint};
+use super::profile::{HALF_WIDTH, Profile, paint};
 use super::ribbon::{STEP, Station};
 
 /// Tighter than this and the car cannot carry its top speed through: a corner.
@@ -98,7 +98,18 @@ const APPROACH: usize = 5;
 /// you arrived at it and not before, and still a twentieth of the road. The
 /// footprint has not had to grow now that they stand up — see [`TALL`], which is
 /// where the reach came from instead.
-const HALF: f32 = 0.20;
+pub(super) const HALF: f32 = 0.20;
+/// What a diamond keeps between itself and the kerb on one side, and the lip
+/// the verge falls away over on the other. Small, because on a narrow shoulder
+/// it is all there is: the diamond does not shrink to fit, so what gives is the
+/// gap either side of it.
+pub(super) const CLEAR: f32 = 0.05;
+/// Grass a diamond needs under it: its own footprint, and a clearance either
+/// side. [`super::profile`] takes this as one of the things that decides
+/// whether a circuit has a verge at all — a shoulder too narrow to mark a
+/// corner on is not a shoulder, and a corner does not go unmarked to let a
+/// circuit in.
+pub(super) const ROOM: f32 = 2.0 * (HALF + CLEAR);
 /// How far a diamond rises above the verge it stands on.
 ///
 /// Low. This is a mark on the verge, not a bollard beside it: about as tall as
@@ -117,12 +128,16 @@ const TALL: f32 = 0.15;
 /// Faces a diamond has: four sides and no bottom. Named because the mesh is
 /// counted in [`super::profile`] as well as filled there.
 pub(super) const FACES: usize = 4;
-/// Metres either side of the centreline the line of diamonds runs down. Half a
-/// metre outside the kerb — close enough to the road to sit in the corner of the
-/// eye, far enough not to be taken for part of it — and well inside the
-/// narrowest verge a circuit is allowed to carry, so a cramped circuit draws its
-/// verge in without drawing it out from under these.
-const LATERAL: f32 = 4.5;
+/// Where on the shoulder the line of diamonds runs: half a metre out from the
+/// kerb, where the shoulder has that much grass to give.
+///
+/// Close enough to the road to sit in the corner of the eye, far enough not to
+/// be taken for part of it. It used to be a distance from the centreline, and a
+/// constant, which it could be while every circuit carried the same verge for
+/// the whole of its lap. Now the verge is fitted station by station, so this is
+/// where a diamond goes when there is room and [`lateral`] is what it comes to
+/// when there is not.
+const OUT: f32 = 0.5;
 /// How far a diamond floats above the verge. A hair, and only so the depth
 /// buffer has something to separate the two by: a fifth of the kerb's lip.
 const LIFT: f32 = 0.01;
@@ -150,14 +165,27 @@ const PALETTE: [(f32, f32, f32); 5] = [
     (0.97, 0.48, 0.06), // orange
 ];
 
-// A diamond lies on the verge, clear of the kerb and inside the loft. Both are
-// settled here rather than found later: the cross-section is a constant and so
-// is [`LATERAL`], so a change that puts the two through each other has no
-// business compiling. What the constants cannot say is how far a given circuit's
-// verge actually reaches, which narrows to what that circuit has room for —
-// `diamonds_lie_on_the_verge` is what asks each of them.
-const _: () = assert!(LATERAL - HALF > HALF_WIDTH);
-const _: () = assert!(LATERAL + HALF < EDGE);
+/// How far off the centreline a diamond stands, on a shoulder whose grass is
+/// `grass` metres wide.
+///
+/// Out at [`OUT`] from the kerb where the grass reaches that far, and drawn in
+/// against the kerb where it does not — never off the lip at the far side, and
+/// never overhanging the kerb at the near one. The diamond keeps its size while
+/// it moves: what gives on a narrow shoulder is where the line runs, not what
+/// the line is made of, because a mark that shrank would be a mark that read as
+/// further away than it is.
+///
+/// The two const assertions this replaces could be checked at compile time
+/// because both the verge and this were constants. Only one of them still can
+/// be — that a shoulder wide enough to be a shoulder is wide enough to hold a
+/// diamond — and it is in [`super::profile`] beside the floor it is about.
+/// Where the diamonds actually landed on each circuit is
+/// `a_diamond_stands_on_the_shoulder_it_was_given`.
+fn lateral(grass: f32) -> f32 {
+    let nearest = HALF + CLEAR;
+    let furthest = (grass - HALF - CLEAR).max(nearest);
+    HALF_WIDTH + OUT.clamp(nearest, furthest)
+}
 
 /// One diamond, ready to go into the loft's mesh.
 pub(super) struct Diamond {
@@ -188,20 +216,45 @@ impl Diamond {
 /// flat over it. The point goes straight up from the middle of them, because a
 /// marker leaning out with the camber is a marker that has been knocked.
 pub(super) fn diamonds(stations: &[Station], profile: &Profile) -> Vec<Diamond> {
+    let n = stations.len();
     let marked = markers(stations);
     let mut out = Vec::with_capacity(marked.len() * 2);
     for (at, step) in marked {
         let station = &stations[at];
         let (r, g, b) = PALETTE[step % PALETTE.len()];
         for side in [1.0, -1.0] {
+            // The narrowest the grass gets anywhere under this diamond, not the
+            // width at its middle. A diamond is 0.4 m long and the shoulder is
+            // fitted station by station, so its nose and tail stand on
+            // cross-sections that are not this one — and where the verge is
+            // tapering, the tighter of them is what the clearance has to be
+            // measured against. Placed off the middle alone, a diamond on
+            // Madring's narrowest shoulder hangs a millimetre over the lip.
+            let here = lateral(
+                [-HALF, 0.0, HALF]
+                    .into_iter()
+                    .map(|along| {
+                        let (on, t) = under(at, along, n);
+                        profile.grass(on, t, side)
+                    })
+                    .fold(f32::MAX, f32::min),
+            ) * side;
             // `across` is not flipped with the side, so both verges wind the
             // same way round and both faces point up.
+            //
+            // The fore and aft corners are half a station up and down the road,
+            // where the shoulder is not necessarily the width it is here, so
+            // each corner is stood on the cross-section at its own place rather
+            // than on this station's four times over. On a tapering verge that
+            // is the difference between a diamond lying on the ground and one
+            // with a corner in the air.
             let corner = |across: f32, along: f32| {
-                let lateral = LATERAL * side + across;
+                let lateral = here + across;
+                let (on, t) = under(at, along, n);
                 station.pos
                     + station.right * lateral
                     + station.tangent * along
-                    + Vec3::Y * (profile.height(lateral) + LIFT)
+                    + Vec3::Y * (profile.height(on, t, lateral) + LIFT)
             };
             let base = [
                 corner(0.0, -HALF),
@@ -217,6 +270,13 @@ pub(super) fn diamonds(stations: &[Station], profile: &Profile) -> Vec<Diamond> 
         }
     }
     out
+}
+
+/// Which cross-section a point `along` metres up or down the road from station
+/// `at` stands on, as a station and a fraction of the way to the next.
+fn under(at: usize, along: f32, n: usize) -> (usize, f32) {
+    let down = (at as f32 + along / STEP).rem_euclid(n as f32);
+    (down as usize % n, down.fract())
 }
 
 /// The stations that carry a diamond, each with its place in the line — which is
@@ -504,29 +564,49 @@ mod tests {
         }
     }
 
-    /// Diamonds stand on the verge of the circuit actually being driven. They
-    /// sit at a fixed distance off the centreline while the verge either side
-    /// narrows to whatever that circuit has room for, and the const assertions
-    /// above cannot see how far that is.
+    /// A diamond stands on the shoulder it was given, all four corners of it,
+    /// with the grass under every one and clear air past the last.
+    ///
+    /// The line used to run at a fixed 4.5 m off the centreline, which two
+    /// compile-time assertions could hold against a cross-section that was also
+    /// fixed. It is not fixed any more: the shoulder is fitted station by
+    /// station, so where the line runs is an answer rather than a constant, and
+    /// the four corners of one diamond are at four different places along the
+    /// road and so on four different cross-sections. This asks each of them.
+    ///
+    /// On the grass specifically, not merely inside the mesh. Past the grass is
+    /// the lip the verge falls away over, at six times the slope, and a marker
+    /// hanging off that is a marker that has been knocked over.
     #[test]
-    fn diamonds_lie_on_the_verge() {
+    fn a_diamond_stands_on_the_shoulder_it_was_given() {
         for (name, track) in every_track() {
-            let edge = track.profile.edge();
-            assert!(
-                LATERAL + HALF < edge,
-                "{name} carries {edge:.2} m of cross-section, which does not \
-                 reach the diamonds at {:.2}",
-                LATERAL + HALF
-            );
-            for diamond in diamonds(track.ribbon.stations(), &track.profile) {
-                for corner in diamond.base.into_iter().chain([diamond.apex]) {
-                    let lateral = track.ribbon.locate(corner).lateral.abs();
+            let profile = &track.profile;
+            let mut nearest = f32::MAX;
+            for diamond in diamonds(track.ribbon.stations(), profile) {
+                for corner in diamond.base {
+                    let fix = track.ribbon.locate(corner);
+                    let across = fix.lateral.abs();
+                    let grass = profile.grass(fix.at, fix.t, fix.lateral);
                     assert!(
-                        (HALF_WIDTH..edge).contains(&lateral),
-                        "{name}: a diamond corner sits {lateral:.2} m out"
+                        across > HALF_WIDTH,
+                        "{name}: a diamond corner sits {across:.2} m out, on the road"
                     );
+                    assert!(
+                        across < HALF_WIDTH + grass,
+                        "{name}: a diamond corner sits {across:.2} m out, past the \
+                         {:.2} m of grass there is there",
+                        HALF_WIDTH + grass
+                    );
+                    nearest = nearest
+                        .min(across - HALF_WIDTH)
+                        .min(HALF_WIDTH + grass - across);
                 }
             }
+            assert!(
+                nearest >= CLEAR - 1e-3,
+                "{name}: a diamond comes within {nearest:.3} m of the edge of its \
+                 own grass, against a clearance of {CLEAR}"
+            );
         }
     }
 

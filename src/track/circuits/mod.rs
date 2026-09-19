@@ -12,13 +12,16 @@
 mod albert_park;
 mod americas;
 mod bahrain;
+mod barcelona_catalunya;
 mod gilles_villeneuve;
 mod hermanos_rodriguez;
 mod imola;
 mod indianapolis;
 mod istanbul_park;
+mod jacarepagua;
 mod las_vegas;
 mod losail;
+mod madring;
 mod marina_bay;
 mod monza;
 mod paul_ricard;
@@ -45,20 +48,23 @@ pub(crate) struct Circuit {
 }
 
 /// Every circuit, in the order the menu lists them, which is alphabetical:
-/// seventeen of them is too many to remember a running order for, and a
+/// twenty of them is far too many to remember a running order for, and a
 /// list you can find a name in is worth more than one that tells you which
 /// was added when.
 const ALL: &[Circuit] = &[
     albert_park::CIRCUIT,
     americas::CIRCUIT,
     bahrain::CIRCUIT,
+    barcelona_catalunya::CIRCUIT,
     gilles_villeneuve::CIRCUIT,
     hermanos_rodriguez::CIRCUIT,
     imola::CIRCUIT,
     indianapolis::CIRCUIT,
     istanbul_park::CIRCUIT,
+    jacarepagua::CIRCUIT,
     las_vegas::CIRCUIT,
     losail::CIRCUIT,
+    madring::CIRCUIT,
     marina_bay::CIRCUIT,
     monza::CIRCUIT,
     paul_ricard::CIRCUIT,
@@ -70,7 +76,7 @@ const ALL: &[Circuit] = &[
 
 /// The circuit the game opens on. Named rather than taken off the top of the
 /// list, because the list is alphabetical and the Red Bull Ring is not — it is
-/// the one Todora was built around, and the shortest lap of the seventeen.
+/// the one Todora was built around, and one of the shortest laps in it.
 pub(crate) fn first() -> &'static Circuit {
     &red_bull_ring::CIRCUIT
 }

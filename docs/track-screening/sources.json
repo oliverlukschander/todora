@@ -1,0 +1,29 @@
+{
+  "barcelona_catalunya": {
+    "source_id": "es-1991",
+    "name": "Barcelona-Catalunya",
+    "source": "bacinger/f1-circuits",
+    "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
+    "heights": "Open-Meteo DEM",
+    "fixes": 149,
+    "lap_km": 4.67
+  },
+  "jacarepagua": {
+    "source_id": "br-1977",
+    "name": "Jacarepagu\u00e1",
+    "source": "bacinger/f1-circuits",
+    "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
+    "heights": "Open-Meteo DEM",
+    "fixes": 92,
+    "lap_km": 4.967
+  },
+  "madring": {
+    "source_id": "es-2026",
+    "name": "Madring",
+    "source": "bacinger/f1-circuits",
+    "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
+    "heights": "Open-Meteo DEM",
+    "fixes": 115,
+    "lap_km": 5.436
+  }
+}

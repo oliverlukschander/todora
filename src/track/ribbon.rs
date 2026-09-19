@@ -52,9 +52,6 @@ const SMOOTH_SPAN: f32 = 24.0;
 /// where the trace put it, so Spa is still Spa rather than Spa with the corners
 /// somewhere else.
 const CORNER_SPAN: f32 = 45.0;
-/// Stretches of circuit closer together than this along the lap are neighbours,
-/// and are expected to be close in space too.
-const APART: f32 = 60.0;
 /// Corner-opening sweeps. Each pass relaxes the tight stations and then respaces
 /// them; respacing shifts the curvature a little, so the two alternate until the
 /// circuit settles and the loop stops early. Spielberg takes a few hundred and
@@ -99,6 +96,16 @@ pub struct Ribbon {
 
 /// Where a world position sits relative to the circuit.
 pub struct Fix {
+    /// The segment the nearest point is on, and how far along it — `0` at
+    /// station `at`, `1` at the one after.
+    ///
+    /// Carried so that everything reading the cross-section reads it at the
+    /// same place. The road is the same everywhere, but the verge is not: it is
+    /// fitted station by station, so a height, a wall and a marker footprint
+    /// are only the same surface if they are all taken from this one answer
+    /// rather than each going and finding its own.
+    pub at: usize,
+    pub t: f32,
     /// Nearest point on the centreline, at circuit elevation.
     pub point: Vec3,
     /// Unit heading of the circuit here, level in XZ.
@@ -188,8 +195,14 @@ impl Ribbon {
         &self.stations[(n - steps) % n]
     }
 
-    /// Tightest corner on the circuit. The cross-section may not reach past
-    /// this, or its outer ribs cusp.
+    /// Tightest corner on the circuit.
+    ///
+    /// No longer what the cross-section is fitted against — [`Ribbon::room`]
+    /// measures the corner *here* rather than the tightest one anywhere — but
+    /// still how the corner-opening pass is checked to have converged, and
+    /// still what `tools/screen_tracks.py` reads off a candidate before anything
+    /// else is built. Hence the allowance: the game itself does not ask.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn min_radius(&self) -> f32 {
         self.stations
             .iter()
@@ -197,49 +210,56 @@ impl Ribbon {
             .fold(f32::MAX, |r, s| r.min(1.0 / s.curvature.abs()))
     }
 
-    /// Closest approach between two stretches of the circuit that are not
-    /// neighbours. Half of this is the widest the cross-section can reach before
-    /// the verge of one stretch grows through the verge of another — the bound a
-    /// per-station curvature check cannot see, because nothing is wrong locally.
+    /// How far the cross-section may reach from station `i` on side `side`
+    /// before the surface it sweeps grows through itself — capped at `cap`,
+    /// beyond which nothing asks.
     ///
-    /// Every pair of stations is a comparison, and every circuit in the game is
-    /// built at least once per test that walks them, so this asks [`Index`] for
-    /// each station's nearest non-neighbour rather than measuring against all of
-    /// them. The answer is the same one — `the_index_agrees_with_the_walk` holds
-    /// both halves of that to the exhaustive version.
-    pub fn min_separation(&self) -> f32 {
-        let n = self.stations.len();
-        let skip = (APART / STEP) as usize;
-        // Nothing on this circuit is [`APART`] from anything: the whole lap is
-        // its own neighbourhood, so there is no pair to measure. Monaco at this
-        // scale is 105 m round and every station of it is within 60 m of every
-        // other. That is not room to spare, it is no answer at all.
-        if n / 2 < skip {
-            return f32::MAX;
-        }
-        let mut best = f32::MAX;
-        for i in 0..n {
-            self.index.nearest_apart(&self.stations, i, skip, &mut best);
-        }
-        if best == f32::MAX { best } else { best.sqrt() }
+    /// The largest disc that touches the centreline here and nowhere else.
+    /// Grow a circle from the centreline at this station, tangent to the road
+    /// and lying on the side in question, and stop when it reaches any other
+    /// part of the circuit: everything inside it belongs to this station and to
+    /// nothing else, so a rib anywhere inside it is a rib that cannot have come
+    /// from somewhere else as well.
+    ///
+    /// That one measurement is both of the bounds the cross-section used to be
+    /// given separately, and it is *local*, which the old pair were not:
+    ///
+    /// - Where the circuit is turning, the disc runs out of room at the centre
+    ///   of the corner, so it measures the radius of curvature *here* rather
+    ///   than the tightest corner anywhere on the lap.
+    /// - Where the circuit runs back past itself, it runs out of room half way
+    ///   across the gap, so it measures the space at *this* pinch rather than
+    ///   the closest approach anywhere on the lap.
+    ///
+    /// And it needs no arbitrary exclusion of nearby stations to do it. The
+    /// disc is tangent to the road, so the road running on ahead is tangent to
+    /// it too and never inside it: a station's neighbours drop out of the
+    /// measurement by geometry rather than by being told to. The old
+    /// `min_separation` had to skip everything within 60 m along the lap, which
+    /// is also how far apart two genuinely separate turns can be.
+    ///
+    /// Solved rather than searched. The disc of radius `w` is centred at
+    /// `pos + side * w * right`, so a station at `d` from here is outside it
+    /// while `|d - side * w * right|² ≥ w²`, which is `|d|² ≥ 2 w (side * d·right)`
+    /// — so each station either says nothing, when it is behind the tangent
+    /// line, or caps `w` at `|d|² / (2 * side * d·right)`.
+    pub fn room(&self, i: usize, side: f32, cap: f32) -> f32 {
+        let mut best = cap;
+        self.index.narrow_room(&self.stations, i, side, &mut best);
+        best
     }
 
-    /// The same closest approach, measured against every pair. The oracle the
-    /// indexed answer is held to, and slow enough to be worth keeping out of
-    /// the game.
+    /// The same widest disc, measured against every station in turn. The
+    /// oracle the indexed answer is held to.
     #[cfg(test)]
-    pub(crate) fn min_separation_exhaustively(&self) -> f32 {
-        let n = self.stations.len();
-        let skip = (APART / STEP) as usize;
-        let mut best = f32::MAX;
-        for i in 0..n {
-            for j in (i + skip)..n {
-                // `j` runs ahead of `i`, so it is only far enough away if it is
-                // also far enough from `i` the long way round the lap.
-                if n - j + i < skip {
-                    continue;
-                }
-                best = best.min(flat(self.stations[j].pos - self.stations[i].pos).length());
+    pub(crate) fn room_exhaustively(&self, i: usize, side: f32, cap: f32) -> f32 {
+        let here = &self.stations[i];
+        let mut best = cap;
+        for station in &self.stations {
+            let d = flat(station.pos - here.pos);
+            let across = d.dot(here.right) * side;
+            if across > 0.0 {
+                best = best.min(d.length_squared() / (2.0 * across));
             }
         }
         best
@@ -259,6 +279,8 @@ impl Ribbon {
             // on station zero is the one answer that cannot be wrong about
             // something that does not exist.
             None => Fix {
+                at: 0,
+                t: 0.0,
                 point: self.stations[0].pos,
                 tangent: self.stations[0].tangent,
                 right: self.stations[0].right,
@@ -330,6 +352,8 @@ impl Ribbon {
         let point = a.pos + (b.pos - a.pos) * t;
         let right = a.right.lerp(b.right, t).normalize_or(a.right);
         Fix {
+            at,
+            t,
             point,
             tangent: a.tangent.lerp(b.tangent, t).normalize_or(a.tangent),
             right,
@@ -340,7 +364,10 @@ impl Ribbon {
         }
     }
 
-    fn from_polyline(line: Vec<Vec3>) -> Self {
+    /// A ribbon straight from a closed polyline, with no splining, no corner
+    /// opening and no smoothing. What [`Ribbon::new`] finishes with, and how a
+    /// test builds a shape it wants exactly rather than approximately.
+    pub(super) fn from_polyline(line: Vec<Vec3>) -> Self {
         let n = line.len();
         let length = closed_length(&line);
         let step = length / n as f32;
@@ -513,43 +540,45 @@ impl Index {
         self.descend(stations, pos, far, best, counted);
     }
 
-    /// Narrow `best` — a squared plan distance — to the nearest station at least
-    /// `skip` stations from `i` round the loop.
+    /// Narrow `best` to the widest disc that touches the centreline at station
+    /// `i` on side `side` and nothing else. See [`Ribbon::room`].
     ///
-    /// Two ways for a node to be worth nothing here, and the second is the one
-    /// that matters: a run entirely inside `i`'s own neighbourhood has nothing
-    /// in it that may be measured against, however near it is. Without that the
-    /// walk would descend the whole of the stretch either side of every station,
-    /// which is most of the saving.
-    fn nearest_apart(&self, stations: &[Station], i: usize, skip: usize, best: &mut f32) {
-        self.walk_apart(stations, i, skip, 0, best);
+    /// The discs are nested — every one of them touches the centreline at the
+    /// same point from the same side, so a smaller radius is a disc inside a
+    /// larger one. Pruning against the disc for the best radius so far is
+    /// therefore sound, and it tightens as the walk goes on.
+    fn narrow_room(&self, stations: &[Station], i: usize, side: f32, best: &mut f32) {
+        self.walk_room(stations, i, side, 0, best);
     }
 
-    fn walk_apart(&self, stations: &[Station], i: usize, skip: usize, at: usize, best: &mut f32) {
+    fn walk_room(&self, stations: &[Station], i: usize, side: f32, at: usize, best: &mut f32) {
+        let here = &stations[i];
+        let centre = here.pos + here.right * (side * *best);
         let node = &self.nodes[at];
-        let n = stations.len();
-        if all_near(i, node.from as usize, node.to as usize, n, skip)
-            || outside(node, stations[i].pos) > slack(*best)
-        {
+        if outside(node, centre) > slack(*best * *best) {
             return;
         }
         if node.right == 0 {
-            for j in node.from as usize..node.to as usize {
-                if far_enough(i, j, n, skip) {
-                    *best = best.min(flat(stations[j].pos - stations[i].pos).length_squared());
+            for other in &stations[node.from as usize..node.to as usize] {
+                let d = flat(other.pos - here.pos);
+                let across = d.dot(here.right) * side;
+                // Behind the tangent line, so outside every one of the discs:
+                // this station has nothing to say about how wide they get.
+                if across > 0.0 {
+                    *best = best.min(d.length_squared() / (2.0 * across));
                 }
             }
             return;
         }
         let (left, right) = (at + 1, node.right as usize);
-        let at = stations[i].pos;
-        let (near, far) = if outside(&self.nodes[left], at) <= outside(&self.nodes[right], at) {
-            (left, right)
-        } else {
-            (right, left)
-        };
-        self.walk_apart(stations, i, skip, near, best);
-        self.walk_apart(stations, i, skip, far, best);
+        let (near, far) =
+            if outside(&self.nodes[left], centre) <= outside(&self.nodes[right], centre) {
+                (left, right)
+            } else {
+                (right, left)
+            };
+        self.walk_room(stations, i, side, near, best);
+        self.walk_room(stations, i, side, far, best);
     }
 }
 
@@ -570,31 +599,6 @@ fn outside(node: &Bounds, pos: Vec3) -> f32 {
 /// they do not.
 fn slack(best: f32) -> f32 {
     best * (1.0 + 1e-6) + 1e-9
-}
-
-/// Is `j` far enough round the loop from `i` for the two to be different parts
-/// of the circuit rather than the same part twice?
-fn far_enough(i: usize, j: usize, n: usize, skip: usize) -> bool {
-    let along = (j + n - i) % n;
-    along >= skip && n - along >= skip
-}
-
-/// Is every station in `from..to` inside `i`'s own neighbourhood?
-///
-/// Measured in distance round the loop from `i`, where a run of consecutive
-/// stations is one arc and the stations too near `i` to measure against are
-/// another — so this is one arc inside another, which is arithmetic rather than
-/// a loop over the run.
-fn all_near(i: usize, from: usize, to: usize, n: usize, skip: usize) -> bool {
-    let near = 2 * skip - 1;
-    if near >= n {
-        return true;
-    }
-    // The neighbourhood as an arc of distance-round-the-loop, running from just
-    // inside a whole lap back through zero.
-    let starts = (n - skip + 1) % n;
-    let offset = ((from + n - i) % n + n - starts) % n;
-    offset + (to - from) <= near
 }
 
 /// Drop the height: the cross-section and every distance along the lap are
@@ -837,12 +841,19 @@ mod tests {
                     &ribbon.locate_exhaustively(at),
                 );
             }
-            assert_eq!(
-                ribbon.min_separation(),
-                ribbon.min_separation_exhaustively(),
-                "{name}: the index and the walk disagree about how close the \
-                 circuit comes to itself"
-            );
+            // And the other question the index answers: how much room the
+            // circuit has at a station, which the cross-section is fitted to.
+            let cap = 10.0;
+            for i in (0..ribbon.stations().len()).step_by(7) {
+                for side in [-1.0f32, 1.0] {
+                    assert_eq!(
+                        ribbon.room(i, side, cap),
+                        ribbon.room_exhaustively(i, side, cap),
+                        "{name}: the index and the walk disagree about the room \
+                         at station {i} on side {side}"
+                    );
+                }
+            }
         }
     }
 

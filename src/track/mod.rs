@@ -2,9 +2,10 @@
 //!
 //! Tarmac, edge lines, kerbs and grass are all strips of a single loft over the
 //! stations in [`ribbon`]. Every strip is generated from the same station, the
-//! same `right` vector and the same station index, so neighbouring strips share
-//! their edge vertices exactly. Nothing overlaps anything, so nothing can
-//! z-fight, tear open, or stair-step away from its neighbour.
+//! same `right` vector, the same station index and the one cross-section fitted
+//! at that station, so neighbouring strips share their edge vertices exactly.
+//! Nothing overlaps anything, so nothing can z-fight, tear open, or stair-step
+//! away from its neighbour.
 //!
 //! The sweep itself has no special cases — no clamping, no per-corner fudge. It
 //! can afford that because the cross-section is fitted to what the circuit can
@@ -235,25 +236,28 @@ impl Track {
 
     /// A cheap hash of the shape the car actually drives on.
     ///
-    /// Taken from the finished centreline rather than from the trace it came
-    /// from, so it moves when *anything* that shapes a circuit moves: the scales
-    /// here, the trace itself, and every constant in [`ribbon`] — how far the
-    /// corners are opened, how the heights are smoothed, how steep a grade is
-    /// allowed to be. A lap saved around one shape means nothing around another,
-    /// so this goes into the saved file and is checked on the way back in.
-    /// FNV-1a, because it only has to notice a change, not resist anyone.
+    /// Taken from the finished driving surface rather than from the trace it
+    /// came from, so it moves when *anything* that shapes a circuit moves: the
+    /// scales here, the trace itself, and every constant in [`ribbon`] — how far
+    /// the corners are opened, how the heights are smoothed, how steep a grade
+    /// is allowed to be. A lap saved around one shape means nothing around
+    /// another, so this goes into the saved file and is checked on the way back
+    /// in. FNV-1a, because it only has to notice a change, not resist anyone.
+    ///
+    /// The centreline used to be the whole of it, and that was right while every
+    /// circuit carried the same road and the same verge for the whole of its
+    /// lap: nothing about the surface could move unless the centreline did. It
+    /// is not right now. The verge is fitted station by station, so a circuit
+    /// can keep its centreline to the bit and still put the wall somewhere else,
+    /// and a wall somewhere else is a lap that could not have been driven. So
+    /// the cross-section goes in too — both verge widths at every station, which
+    /// is everything the surface is that the centreline is not.
+    ///
+    /// What deliberately does *not* go in is paint. Recolouring a kerb stripe
+    /// changes the mesh and changes nothing a lap time depends on, and throwing
+    /// away everyone's ghosts over it would teach people to distrust the check.
     pub(crate) fn fingerprint(&self) -> u64 {
-        const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-        const PRIME: u64 = 0x0000_0100_0000_01b3;
-        let mut hash = OFFSET;
-        for station in self.ribbon.stations() {
-            for value in station.pos.to_array() {
-                for byte in value.to_bits().to_le_bytes() {
-                    hash = (hash ^ byte as u64).wrapping_mul(PRIME);
-                }
-            }
-        }
-        hash
+        hash(&surface(&self.ribbon, &self.profile))
     }
 
     /// Plan length of one lap. Circuits are not the same length — they are all
@@ -269,10 +273,12 @@ impl Track {
         self.ribbon.locate(pos).s / self.ribbon.length()
     }
 
-    /// How far out the car is held. Inside the edge of the loft, wherever this
-    /// circuit's verge had to stop.
-    fn wall(&self) -> f32 {
-        self.profile.edge() - WALL_INSET
+    /// How far out the car is held where it is standing. Inside the edge of the
+    /// loft, wherever this circuit's verge had to stop *here* — the verge is
+    /// fitted station by station, so the wall follows it rather than being set
+    /// once to the narrowest place on the lap.
+    fn wall(&self, ground: &Ground) -> f32 {
+        ground.edge - WALL_INSET
     }
 
     /// Sit the car on the loft, hold it inside the outermost strip, and fetch it
@@ -297,7 +303,7 @@ impl Track {
             return;
         }
 
-        let wall = self.wall();
+        let wall = self.wall(&ground);
         if ground.lateral.abs() > wall {
             let held = ground.lateral.clamp(-wall, wall);
             let correction = ground.right * (held - ground.lateral);
@@ -339,15 +345,48 @@ impl Track {
         let fix = self.ribbon.locate(pos);
         Ground {
             centre: fix.point,
-            height: fix.point.y + self.profile.height(fix.lateral),
+            height: fix.point.y + self.profile.height(fix.at, fix.t, fix.lateral),
             tangent: fix.tangent,
             right: fix.right,
             lateral: fix.lateral,
+            edge: self.profile.reach(fix.at, fix.t, fix.lateral),
             slope: fix.slope,
             curvature: fix.curvature,
             grip: profile::grip(fix.lateral),
         }
     }
+}
+
+/// Everything the shape of a lap is made of, as a flat run of numbers: the
+/// centreline, and the cross-section swept at each station of it.
+///
+/// Written out rather than hashed in place so that what goes in can be looked
+/// at. What is in here is what a lap time depends on; what is left out is
+/// [`profile::Band`], which is paint.
+fn surface(ribbon: &Ribbon, profile: &Profile) -> Vec<f32> {
+    let stations = ribbon.stations();
+    let mut out = Vec::with_capacity(stations.len() * (3 + 2 * profile::RIBS));
+    for (i, station) in stations.iter().enumerate() {
+        out.extend(station.pos.to_array());
+        for (lateral, height, _) in profile.at(i) {
+            out.push(lateral);
+            out.push(height);
+        }
+    }
+    out
+}
+
+/// FNV-1a over the bits. It only has to notice a change, not resist anyone.
+fn hash(values: &[f32]) -> u64 {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = OFFSET;
+    for value in values {
+        for byte in value.to_bits().to_le_bytes() {
+            hash = (hash ^ byte as u64).wrapping_mul(PRIME);
+        }
+    }
+    hash
 }
 
 /// What the car is standing on, at one point.
@@ -361,6 +400,9 @@ pub(crate) struct Ground {
     pub(crate) right: Vec3,
     /// Metres right of the centreline; negative is left.
     pub(crate) lateral: f32,
+    /// How far the cross-section reaches from the centreline on this side, here.
+    /// The wall is set [`WALL_INSET`] inside it.
+    pub(crate) edge: f32,
     /// Rise over run along `tangent`. Gravity pulls against this.
     pub(crate) slope: f32,
     /// Signed curvature of the circuit here; its reciprocal is the corner radius.
@@ -569,17 +611,19 @@ mod tests {
         for (name, track) in every_track() {
             let start = track.start_transform();
             let right = *start.right();
-            // The verge falls to the same depths however far out the edge is, so
-            // the reading at the kerb is fixed and the one out on the grass is
-            // read from the profile this circuit was actually fitted with.
-            let verge = track.profile.edge() - HALF_WIDTH;
-            for (across, grip, height) in [
-                (0.0, 1.0, 0.0),
-                (TARMAC_HALF - 0.01, 1.0, 0.0),
-                (HALF_WIDTH - 0.01, KERB_GRIP, KERB_TOP * (0.69 / 0.70)),
-                (HALF_WIDTH + verge * (2.0 / 3.0), GRASS_GRIP, -0.20),
-            ] {
-                for side in [-1.0f32, 1.0] {
+            for side in [-1.0f32, 1.0] {
+                // How far the grass reaches on this side *here*, which is what
+                // the reading out on it has to be taken against: the verge is
+                // fitted station by station now, so the depth at two thirds of
+                // the way out is not a constant of the game.
+                let edge = track.ground(start.translation + right * side).edge;
+                let lip = HALF_WIDTH + (2.0 / 3.0) * (edge - HALF_WIDTH);
+                for (across, grip, height) in [
+                    (0.0, 1.0, 0.0),
+                    (TARMAC_HALF - 0.01, 1.0, 0.0),
+                    (HALF_WIDTH - 0.01, KERB_GRIP, KERB_TOP * (0.69 / 0.70)),
+                    (lip, GRASS_GRIP, KERB_TOP - 0.125 * (lip - HALF_WIDTH)),
+                ] {
                     let ground = track.ground(start.translation + right * (side * across));
                     assert_eq!(ground.grip, grip, "{name}: grip {across} m off the line");
                     assert!(
@@ -602,7 +646,7 @@ mod tests {
         let track = track();
         let start = track.start_transform();
         let right = *start.right();
-        let wall = track.wall();
+        let wall = track.wall(&track.ground(start.translation));
         for stuck in [wall, -wall, HALF_WIDTH + 1.0, 0.0] {
             let mut transform = Transform::from_translation(start.translation + right * stuck)
                 // Facing backwards, sideways, and scaled like the real car.
@@ -635,9 +679,9 @@ mod tests {
     #[test]
     fn a_wall_hit_stays_on_the_ground_and_does_not_add_energy() {
         for (name, track) in every_track() {
-            let wall = track.wall();
             for station in track.ribbon.stations().iter().step_by(20) {
                 for side in [-1.0, 1.0] {
+                    let wall = track.wall(&track.ground(station.pos + station.right * side));
                     let mut transform = Transform::from_translation(
                         station.pos + station.right * side * (wall + 0.4),
                     );
@@ -654,7 +698,7 @@ mod tests {
                         transform.translation.y,
                         ground.height
                     );
-                    assert!(ground.lateral.abs() <= wall + 0.01);
+                    assert!(ground.lateral.abs() <= track.wall(&ground) + 0.01);
                     assert!(car.velocity.length() <= speed);
                     assert!(car.velocity.dot(ground.right) * side < 0.0);
                 }
@@ -876,6 +920,88 @@ mod tests {
         );
     }
 
+    /// A lap is a lap of the surface it was driven on, and the fingerprint has
+    /// to move when that surface does — in any of the ways it can.
+    ///
+    /// This is a property correction, and the wrong proxy is worth naming. The
+    /// fingerprint used to be of the finished *centreline*, and that was a
+    /// complete description of the driving surface for exactly as long as every
+    /// circuit carried the same road and the same verge from its first station
+    /// to its last: nothing about the surface could move unless the centreline
+    /// moved. The verge is fitted station by station now. A circuit can keep
+    /// its centreline to the bit and put the wall a metre further in, and a
+    /// saved lap that used that metre would replay through the scenery with the
+    /// clock saying it was fine.
+    ///
+    /// So the claim is now about the surface and not the line: the cross-section
+    /// at every station goes into the hash as well. And the negative half of it
+    /// is checked too — paint is deliberately not in there, because recolouring
+    /// a kerb stripe changes the mesh, changes nothing a lap time depends on,
+    /// and throwing away everyone's ghosts over it would teach people to
+    /// distrust the check.
+    #[test]
+    fn a_lap_belongs_to_the_surface_it_was_driven_on() {
+        let track = track();
+        let ribbon = &track.ribbon;
+        let profile = &track.profile;
+        let mine = hash(&surface(ribbon, profile));
+        assert_eq!(mine, track.fingerprint());
+        // Building the same circuit again is the same surface.
+        assert_eq!(mine, Track::any().fingerprint());
+
+        // A centimetre off one station's left verge, and nothing else at all:
+        // the same centreline, the same heights, the same paint. The old
+        // centreline-only hash could not see this, which is the whole reason
+        // this test exists.
+        let narrower = profile.nudged(0, -0.01);
+        assert_ne!(
+            mine,
+            hash(&surface(ribbon, &narrower)),
+            "a width-only change left the fingerprint where it was"
+        );
+
+        // A height-only change: the same plan, the hills a hundredth taller.
+        let circuit = track.circuit();
+        let taller: Vec<Vec3> = circuit
+            .centreline
+            .iter()
+            .map(|p| {
+                Vec3::new(
+                    p[0] * PLAN_SCALE,
+                    p[1] * HEIGHT_SCALE * 1.01,
+                    p[2] * PLAN_SCALE,
+                )
+            })
+            .collect();
+        let taller = Ribbon::new(&taller, circuit.corners);
+        let fitted = Profile::fit(&taller).expect("the same circuit still carries a road");
+        assert_ne!(
+            mine,
+            hash(&surface(&taller, &fitted)),
+            "a height-only change left the fingerprint where it was"
+        );
+
+        // And paint is not in it. Two cross-sections of exactly the same shape,
+        // one of them repainted: the same numbers go into the hash.
+        let plain = profile::section(3.0, 3.0);
+        let mut repainted = plain;
+        repainted[0].2 = profile::Band::Grass;
+        assert_ne!(plain[0].2, repainted[0].2, "nothing was actually repainted");
+        let flatten = |ribs: &profile::Section| -> Vec<f32> {
+            ribs.iter().flat_map(|&(l, h, _)| [l, h]).collect()
+        };
+        assert_eq!(
+            hash(&flatten(&plain)),
+            hash(&flatten(&repainted)),
+            "repainting a strip would throw away every saved lap"
+        );
+        assert_ne!(
+            hash(&flatten(&plain)),
+            hash(&flatten(&profile::section(3.0, 2.99))),
+            "a centimetre of verge reads as the same surface"
+        );
+    }
+
     /// What every circuit came out as: the table the bars in these tests are set
     /// against, and the first thing to look at when a new one will not go in.
     ///
@@ -884,8 +1010,8 @@ mod tests {
     #[ignore]
     fn the_circuits() {
         println!(
-            "{:<26}{:>8}{:>7}{:>7}{:>8}{:>9}{:>8}",
-            "circuit", "lap", "kept", "edge", "pinned", "straight", "relief"
+            "{:<26}{:>8}{:>7}{:>15}{:>8}{:>9}{:>8}",
+            "circuit", "lap", "kept", "cross-section", "pinned", "straight", "relief"
         );
         for (name, track) in every_track() {
             let stations = track.ribbon.stations();
@@ -913,11 +1039,13 @@ mod tests {
             let (low, high) = stations.iter().fold((f32::MAX, f32::MIN), |(l, h), s| {
                 (l.min(s.pos.y), h.max(s.pos.y))
             });
+            let (narrowest, widest) = track.profile.span();
             println!(
-                "{name:<26}{:>7.0}m{:>6.0}%{:>6.2}m{:>7.0}%{:>8.0}%{:>7.1}m",
+                "{name:<26}{:>7.0}m{:>6.0}%{:>9.2}-{:>4.2}m{:>7.0}%{:>8.0}%{:>7.1}m",
                 track.ribbon.length(),
                 track.ribbon.kept() * 100.0,
-                track.profile.edge(),
+                narrowest,
+                widest,
                 100.0 * pinned as f32 / n as f32,
                 100.0 * straight as f32 / n as f32,
                 high - low,
@@ -1001,7 +1129,7 @@ mod tests {
     fn every_circuit_is_its_own_place() {
         let mut shapes = Vec::new();
         for (name, track) in every_track() {
-            assert!(track.profile.edge() <= EDGE, "{name}");
+            assert!(track.profile.span().1 <= EDGE, "{name}");
             shapes.push((name, track.fingerprint(), track.circuit().id));
         }
         for (i, (name, shape, id)) in shapes.iter().enumerate() {
