@@ -2,7 +2,7 @@
 
 A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy.org/). Drive an Omarchy GT around forty scaled real circuits, with **T** for the list of them.
 
-[Download Todora 0.7.0 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.7.0/Todora.dmg) · [Release notes](docs/releases/v0.7.0.md)
+[Download Todora 0.8.0 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.8.0/Todora.dmg) · [Release notes](docs/releases/v0.8.0.md)
 
 The default garage choice is **OMARCHY GT #95**, a Blender-built recreation of the car David Heinemeier Hansson and his co-drivers drove to the **2014 Le Mans GTE Am class win**. It has the pale-blue and orange livery, yellow endurance lights, animated race wheels, rear wing and diffuser. Clubman and Express remain handling and colour variants of the shared model. [Model, reference sources and rebuild instructions](docs/models/omarchy-gt-95.md).
 
@@ -18,7 +18,9 @@ All forty laps are shorter: most by about 10%, with smaller reductions on the ti
 
 **Ghost reset:** press **Esc**, then **Reset this ghost** (current circuit and driving mode) or **Reset all ghosts**. Activate the same button again to confirm; moving selection cancels confirmation. This removes the corresponding saved best times and restarts your lap. **Cmd+Q** on macOS, **Ctrl+Q** elsewhere, or **Quit game** in the pause menu exits with audio stopped and radio shutdown signalled; native window/menu quit also cleans up sound.
 
-Each circuit sits on a grass rectangle extending 50 metres beyond the outermost verge in every direction. The outer ground and infields share continuous surfaces fitted to the verge boundaries, including Suzuka's crossing loops. Shared triangle edges prevent cracks, and the terrain follows the surrounding elevation with smooth shading. The road uses a [fine-grained racing asphalt texture](assets/textures/README.md), filtered for distance, with the painted lines and kerbs kept crisp. Road geometry and saved-ghost fingerprints are unchanged.
+Each circuit sits on a grass rectangle extending 50 metres beyond the outermost verge in every direction. The outer ground and infields share continuous surfaces fitted to the verge boundaries, including Suzuka's crossing loops. Shared triangle edges prevent cracks, and the terrain follows the surrounding elevation with smooth shading. The road uses a [fine-grained racing asphalt texture](assets/textures/README.md), filtered for distance, with the painted lines and kerbs kept crisp. These terrain and texture changes preserve road geometry and saved ghosts.
+
+All forty racing directions have been [audited](docs/track-screening/directions.md). Paul Ricard now runs clockwise and Marina Bay anticlockwise; Buenos Aires was already correct. Ghosts from the two reversed layouts are automatically rejected.
 
 ## Design history
 

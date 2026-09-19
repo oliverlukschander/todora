@@ -960,6 +960,40 @@ mod tests {
         }
     }
 
+    /// Hold finished traversal and the starting car to the researched directions,
+    /// independently of the GeoJSON order. Suzuka's signed area is only a
+    /// regression signal for its pinned figure-eight layout; see the audit.
+    #[test]
+    fn every_circuit_runs_in_its_verified_racing_direction() {
+        let audit = include_str!("../../docs/track-screening/directions.md");
+        for circuit in all_circuits() {
+            let row = audit
+                .lines()
+                .find(|row| row.starts_with(&format!("| {} |", circuit.id)))
+                .expect("every circuit has a researched direction");
+            let clockwise = row
+                .split('|')
+                .nth(3)
+                .unwrap()
+                .trim()
+                .starts_with("Clockwise");
+            let track = Track::new(circuit);
+            let stations = track.ribbon.stations();
+            let area: f32 = stations
+                .iter()
+                .zip(stations.iter().cycle().skip(1))
+                .map(|(a, b)| a.pos.x * b.pos.z - b.pos.x * a.pos.z)
+                .sum();
+            assert_eq!(area > 0.0, clockwise, "{}: reversed ribbon", circuit.name);
+            let grid = track.ribbon.before_start(RUN_UP);
+            assert!(
+                track.start_transform().forward().dot(grid.tangent) > 0.99,
+                "{}: car faces away from racing direction",
+                circuit.name
+            );
+        }
+    }
+
     /// What the car stands on has to be the same cross-section the mesh was
     /// swept from, or the car rides at a height the road is not at.
     #[test]

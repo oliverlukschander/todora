@@ -3,7 +3,7 @@
 
     tools/make_track.py at-1969 red_bull_ring "Red Bull Ring"
     tools/make_track.py be-1925 spa_francorchamps "Spa-Francorchamps"
-    tools/make_track.py mc-1929 monaco "Monaco" --line 43.73543,7.42122
+    tools/make_track.py mc-1929 monaco "Monaco" --line 43.73543,7.42122 --direction clockwise
 
 The plan comes from bacinger/f1-circuits, which traces circuit centrelines as
 GeoJSON in WGS84; the heights come from the Open-Meteo DEM, sampled at those
@@ -33,6 +33,12 @@ circuit here as a `highway=raceway` way running a dozen metres off the road, and
 the line belongs on the stretch that way runs alongside. The trace is only
 rotated to a fix it already has, so the line lands within one fix — forty-odd
 metres of real circuit, five of Todora's — of the coordinate given.
+
+Point order in the GeoJSON is not necessarily racing order. The verified
+--direction (clockwise or anticlockwise) is recorded with the start line and
+reapplied on regeneration, keeping the first fix in place. New circuits need
+an explicit direction. See `docs/track-screening/directions.md` for the audit
+and the limitation of signed area on figure-eight circuits such as Suzuka.
 
 The trace revision is pinned. `master` is a moving target and a circuit that
 was resurveyed between one module and the next would be two circuits generated
@@ -157,6 +163,20 @@ def heights(fixes):
     return [round(metres - lowest) for metres in sampled]
 
 
+def orient(fixes, direction):
+    """Put fixes in racing order without moving the start/finish anchor."""
+    if direction not in ("clockwise", "anticlockwise"):
+        raise ValueError("verify and supply --direction clockwise or anticlockwise")
+    points = plan(fixes)
+    area = sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(points, points[1:] + points[:1]))
+    if abs(area) < 1.0:
+        raise ValueError("trace has no clear signed area; verify its racing order manually")
+    # X points east, Z south: positive signed area is clockwise from above.
+    if (area > 0) != (direction == "clockwise"):
+        return fixes[:1] + fixes[:0:-1]
+    return fixes
+
+
 def lap_length(points):
     return sum(math.dist(points[i], points[(i + 1) % len(points)]) for i in range(len(points)))
 
@@ -245,7 +265,7 @@ def sources():
     return json.loads(SOURCES.read_text()) if SOURCES.exists() else {}
 
 
-def note(circuit_id, module_name, name, revision, fixes, points, line):
+def note(circuit_id, module_name, name, revision, fixes, points, line, direction):
     """Record where this circuit came from, alongside the other circuits'."""
     SOURCES.parent.mkdir(parents=True, exist_ok=True)
     known = sources()
@@ -259,6 +279,7 @@ def note(circuit_id, module_name, name, revision, fixes, points, line):
         "lap_km": round(lap_length(points) / 1000.0, 3),
         # Where the trace was turned to begin. See the module docstring.
         "line": line,
+        "direction": direction,
     }
     SOURCES.write_text(json.dumps(dict(sorted(known.items())), indent=2) + "\n")
 
@@ -267,6 +288,7 @@ def main():
     argv = sys.argv[1:]
     revision = REVISION
     line = None
+    direction = None
     if "--revision" in argv:
         at = argv.index("--revision")
         revision = argv[at + 1]
@@ -275,16 +297,23 @@ def main():
         at = argv.index("--line")
         line = [float(part) for part in argv[at + 1].split(",")]
         argv = argv[:at] + argv[at + 2 :]
+    if "--direction" in argv:
+        at = argv.index("--direction")
+        direction = argv[at + 1]
+        argv = argv[:at] + argv[at + 2 :]
     if len(argv) != 3:
         sys.exit(__doc__)
     circuit_id, module_name, name = argv
+    direction = direction or sources().get(module_name, {}).get("direction")
+    if direction not in ("clockwise", "anticlockwise"):
+        sys.exit("verify and supply --direction clockwise or anticlockwise")
     properties, fixes = trace(circuit_id, revision)
     # A line already recorded outlives a rerun; only --line moves one.
     line = line or sources().get(module_name, {}).get("line") or list(reversed(fixes[0]))
     # Rounded once, here, so the module header and the provenance file spell the
     # same coordinate the same way and can be held to each other.
     line = [round(float(part), 5) for part in line]
-    fixes = start_at(fixes, line)
+    fixes = orient(start_at(fixes, line), direction)
     points = plan(fixes)
     path = CIRCUITS / f"{module_name}.rs"
     path.write_text(
@@ -293,7 +322,7 @@ def main():
         )
     )
     register(module_name)
-    note(circuit_id, module_name, name, revision, fixes, points, line)
+    note(circuit_id, module_name, name, revision, fixes, points, line, direction)
     subprocess.run(["cargo", "fmt", "--all"], cwd=CIRCUITS.parents[2], check=False)
     print(f"{path}: {len(fixes)} fixes, {lap_length(points) / 1000.0:.3f} km")
 
