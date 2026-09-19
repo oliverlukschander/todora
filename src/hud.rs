@@ -13,10 +13,9 @@ pub(crate) const FRONT: Color = Color::srgba(0.045, 0.06, 0.073, 0.98);
 const AHEAD: Color = Color::srgb(0.38, 0.86, 0.42);
 const BEHIND: Color = Color::srgb(0.96, 0.32, 0.26);
 
-/// Arcade speedometer calibration for the miniature world. On a flat straight,
-/// Clubman / Tourer / Express settle near 217 / 240 / 298 displayed km/h.
+/// Arcade speedometer calibration for the miniature world.
 /// Shared by all cars and independent of model size; physics stays in m/s.
-const DISPLAY_SPEED_SCALE: f32 = 3.0;
+pub(crate) const DISPLAY_SPEED_SCALE: f32 = 3.0;
 
 /// Side of the g-meter's square, in pixels, and the reading that reaches its
 /// edge. Tyres give up somewhere near 1.2 g, so a needle on the rim means the
@@ -238,16 +237,25 @@ fn setup(mut commands: Commands) {
     }, BackgroundColor(PANEL)));
 }
 
-fn draw_controls(pads: Query<&Gamepad>, mut text: Query<&mut Text, With<ControlHints>>) {
+fn draw_controls(
+    pads: Query<&Gamepad>,
+    sound: Res<crate::sound::Sound>,
+    mut text: Query<&mut Text, With<ControlHints>>,
+) {
     let hint = if pads.is_empty() {
         "WASD / Arrows  Drive    Space  Handbrake    R  Restart\nG  Ghost    Scroll  Zoom    Esc  Pause"
     } else {
         "Left stick  Steer    A  Gas    X  Brake    B  Handbrake    RB  Reset\nStart  Pause    LB  Garage    View  Circuits    Y  Ghost"
     };
+    let hint = format!(
+        "{hint}\nM  Omarchy: {}    F8  Sound: {}",
+        sound.station(),
+        if sound.muted { "muted" } else { "on" }
+    );
     if let Ok(mut text) = text.single_mut()
         && text.0 != hint
     {
-        text.0 = hint.into();
+        text.0 = hint;
     }
 }
 
