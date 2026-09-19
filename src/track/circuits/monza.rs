@@ -16,7 +16,7 @@ pub(super) const CIRCUIT: Circuit = Circuit {
     // the car by less than half a road width. The road is 3.3 m now and the
     // Rettifilo is a chicane again without being told to be.
     corners: 1.0,
-    lap: 762.7,
+    lap: 685.7,
     plan_scale: 1.0,
     centreline: CENTRELINE,
     crossings: &[],

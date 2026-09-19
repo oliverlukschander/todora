@@ -2,6 +2,16 @@
 
 A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy.org/). Drive a comic shooting-brake around forty scaled real circuits, with **T** for the list of them.
 
+[Download Todora 0.6.0 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.6.0/Todora.dmg) · [Release notes](docs/releases/v0.6.0.md)
+
+Cars are now **25% smaller**, with matching wheel contacts and ghost models. Every road is **3.6 m wide** including kerbs (previously 3.3 m), with 2.94 m of asphalt. Runoff and corner plaques are sized for the smaller cars.
+
+All forty laps are shorter: most by about 10%, with smaller reductions on the tightest circuits to keep the roads separate. Finished laps range from 446 m at Magny-Cours to 1,807 m at Baku. The shared plan scale is 0.12 and the elevation scale is 0.252; corner opening targets 4.5 m. The menu lists the rebuilt lengths. Surface fingerprints automatically reject ghosts recorded on the previous layouts.
+
+## Design history
+
+The notes and benchmark figures below record earlier proportions and tuning. The current dimensions are above; `cargo test --locked --lib the_circuits -- --ignored --nocapture` reports the current circuits.
+
 The car is the ruler (~2.4 m long, ~1.1 m wide). Almost every circuit is shrunk the same way — the same 0.4⁄3 in plan, the same 0.28 in elevation, the same 3.3 m road — so they are comparable: laps run from Magny-Cours' 497 m to Spa's 1,011 m, and Spa is half again as long as Spielberg in life and comes out half again as long here. Scaling each circuit to a target length instead would have made the long ones tighter and the short ones emptier, and the same lap time would have meant a different thing on each.
 
 Five of them are not shrunk the same way, and that is the one place this promise is broken on purpose. Baku, Monaco, Miami, Jeddah and Suzuka come within a couple of metres of themselves somewhere — round the old town walls, at the harbour, in the stadium car park, on the corniche, at the hairpin — and no road narrow enough to fit there is a road. So each carries a multiplier of its own on top of the shared scale, the smallest that makes room: Baku 2.45, Monaco 1.6, Miami 1.45, Jeddah 1.2, Suzuka 1.1. Seconds, metres, the car and the road stay common between all forty; the ratio of one lap's length to another's does not, and Baku at 1,930 m is now more than twice Spa. The circuit menu shows every lap length for that reason, and a record is never divided by a multiplier to compare it with another — cornering and acceleration do not scale linearly, so a lap of Baku over 2.45 is not a lap of anything.

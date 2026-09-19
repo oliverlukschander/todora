@@ -14,7 +14,7 @@ pub(super) const CIRCUIT: Circuit = Circuit {
     // to keep its corners from being driven straight through. See `monza`: the
     // narrower road gave every circuit its corners back.
     corners: 1.0,
-    lap: 901.5,
+    lap: 809.3,
     plan_scale: 1.0,
     centreline: CENTRELINE,
     crossings: &[],

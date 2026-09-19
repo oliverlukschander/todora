@@ -19,7 +19,7 @@ pub(super) const CIRCUIT: Circuit = Circuit {
     // The shared plan scale. Raise it only if the circuit cannot carry a road
     // and a shoulder at 1, and only as far as it has to be raised: see
     // `Circuit::plan_scale` for what a multiplier gives up.
-    lap: 545.6,
+    lap: 489.1,
     plan_scale: 1.0,
     centreline: CENTRELINE,
     crossings: &[],

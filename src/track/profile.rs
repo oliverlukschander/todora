@@ -29,32 +29,9 @@ use bevy::{
 use super::markers;
 use super::ribbon::{Ribbon, Station};
 
-/// Half of the 3.3 m road, kerbs and edge lines included.
-///
-/// The road used to be 8 m, and 8 m was the thing every other compromise in the
-/// game was paying for. The plan is shrunk about seven and a half times and the
-/// road was not, so it came out five times too wide for the land it was laid
-/// on: corners had to be exaggerated before they were corners at all, a circuit
-/// needed 5.5 m either side of its centreline before it could be built, and
-/// more than half of the source's circuits could not be. At 3.3 m the road is
-/// three cars wide rather than seven — half again as generous as a real circuit
-/// is, in car widths, instead of two and a half times as generous — and the
-/// land it is laid on is nearly big enough for it.
-///
-/// It is not the old road multiplied. The kerb and the edge line are sized for
-/// what they are, because a kerb scaled by 0.41 is a strip a wheel cannot land
-/// on and a line scaled by 0.41 is too thin to see; what gives instead is the
-/// asphalt, which had 2.6 m of room either side of the car and now has 0.86.
-pub(crate) const HALF_WIDTH: f32 = 1.65;
-/// Half-width of the asphalt itself: the kerbs and edge lines sit inside
-/// [`HALF_WIDTH`], so this is where a wheel starts rumbling.
-///
-/// What is left after the kerb and the line, and what it has to leave is a car:
-/// the outside of the outer tyre is [`ROLLING_HALF`] from the middle, so this
-/// is 0.86 m of asphalt either side of a car sitting on the centreline. That is
-/// the number the narrower road actually costs, and it is why the kerb is worth
-/// keeping wide — a driver who runs out of asphalt here lands on a kerb rather
-/// than in the grass.
+/// Half of the 3.6 m road, kerbs and edge lines included.
+pub(crate) const HALF_WIDTH: f32 = 1.8;
+/// Asphalt ends where the edge line and kerb begin.
 pub(super) const TARMAC_HALF: f32 = HALF_WIDTH - KERB_WIDTH - LINE_WIDTH;
 /// Where the white edge line stops and the kerb begins.
 const KERB_INNER: f32 = HALF_WIDTH - KERB_WIDTH;
@@ -74,15 +51,8 @@ const _: () = assert!(TARMAC_HALF > 2.0 * ROLLING_HALF);
 const _: () = assert!(KERB_WIDTH > crate::car::WHEEL_WIDTH);
 /// Height of the kerb's outer lip, which the verge hangs off.
 pub(super) const KERB_TOP: f32 = 0.05;
-/// How far the verge reaches beyond the kerb on a circuit with room for all of
-/// it. A stretch of circuit with less gets less — see [`Profile::fit`].
-///
-/// Sized against the car rather than against the road, because what a verge is
-/// for is somewhere to put a car that has run out of road: a spun one is 2.4 m
-/// long and this is most of that. Scaling the old 3 m down with the road would
-/// have left 1.2 m, which is a car's width of grass and nowhere to have an
-/// accident.
-pub(super) const VERGE: f32 = 2.0;
+/// Runoff for the smaller car; tighter sections use less, via [`Profile::fit`].
+pub(super) const VERGE: f32 = 1.5;
 /// The whole cross-section at its widest, either side of the centreline.
 pub(super) const EDGE: f32 = HALF_WIDTH + VERGE;
 /// How much of the verge is grass before the lip it falls away over.
@@ -155,7 +125,7 @@ const TAPER: f32 = 0.25;
 /// The old figure admitted none of the six circuits that fail for want of room,
 /// and it was not measuring anything: 1.5 m of grass is pleasant, and a circuit
 /// is not unbuildable for having 1.4.
-const LEAST_VERGE: f32 = 0.75;
+const LEAST_VERGE: f32 = 0.5;
 const _: () = assert!(LEAST_VERGE >= super::WALL_INSET);
 const _: () = assert!(GRASS_OF_VERGE * LEAST_VERGE >= markers::ROOM);
 /// One kerb stripe and the start/finish paint, in stations. [`ribbon::STEP`] is
@@ -711,11 +681,11 @@ mod tests {
     ///
     /// Written out rather than derived, because everything else in this module
     /// derives it and a table that checks its own derivation checks nothing.
-    /// This is the road: 3.3 m across the outsides of the kerbs, of which
-    /// 2.64 m is asphalt, a white line 0.08 m wide either side of that, and a
-    /// kerb 0.25 m wide outside each line standing 5 cm proud. Then two metres
-    /// of verge, grass for the first 1.33 and a lip for the last 0.67, arriving
-    /// at −0.62 m.
+    /// This is the road: 3.6 m across the outsides of the kerbs, of which
+    /// 2.94 m is asphalt, a white line 0.08 m wide either side of that, and a
+    /// kerb 0.25 m wide outside each line standing 5 cm proud. Then 1.5 metres
+    /// of verge, grass for the first metre and a lip for the last half, arriving
+    /// at −0.45 m.
     ///
     /// That the asphalt holds the whole car and the kerb holds a wheel — the
     /// reason the road was cut up this way rather than multiplied down from the
@@ -723,16 +693,16 @@ mod tests {
     #[test]
     fn a_full_verge_is_the_section_it_says_it_is() {
         let was: &[(f32, f32, Band)] = &[
-            (-3.65000, -0.61667, Band::Skirt),
-            (-2.98333, -0.11667, Band::Grass),
-            (-1.65000, 0.05, Band::Kerb),
-            (-1.40000, 0.00, Band::Line),
-            (-1.32000, 0.00, Band::Tarmac),
-            (1.32000, 0.00, Band::Line),
-            (1.40000, 0.00, Band::Kerb),
-            (1.65000, 0.05, Band::Grass),
-            (2.98333, -0.11667, Band::Skirt),
-            (3.65000, -0.61667, Band::End),
+            (-3.30000, -0.45000, Band::Skirt),
+            (-2.80000, -0.07500, Band::Grass),
+            (-1.80000, 0.05, Band::Kerb),
+            (-1.55000, 0.00, Band::Line),
+            (-1.47000, 0.00, Band::Tarmac),
+            (1.47000, 0.00, Band::Line),
+            (1.55000, 0.00, Band::Kerb),
+            (1.80000, 0.05, Band::Grass),
+            (2.80000, -0.07500, Band::Skirt),
+            (3.30000, -0.45000, Band::End),
         ];
         let now = section(VERGE, VERGE);
         assert_eq!(now.len(), was.len());
@@ -824,7 +794,9 @@ mod tests {
             let n = track.ribbon.stations().len();
             let profile = &track.profile;
             let (narrowest, widest) = profile.span();
-            if narrowest == widest {
+            // Apply the same centimetre tolerance as the asymmetry check:
+            // a 3 mm trim cannot produce a 10 mm difference between sides.
+            if widest - narrowest <= 0.01 {
                 continue;
             }
             anywhere = true;
@@ -1147,7 +1119,7 @@ mod tests {
     /// clearances, on grass that is two thirds of the verge. Lowering it is not
     /// the same as removing it, and this is what says so — an oval whose two
     /// straights run 4.2 m apart has 1.85 m of cross-section to give against a
-    /// road that is 1.65 m to the kerb, and it is turned away with the place
+    /// road that is 1.8 m to the kerb, and it is turned away with the place
     /// named. Widen the same oval to 6 m and it is a circuit.
     #[test]
     fn a_circuit_with_nowhere_to_put_a_shoulder_is_still_refused() {

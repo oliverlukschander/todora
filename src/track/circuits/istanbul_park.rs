@@ -16,7 +16,7 @@ pub(super) const CIRCUIT: Circuit = Circuit {
     // it is a corner, and a circuit wound tightly on itself has less room to do
     // it in than one made of straights.
     corners: 1.0,
-    lap: 684.6,
+    lap: 613.0,
     plan_scale: 1.0,
     centreline: CENTRELINE,
     crossings: &[],

@@ -21,7 +21,7 @@ pub(super) const CIRCUIT: Circuit = Circuit {
     // within 3.5 m of itself. At a 5 m corner target it now keeps four fifths
     // of its lap where it used to keep a quarter, so the shrink is no longer
     // what stops it — the gap at the harbour is.
-    lap: 650.0,
+    lap: 583.2,
     plan_scale: 1.6,
     centreline: CENTRELINE,
     crossings: &[],

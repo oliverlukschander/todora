@@ -62,6 +62,11 @@ def constants():
         if not match:
             raise RuntimeError(f"{name} moved; review the probe before trusting it")
         found[name] = match[1].strip()
+    source = (ROOT / "src/track/mod.rs").read_text()
+    match = re.search(r"^const PLAN_SCALE: f32 = ([^;]+);", source, re.M)
+    if not match:
+        raise RuntimeError("PLAN_SCALE moved; review the probe before trusting it")
+    found["PLAN_SCALE"] = match[1].strip()
     return found
 
 
@@ -177,7 +182,7 @@ min_radius,narrowest,widest,carries");
     for (id, name, corners, scale, raw, points) in DATA {
         let control: Vec<Vec3> = points
             .iter()
-            .map(|p| Vec3::new(p[0] * (0.4 / 3.0) * scale, 0.0, p[2] * (0.4 / 3.0) * scale))
+            .map(|p| Vec3::new(p[0] * PLAN_SCALE * scale, 0.0, p[2] * PLAN_SCALE * scale))
             .collect();
         // No bridges. Heights are zero here, so a bridge would have nothing to
         // lift the road over; what the screen reports instead is that one is

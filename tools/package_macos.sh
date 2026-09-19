@@ -17,7 +17,7 @@ VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
 APP="dist/$NAME.app"
 RES="$APP/Contents/Resources"
 
-cargo build --release
+cargo build --release --locked
 
 rm -rf "$APP" dist/dmg "dist/$NAME.dmg" dist/AppIcon.iconset dist/todora.svg.png
 mkdir -p "$APP/Contents/MacOS" "$RES"

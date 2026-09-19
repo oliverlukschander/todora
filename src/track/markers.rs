@@ -18,9 +18,9 @@ const SMOOTH: usize = 9;
 /// Original layout spacing; every other position is retained for display.
 const SPACING: usize = 11;
 const APPROACH: usize = 5;
-/// Keep the existing footprint allowance and shoulder clearance.
-pub(super) const HALF: f32 = 0.20;
-pub(super) const CLEAR: f32 = 0.05;
+/// Compact plaques leave room for the wider road at tight passages.
+pub(super) const HALF: f32 = 0.12;
+pub(super) const CLEAR: f32 = 0.04;
 pub(super) const ROOM: f32 = 2.0 * (HALF + CLEAR);
 const OUT: f32 = 0.5;
 const LIFT: f32 = 0.015;
@@ -197,14 +197,14 @@ fn plaque(track: &Track, at: usize, side: f32) -> Mesh {
         }
     };
     let edge = [
-        (-0.15, -HALF),
-        (0.15, -HALF),
-        (HALF, -0.15),
-        (HALF, 0.15),
-        (0.15, HALF),
-        (-0.15, HALF),
-        (-HALF, 0.15),
-        (-HALF, -0.15),
+        (-HALF * 0.75, -HALF),
+        (HALF * 0.75, -HALF),
+        (HALF, -HALF * 0.75),
+        (HALF, HALF * 0.75),
+        (HALF * 0.75, HALF),
+        (-HALF * 0.75, HALF),
+        (-HALF, HALF * 0.75),
+        (-HALF, -HALF * 0.75),
     ];
     for i in 0..edge.len() {
         let (a, b) = (edge[i], edge[(i + 1) % edge.len()]);
@@ -221,7 +221,7 @@ fn plaque(track: &Track, at: usize, side: f32) -> Mesh {
         [(-0.11, 0.0), (0.11, -0.12), (0.11, -0.06), (-0.01, 0.0)],
         [(-0.11, 0.0), (-0.01, 0.0), (0.11, 0.06), (0.11, 0.12)],
     ] {
-        let p = arm.map(|(x, z)| point(x * side, z, 0.002));
+        let p = arm.map(|(x, z)| point(x * side * (HALF / 0.20), z * (HALF / 0.20), 0.002));
         for face in [[p[0], p[1], p[2]], [p[0], p[2], p[3]]] {
             triangle(face, paint(CHEVRON.0, CHEVRON.1, CHEVRON.2));
         }

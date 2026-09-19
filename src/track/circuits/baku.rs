@@ -18,12 +18,10 @@ pub(super) const CIRCUIT: Circuit = Circuit {
     corners: 1.0,
     // Baku is 6 km of city street and the tightest of it runs the old town
     // twice over, out past the castle and back within a few metres of itself.
-    // At the shared scale that pinch allows 0.98 m of cross-section against the
-    // 2.40 m a road and a shoulder need, and no corner target rescues it — the
-    // gap is the gap. 2.45 is the smallest multiplier that opens it, and it
-    // costs the longest lap in the game by half again.
-    lap: 1930.2,
-    plan_scale: 2.45,
+    // Its multiplier keeps the wider road and shoulder separate at that
+    // pinch. Combined with the smaller shared scale, the lap is still shorter.
+    lap: 1807.3,
+    plan_scale: 2.55,
     centreline: CENTRELINE,
     crossings: &[],
 };

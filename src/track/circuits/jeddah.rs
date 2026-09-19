@@ -23,8 +23,8 @@ pub(super) const CIRCUIT: Circuit = Circuit {
     // the lap, and its tightest came out at 2.25 m rather than the 10 asked
     // for, which is the corner-opening pass failing to converge rather than
     // succeeding narrowly.
-    lap: 976.7,
-    plan_scale: 1.2,
+    lap: 915.2,
+    plan_scale: 1.25,
     centreline: CENTRELINE,
     crossings: &[],
 };

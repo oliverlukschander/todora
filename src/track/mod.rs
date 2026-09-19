@@ -39,20 +39,11 @@ pub(crate) use circuits::Circuit;
 use profile::{HALF_WIDTH, Profile};
 use ribbon::{Overpass, Ribbon};
 
-/// The car is the ruler: ~2.4 m long, ~1.1 m wide, 1 unit = 1 metre. Every
-/// circuit is scaled by this, so a longer circuit makes a longer lap rather than
-/// a bigger world, and a lap time means the same thing wherever it was set.
-///
-/// A few circuits are scaled by this *and* by a multiplier of their own,
-/// because no amount of narrowing the road makes them fit at the shared scale.
-/// See [`Circuit::plan_scale`], which is also where what that gives up is
-/// written down.
-const PLAN_SCALE: f32 = 0.4 / 3.0;
-/// Elevation as a fraction of the real circuit, then smoothed and grade-capped.
-/// The plan is scaled far harder than this, so the hills come out steeper than
-/// real by the ratio of the two: at 0.4 that was three times, and every descent
-/// arrived at its corner too fast to take. This still rolls.
-const HEIGHT_SCALE: f32 = 0.28;
+/// Shared plan scale; cramped circuits also apply [`Circuit::plan_scale`].
+/// Ten percent shorter than the previous 0.4 / 3.0 scale.
+const PLAN_SCALE: f32 = 0.12;
+/// Shrink elevation with the plan so shorter laps retain their hill gradients.
+const HEIGHT_SCALE: f32 = 0.252;
 /// How thick a bridge deck is: the road above, and the structure it is carried
 /// on, between the surface the car drives on and the soffit the car below
 /// drives under.
@@ -116,7 +107,7 @@ const A_DECK_APART: f32 = 1.0;
 
 /// How far inside the edge of the loft the car is held. It may run wide onto the
 /// verge, but not off into the sky.
-const WALL_INSET: f32 = 0.6;
+const WALL_INSET: f32 = 0.45;
 /// Fraction of the impact the wall gives back. Absorbing it all lets a car that
 /// spun in nose-first sit there with its wheels spinning, because everything it
 /// does is outward and everything outward is deleted.
@@ -126,22 +117,9 @@ const BOUNCE: f32 = 0.45;
 /// no barrier at all.
 const RESCUE_AFTER: f32 = 1.6;
 const GOING_NOWHERE: f32 = 1.5;
-/// How far before the start/finish line the car is set down, so that a lap
-/// begins at speed instead of from a standstill.
-///
-/// It takes 45 m to reach 20 m/s, and 20 m/s is as good as this is going to get:
-/// the car settles at 22.2 m/s on the flat, not at the 24 of `top_speed`, which
-/// is only where the engine's push fades to nothing — drag and rolling
-/// resistance are still there when it does. The last tenth costs another 65 m.
-///
-/// And 65 m is not there to spend. The run-up wants to be straight, or the car
-/// arrives at the line slower for having cornered on the way, and a straight is
-/// what the circuits have least of behind their lines: Spielberg has 48 m of it,
-/// Monza 97, and Silverstone barely any, because its line is on the Hamilton
-/// Straight and Club is 45 m behind it. At 45 every circuit sets the car down
-/// pointing very nearly the way the line does; at 75 Spielberg sets it down
-/// sideways, mid-corner. `the_grid_is_a_run_up_to_the_line` is what holds that.
-const RUN_UP: f32 = 45.0;
+/// Run-up to the line, shortened with the circuit so the grid stays on the
+/// same approach. Driving tests check that every circuit reaches it at speed.
+const RUN_UP: f32 = 40.5;
 /// How much of a lap may sit at [`ribbon::MAX_GRADE`] before the cap has
 /// stopped backing the hills up and started being their shape. At the cap the
 /// game ships with, the worst circuit is Spa at 16%, then Imola at 9% and

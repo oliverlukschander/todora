@@ -19,11 +19,11 @@ pub(super) const CIRCUIT: Circuit = Circuit {
     // What one lap comes out as once the circuit has been shrunk and had its
     // corners opened. Run `cargo test --locked --lib the_menu_shows_the_lap`
     // and write down the figure it asks for.
-    lap: 808.4,
+    lap: 768.1,
     // The shared plan scale. Raise it only if the circuit cannot carry a road
     // and a shoulder at 1, and only as far as it has to be raised: see
     // `Circuit::plan_scale` for what a multiplier gives up.
-    plan_scale: 1.1,
+    plan_scale: 1.16,
     centreline: CENTRELINE,
     // Where the circuit passes over itself. Almost none do; see `Crossing`, and
     // `screen_tracks.py`, whose `finished_crossings` column is what says

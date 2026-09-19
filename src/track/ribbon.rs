@@ -20,26 +20,10 @@ const PERIOD: usize = 4;
 const CTRL_STEP: f32 = 6.0;
 /// Samples per spline segment, before the arc-length resample.
 const SUB: usize = 6;
-/// No corner may be tighter than this. A parallel curve offset by `w` stays
-/// regular only while `w` is inside the radius of curvature; past that it cusps
-/// and folds back through itself. Scaled to ⅓, Spielberg's hairpins come out at
-/// well under a metre of radius, so the corners have to be opened before the
-/// road can carry its width through them.
-///
-/// Opening a corner cuts it, and this is what decides how much gets cut. At
-/// 10 m it cut a great deal: more than a third of the source's circuits were
-/// rounded off into rings rather than shrunk, Monaco worst of all at a quarter
-/// of its lap kept. It had to be 10 m because the road was 8 m wide and the
-/// outermost rib of the cross-section has to stay inside the radius of the
-/// corner it is being swept round. The road is 3.3 m now, so the target can be
-/// 5 m, and at 5 m every circuit in the source keeps more than four fifths of
-/// its lap: the worst is Monaco at 81%, against 25%.
-///
-/// It is not the *only* thing the cross-section is checked against — see
-/// [`Ribbon::room`], which measures the corner here rather than the tightest
-/// one anywhere. This is what the corner-opening pass promises the fit it will
-/// deliver, and `every_circuit_carries_a_road` is what says it did.
-pub(crate) const MIN_RADIUS: f32 = 5.0;
+/// Open tight corners before lofting. This shrinks with the plan to preserve
+/// chicanes and hairpins; the local profile fit still checks every road edge
+/// against curvature and neighbouring sections before accepting a circuit.
+pub(crate) const MIN_RADIUS: f32 = 4.5;
 /// Rise over run, after smoothing. The DEM heights are quantised to whole metres
 /// and the plan is scaled far harder than the elevation, so a single 1 m DEM step
 /// otherwise lands inside one station and reads as a wall.

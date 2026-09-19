@@ -19,8 +19,8 @@ pub(super) const CIRCUIT: Circuit = Circuit {
     // Miami wraps the stadium car park in a knot of switchbacks that come back
     // alongside themselves twice. 1.70 m of cross-section at the tightest of
     // them, against the 2.40 m a road and a shoulder need.
-    lap: 1024.9,
-    plan_scale: 1.45,
+    lap: 966.3,
+    plan_scale: 1.52,
     centreline: CENTRELINE,
     crossings: &[],
 };

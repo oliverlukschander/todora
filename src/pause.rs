@@ -292,17 +292,20 @@ mod tests {
     #[test]
     fn esc_stops_the_car_and_the_clock_together_and_enter_starts_them_again() {
         let mut app = game();
-        // Far enough to be past the line with the clock actually running, and
-        // no further: the throttle is held down and nothing is steering, so on
-        // a 3.3 m road the car is in the barrier shortly afterwards, and a car
-        // in the barrier is not a car that can be seen to start again.
-        run(&mut app, 400);
+        // Stop at the crossing, while the car is still moving. Its timing
+        // depends on the current grid placement and circuit geometry.
+        for _ in 0..400 {
+            run(&mut app, 1);
+            if app.world().resource::<LapTimer>().running() {
+                break;
+            }
+        }
         assert!(
             app.world().resource::<LapTimer>().running(),
             "the car never reached the line, so there is no clock to stop"
         );
         let rolling = where_is_the_car(&mut app);
-        assert!(rolling.distance(Track::any().start_transform().translation) > 45.0);
+        assert!(rolling.distance(Track::any().start_transform().translation) > 40.0);
 
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()

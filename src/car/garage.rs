@@ -59,7 +59,7 @@ const TOURER: Handling = Handling::SHOOTING_BRAKE;
 const CLUBMAN: Handling = Handling {
     grip: 14.8,
     downforce: 0.00981,
-    top_speed: 21.5,
+    top_speed: 21.8,
     ..Handling::SHOOTING_BRAKE
 };
 
