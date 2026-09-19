@@ -13,6 +13,11 @@ pub(crate) const FRONT: Color = Color::srgba(0.045, 0.06, 0.073, 0.98);
 const AHEAD: Color = Color::srgb(0.38, 0.86, 0.42);
 const BEHIND: Color = Color::srgb(0.96, 0.32, 0.26);
 
+/// Arcade speedometer calibration for the miniature world. On a flat straight,
+/// Clubman / Tourer / Express settle near 217 / 240 / 298 displayed km/h.
+/// Shared by all cars and independent of model size; physics stays in m/s.
+const DISPLAY_SPEED_SCALE: f32 = 3.0;
+
 /// Side of the g-meter's square, in pixels, and the reading that reaches its
 /// edge. Tyres give up somewhere near 1.2 g, so a needle on the rim means the
 /// car is at the limit.
@@ -365,7 +370,7 @@ fn draw_g_meter(
     if let Ok(mut text) = speed.single_mut() {
         // A hill adds a lot of speed, and a corner that will not come round is
         // usually a corner arrived at too fast. Worth being able to see.
-        text.0 = format!("{:.0}", car.velocity.length() * 3.6);
+        text.0 = format!("{:.0}", car.velocity.length() * 3.6 * DISPLAY_SPEED_SCALE);
     }
     let reading = (car.g_force / FULL_SCALE).clamp_length_max(1.0) * (METER - NEEDLE) / 2.0;
     if let Ok(mut node) = needle.single_mut() {
