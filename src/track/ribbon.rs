@@ -64,6 +64,10 @@ const RELAX_PASSES: usize = 1200;
 const RELAX_STEPS: usize = 12;
 /// How far a too-tight station moves toward its neighbours' midpoint per step.
 const RELAX_RATE: f32 = 0.5;
+/// Segments in a leaf of [`Index`]. Descending costs a box test per node, and
+/// under about this many segments that test costs more than the projections it
+/// saves.
+const LEAF: usize = 8;
 
 /// One cross-section of the circuit.
 #[derive(Clone, Copy)]
@@ -88,6 +92,7 @@ pub struct Station {
 /// The closed centreline, ready to loft.
 pub struct Ribbon {
     stations: Vec<Station>,
+    index: Index,
     length: f32,
     kept: f32,
 }
@@ -196,7 +201,34 @@ impl Ribbon {
     /// neighbours. Half of this is the widest the cross-section can reach before
     /// the verge of one stretch grows through the verge of another — the bound a
     /// per-station curvature check cannot see, because nothing is wrong locally.
+    ///
+    /// Every pair of stations is a comparison, and every circuit in the game is
+    /// built at least once per test that walks them, so this asks [`Index`] for
+    /// each station's nearest non-neighbour rather than measuring against all of
+    /// them. The answer is the same one — `the_index_agrees_with_the_walk` holds
+    /// both halves of that to the exhaustive version.
     pub fn min_separation(&self) -> f32 {
+        let n = self.stations.len();
+        let skip = (APART / STEP) as usize;
+        // Nothing on this circuit is [`APART`] from anything: the whole lap is
+        // its own neighbourhood, so there is no pair to measure. Monaco at this
+        // scale is 105 m round and every station of it is within 60 m of every
+        // other. That is not room to spare, it is no answer at all.
+        if n / 2 < skip {
+            return f32::MAX;
+        }
+        let mut best = f32::MAX;
+        for i in 0..n {
+            self.index.nearest_apart(&self.stations, i, skip, &mut best);
+        }
+        if best == f32::MAX { best } else { best.sqrt() }
+    }
+
+    /// The same closest approach, measured against every pair. The oracle the
+    /// indexed answer is held to, and slow enough to be worth keeping out of
+    /// the game.
+    #[cfg(test)]
+    pub(crate) fn min_separation_exhaustively(&self) -> f32 {
         let n = self.stations.len();
         let skip = (APART / STEP) as usize;
         let mut best = f32::MAX;
@@ -213,21 +245,44 @@ impl Ribbon {
         best
     }
 
-    /// Nearest point on the centreline. A linear scan of the stations, which is
-    /// well under a millisecond for the handful of callers that ask each frame.
+    /// Nearest point on the centreline.
+    ///
+    /// Asked of every wheel, every skid sample, the camera, the clock and the
+    /// ghost, several times per fixed step — so it is asked through [`Index`]
+    /// rather than by projecting the car onto all thirteen hundred segments of
+    /// the lap. The answer is the walk's answer, tie for tie.
     pub fn locate(&self, pos: Vec3) -> Fix {
+        match self.index.nearest(&self.stations, pos) {
+            Some((at, t)) => self.fix(pos, at, t),
+            // Every segment degenerate, which no built circuit is: the resample
+            // spaces them and the relax pass cannot bring two together. Sitting
+            // on station zero is the one answer that cannot be wrong about
+            // something that does not exist.
+            None => Fix {
+                point: self.stations[0].pos,
+                tangent: self.stations[0].tangent,
+                right: self.stations[0].right,
+                lateral: 0.0,
+                slope: self.stations[0].slope,
+                curvature: self.stations[0].curvature,
+                s: 0.0,
+            },
+        }
+    }
+
+    /// The same nearest point, found by projecting onto every segment in turn.
+    ///
+    /// This is what [`Ribbon::locate`] used to be, kept as the oracle the index
+    /// is measured against rather than as a comment claiming they agree. It also
+    /// fixes what "agree" means where two segments are exactly equally near: the
+    /// walk takes the first of them, so the index has to as well, or a car
+    /// straddling a seam would sit on one segment under test and the other in
+    /// the game.
+    #[cfg(test)]
+    pub(crate) fn locate_exhaustively(&self, pos: Vec3) -> Fix {
         let n = self.stations.len();
-        let step = self.length / n as f32;
         let mut best = f32::MAX;
-        let mut fix = Fix {
-            point: self.stations[0].pos,
-            tangent: self.stations[0].tangent,
-            right: self.stations[0].right,
-            lateral: 0.0,
-            slope: self.stations[0].slope,
-            curvature: self.stations[0].curvature,
-            s: 0.0,
-        };
+        let mut found = None;
         for i in 0..n {
             let a = &self.stations[i];
             let b = &self.stations[(i + 1) % n];
@@ -237,30 +292,59 @@ impl Ribbon {
                 continue;
             }
             let t = (flat(pos - a.pos).dot(ab) / len2).clamp(0.0, 1.0);
-            let point = a.pos + (b.pos - a.pos) * t;
-            let d = flat(pos - point).length_squared();
+            let d = flat(pos - (a.pos + (b.pos - a.pos) * t)).length_squared();
             if d < best {
                 best = d;
-                let right = a.right.lerp(b.right, t).normalize_or(a.right);
-                fix = Fix {
-                    point,
-                    tangent: a.tangent.lerp(b.tangent, t).normalize_or(a.tangent),
-                    right,
-                    lateral: flat(pos - point).dot(right),
-                    slope: a.slope.lerp(b.slope, t),
-                    curvature: a.curvature.lerp(b.curvature, t),
-                    s: a.s + step * t,
-                };
+                found = Some((i, t));
             }
         }
-        fix
+        match found {
+            Some((at, t)) => self.fix(pos, at, t),
+            None => self.locate(pos),
+        }
+    }
+
+    /// How many segments a lookup had to project onto to answer.
+    ///
+    /// The evidence that the index is worth having, and a count rather than a
+    /// clock: it reads the same on a loaded machine as on an idle one, so it can
+    /// be asserted on instead of watched. `the_index_looks_at_little_of_the_lap`
+    /// is what holds it.
+    #[cfg(test)]
+    pub(crate) fn projections(&self, pos: Vec3) -> usize {
+        let mut counted = 0;
+        self.index
+            .nearest_counting(&self.stations, pos, &mut counted);
+        counted
+    }
+
+    /// The fix `t` of the way along segment `at`, as seen from `pos`.
+    ///
+    /// One place, so the index and the walk cannot differ in how they read a
+    /// segment they both chose — only in which segment they chose.
+    fn fix(&self, pos: Vec3, at: usize, t: f32) -> Fix {
+        let n = self.stations.len();
+        let step = self.length / n as f32;
+        let a = &self.stations[at];
+        let b = &self.stations[(at + 1) % n];
+        let point = a.pos + (b.pos - a.pos) * t;
+        let right = a.right.lerp(b.right, t).normalize_or(a.right);
+        Fix {
+            point,
+            tangent: a.tangent.lerp(b.tangent, t).normalize_or(a.tangent),
+            right,
+            lateral: flat(pos - point).dot(right),
+            slope: a.slope.lerp(b.slope, t),
+            curvature: a.curvature.lerp(b.curvature, t),
+            s: a.s + step * t,
+        }
     }
 
     fn from_polyline(line: Vec<Vec3>) -> Self {
         let n = line.len();
         let length = closed_length(&line);
         let step = length / n as f32;
-        let stations = (0..n)
+        let stations: Vec<Station> = (0..n)
             .map(|i| {
                 let tangent = flat(line[(i + 1) % n] - line[(i + n - 1) % n]).normalize_or(Vec3::X);
                 let (behind, ahead) = (line[(i + n - 1) % n], line[(i + 1) % n]);
@@ -275,11 +359,242 @@ impl Ribbon {
             })
             .collect();
         Self {
+            index: Index::new(&stations),
             stations,
             length,
             kept: 1.0,
         }
     }
+}
+
+/// Where the circuit is, indexed.
+///
+/// Finding what the car is standing on used to mean projecting it onto every
+/// segment of the lap — thirteen hundred of them on Spielberg, for one answer
+/// about one of them, several times per fixed step. This is the same answer
+/// reached by looking: a tree of plan bounding boxes over runs of consecutive
+/// segments, descended only into the boxes that could still hold something
+/// nearer than the best found so far.
+///
+/// Runs of *consecutive* segments, rather than a spatial split of them, because
+/// a road is a curve: a stretch of one is compact in plan, so its box is tight,
+/// and the runs fall out of the lap itself with nothing to sort.
+///
+/// The nearer child is descended first, which is where nearly all of the saving
+/// is — reaching the stretch the car is actually on before opening anything else
+/// makes the best distance small immediately, and a small best is what prunes
+/// the rest of the lap. Descending in lap order instead leaves the best at
+/// infinity until the walk happens to arrive somewhere near, and Albert Park
+/// then projects a fifth of itself rather than a fortieth.
+///
+/// That ordering is no longer what settles a tie, so the tie is settled openly:
+/// of two segments exactly as near, the earlier one wins, which is what walking
+/// the stations in order did. A box exactly as far as the best is opened rather
+/// than pruned, so an earlier tie is never missed. It matters because a car
+/// straddling a seam must read the same segment here as it would have before,
+/// not the other one.
+///
+/// Built once, with the ribbon, and never changed — the shape of the circuit is
+/// settled by the time there is a station to index. The bounds are plan only,
+/// because every distance this answers is measured in plan.
+struct Index {
+    nodes: Vec<Bounds>,
+}
+
+/// One node: the plan bounds of a run of consecutive segments.
+struct Bounds {
+    min: Vec2,
+    max: Vec2,
+    /// The first segment in the run, and one past the last. Segment `i` runs
+    /// from station `i` to station `i + 1`, the closing one included.
+    from: u32,
+    to: u32,
+    /// The right child. The left is always the node straight after this one, so
+    /// only this one has to be written down, and zero marks a leaf — which is
+    /// unambiguous, because node zero is the root and is nobody's child.
+    right: u32,
+}
+
+impl Index {
+    /// Index every segment of the closed centreline, the closing one included.
+    fn new(stations: &[Station]) -> Self {
+        let mut index = Self { nodes: Vec::new() };
+        index.push(stations, 0, stations.len());
+        index
+    }
+
+    /// Write the node for segments `from..to` and everything under it, and say
+    /// where it went. Children first, so a node's box is the union of theirs.
+    fn push(&mut self, stations: &[Station], from: usize, to: usize) -> usize {
+        let at = self.nodes.len();
+        self.nodes.push(Bounds {
+            min: Vec2::MAX,
+            max: Vec2::MIN,
+            from: from as u32,
+            to: to as u32,
+            right: 0,
+        });
+        if to - from > LEAF {
+            let mid = from + (to - from) / 2;
+            self.push(stations, from, mid);
+            self.nodes[at].right = self.push(stations, mid, to) as u32;
+        }
+        let n = stations.len();
+        let (mut min, mut max) = (Vec2::MAX, Vec2::MIN);
+        for i in from..to {
+            for end in [stations[i].pos, stations[(i + 1) % n].pos] {
+                min = min.min(Vec2::new(end.x, end.z));
+                max = max.max(Vec2::new(end.x, end.z));
+            }
+        }
+        self.nodes[at].min = min;
+        self.nodes[at].max = max;
+        at
+    }
+
+    /// The nearest segment to `pos` in plan, and how far along it the nearest
+    /// point sits. `None` only if every segment is degenerate.
+    fn nearest(&self, stations: &[Station], pos: Vec3) -> Option<(usize, f32)> {
+        let mut best = (f32::MAX, None);
+        self.descend(stations, pos, 0, &mut best, &mut 0);
+        best.1
+    }
+
+    #[cfg(test)]
+    fn nearest_counting(
+        &self,
+        stations: &[Station],
+        pos: Vec3,
+        counted: &mut usize,
+    ) -> Option<(usize, f32)> {
+        let mut best = (f32::MAX, None);
+        self.descend(stations, pos, 0, &mut best, counted);
+        best.1
+    }
+
+    fn descend(
+        &self,
+        stations: &[Station],
+        pos: Vec3,
+        at: usize,
+        best: &mut (f32, Option<(usize, f32)>),
+        counted: &mut usize,
+    ) {
+        let node = &self.nodes[at];
+        if outside(node, pos) > slack(best.0) {
+            return;
+        }
+        if node.right == 0 {
+            let n = stations.len();
+            for i in node.from as usize..node.to as usize {
+                let (a, b) = (stations[i].pos, stations[(i + 1) % n].pos);
+                let ab = flat(b - a);
+                let len2 = ab.length_squared();
+                if len2 < 1e-9 {
+                    continue;
+                }
+                *counted += 1;
+                let t = (flat(pos - a).dot(ab) / len2).clamp(0.0, 1.0);
+                let d = flat(pos - (a + (b - a) * t)).length_squared();
+                let earlier = best.1.is_some_and(|(was, _)| i < was);
+                if d < best.0 || (d == best.0 && earlier) {
+                    *best = (d, Some((i, t)));
+                }
+            }
+            return;
+        }
+        let (left, right) = (at + 1, node.right as usize);
+        let (near, far) = if outside(&self.nodes[left], pos) <= outside(&self.nodes[right], pos) {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        self.descend(stations, pos, near, best, counted);
+        self.descend(stations, pos, far, best, counted);
+    }
+
+    /// Narrow `best` — a squared plan distance — to the nearest station at least
+    /// `skip` stations from `i` round the loop.
+    ///
+    /// Two ways for a node to be worth nothing here, and the second is the one
+    /// that matters: a run entirely inside `i`'s own neighbourhood has nothing
+    /// in it that may be measured against, however near it is. Without that the
+    /// walk would descend the whole of the stretch either side of every station,
+    /// which is most of the saving.
+    fn nearest_apart(&self, stations: &[Station], i: usize, skip: usize, best: &mut f32) {
+        self.walk_apart(stations, i, skip, 0, best);
+    }
+
+    fn walk_apart(&self, stations: &[Station], i: usize, skip: usize, at: usize, best: &mut f32) {
+        let node = &self.nodes[at];
+        let n = stations.len();
+        if all_near(i, node.from as usize, node.to as usize, n, skip)
+            || outside(node, stations[i].pos) > slack(*best)
+        {
+            return;
+        }
+        if node.right == 0 {
+            for j in node.from as usize..node.to as usize {
+                if far_enough(i, j, n, skip) {
+                    *best = best.min(flat(stations[j].pos - stations[i].pos).length_squared());
+                }
+            }
+            return;
+        }
+        let (left, right) = (at + 1, node.right as usize);
+        let at = stations[i].pos;
+        let (near, far) = if outside(&self.nodes[left], at) <= outside(&self.nodes[right], at) {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        self.walk_apart(stations, i, skip, near, best);
+        self.walk_apart(stations, i, skip, far, best);
+    }
+}
+
+/// Squared plan distance from `pos` to a node's box, and zero inside it. A box
+/// holds nothing nearer than this, so anything further away than the best found
+/// so far can be left unopened.
+fn outside(node: &Bounds, pos: Vec3) -> f32 {
+    let at = Vec2::new(pos.x, pos.z);
+    (at.clamp(node.min, node.max) - at).length_squared()
+}
+
+/// How far past the best a box has to be before it is pruned.
+///
+/// A box distance is a lower bound on what is inside it in exact arithmetic,
+/// and in `f32` it is that bound give or take a last place. Pruning has to be
+/// conservative about which way that lands, or the index and the walk part
+/// company over a rounding error — and the whole worth of the index is that
+/// they do not.
+fn slack(best: f32) -> f32 {
+    best * (1.0 + 1e-6) + 1e-9
+}
+
+/// Is `j` far enough round the loop from `i` for the two to be different parts
+/// of the circuit rather than the same part twice?
+fn far_enough(i: usize, j: usize, n: usize, skip: usize) -> bool {
+    let along = (j + n - i) % n;
+    along >= skip && n - along >= skip
+}
+
+/// Is every station in `from..to` inside `i`'s own neighbourhood?
+///
+/// Measured in distance round the loop from `i`, where a run of consecutive
+/// stations is one arc and the stations too near `i` to measure against are
+/// another — so this is one arc inside another, which is arithmetic rather than
+/// a loop over the run.
+fn all_near(i: usize, from: usize, to: usize, n: usize, skip: usize) -> bool {
+    let near = 2 * skip - 1;
+    if near >= n {
+        return true;
+    }
+    // The neighbourhood as an arc of distance-round-the-loop, running from just
+    // inside a whole lap back through zero.
+    let starts = (n - skip + 1) % n;
+    let offset = ((from + n - i) % n + n - starts) % n;
+    offset + (to - from) <= near
 }
 
 /// Drop the height: the cross-section and every distance along the lap are
@@ -439,5 +754,257 @@ fn cap_grade(line: &mut [Vec3]) {
             let cap = line[(i + 1) % n].y + rise;
             line[i].y = line[i].y.min(cap);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use super::*;
+    use crate::track::{Track, circuits};
+
+    /// Every circuit, so a new one has to clear the same bar as the old ones.
+    fn every_track() -> impl Iterator<Item = (&'static str, Track)> {
+        circuits::all()
+            .iter()
+            .map(|circuit| (circuit.name, Track::new(circuit)))
+    }
+
+    /// Positions worth asking about: the stations themselves, the seams between
+    /// them, both edges of the road, a spread of points off it, and somewhere
+    /// the circuit is not at all.
+    ///
+    /// The seams and the edges are the interesting ones. A station is the one
+    /// place two segments meet, so it is where a tie is nearly reached and where
+    /// picking the other segment would change `s` by a whole step; an edge is
+    /// where the fix is read from furthest off the centreline, which is where a
+    /// box has least to say about what is inside it.
+    fn probes(ribbon: &Ribbon) -> Vec<Vec3> {
+        let stations = ribbon.stations();
+        let n = stations.len();
+        let mut out = Vec::new();
+        for (i, station) in stations.iter().enumerate() {
+            out.push(station.pos);
+            out.push(station.pos + station.right * 7.0);
+            out.push(station.pos - station.right * 7.0);
+            out.push((station.pos + stations[(i + 1) % n].pos) * 0.5);
+            // Off the circuit entirely, at a spread of angles and distances
+            // that does not line up with the stations.
+            let turn = i as f32 * 0.7;
+            let reach = 12.0 + (i % 37) as f32 * 4.0;
+            out.push(station.pos + Vec3::new(turn.cos(), 0.0, turn.sin()) * reach);
+            // And well above and below it: the lookup is in plan, so height
+            // must not reach the answer.
+            out.push(station.pos + Vec3::Y * 40.0);
+        }
+        out.push(Vec3::new(9_000.0, 0.0, -9_000.0));
+        out.push(Vec3::new(-50_000.0, 120.0, 4.0));
+        out
+    }
+
+    fn same_fix(name: &str, at: Vec3, found: &Fix, oracle: &Fix) {
+        assert_eq!(found.point, oracle.point, "{name}: point at {at}");
+        assert_eq!(found.s, oracle.s, "{name}: s at {at}");
+        assert_eq!(found.lateral, oracle.lateral, "{name}: lateral at {at}");
+        assert_eq!(found.tangent, oracle.tangent, "{name}: tangent at {at}");
+        assert_eq!(found.right, oracle.right, "{name}: right at {at}");
+        assert_eq!(found.slope, oracle.slope, "{name}: slope at {at}");
+        assert_eq!(
+            found.curvature, oracle.curvature,
+            "{name}: curvature at {at}"
+        );
+    }
+
+    /// The index is a faster way to the same answer, and "the same" is meant
+    /// exactly: the whole fix, not just the nearest point, on every circuit in
+    /// the game and at every kind of position anything asks about.
+    ///
+    /// Held to equality rather than to a tolerance on purpose. A lookup that was
+    /// nearly right would move the car a hair off where the mesh puts it, shift
+    /// the lap distance a hair, and do it differently in the two halves of a
+    /// comparison nothing else can see. If the index ever has to be approximate,
+    /// that is a decision to take deliberately, and this is what makes it one.
+    #[test]
+    fn the_index_agrees_with_the_walk() {
+        for (name, track) in every_track() {
+            let ribbon = &track.ribbon;
+            for at in probes(ribbon) {
+                same_fix(
+                    name,
+                    at,
+                    &ribbon.locate(at),
+                    &ribbon.locate_exhaustively(at),
+                );
+            }
+            assert_eq!(
+                ribbon.min_separation(),
+                ribbon.min_separation_exhaustively(),
+                "{name}: the index and the walk disagree about how close the \
+                 circuit comes to itself"
+            );
+        }
+    }
+
+    /// Where two segments are exactly equally near, both have to pick the same
+    /// one — and a real circuit almost never gets a tie exactly, so this builds
+    /// one that does.
+    ///
+    /// A square, asked about its own centre. Every corner of it is the same
+    /// distance away, and the two segments meeting at the middle of each side
+    /// both project onto that middle point exactly, so eight segments come out
+    /// bit-for-bit equal and the answer is settled entirely by which one is
+    /// looked at first. The walk keeps the earliest; the index descends in lap
+    /// order so that it keeps the earliest too.
+    #[test]
+    fn a_tie_goes_to_the_earlier_segment() {
+        let side = 100.0f32;
+        let step = 4.0f32;
+        let count = (side * 2.0 / step) as i32;
+        let mut line = Vec::new();
+        for k in 0..count {
+            line.push(Vec3::new(side, 0.0, -side + k as f32 * step));
+        }
+        for k in 0..count {
+            line.push(Vec3::new(side - k as f32 * step, 0.0, side));
+        }
+        for k in 0..count {
+            line.push(Vec3::new(-side, 0.0, side - k as f32 * step));
+        }
+        for k in 0..count {
+            line.push(Vec3::new(-side + k as f32 * step, 0.0, -side));
+        }
+        let ribbon = Ribbon::from_polyline(line);
+
+        // The fixture is only worth anything if it really does tie.
+        let n = ribbon.stations.len();
+        let nearest: Vec<f32> = (0..n)
+            .map(|i| {
+                let (a, b) = (ribbon.stations[i].pos, ribbon.stations[(i + 1) % n].pos);
+                let ab = flat(b - a);
+                let t = (flat(-a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0);
+                flat(-(a + (b - a) * t)).length_squared()
+            })
+            .collect();
+        let closest = nearest.iter().copied().fold(f32::MAX, f32::min);
+        let tied = nearest.iter().filter(|&&d| d == closest).count();
+        assert_eq!(tied, 8, "the square does not tie the way it was built to");
+
+        let centre = Vec3::ZERO;
+        same_fix(
+            "a square",
+            centre,
+            &ribbon.locate(centre),
+            &ribbon.locate_exhaustively(centre),
+        );
+        // And it is the first of the eight, not merely one of them.
+        let first = nearest.iter().position(|&d| d == closest).expect("a tie");
+        let (chosen, _) = ribbon
+            .index
+            .nearest(&ribbon.stations, centre)
+            .expect("the square has segments");
+        assert_eq!(
+            chosen, first,
+            "the tie went to segment {chosen}, not {first}"
+        );
+    }
+
+    /// What the index is for, stated as the thing actually claimed: the cost of
+    /// a lookup does not grow with the length of the lap.
+    ///
+    /// A fixed count rather than a fraction, because a fraction would pass by
+    /// the lap getting longer. Today the worst circuit is Spa at 28 segments of
+    /// its 2,172 and the best is Indianapolis at 11 of 1,264 — the count follows
+    /// how much circuit crowds into one box, not how much circuit there is. The
+    /// bar has room in it because that crowding is the circuit's business and
+    /// this is not a tuning target; it is here to notice the day the index stops
+    /// pruning.
+    ///
+    /// Counted in segments projected rather than in seconds, so it reads the
+    /// same on a loaded machine as on an idle one. The seconds are in
+    /// `the_lookup`, where a number that moves with the weather belongs.
+    #[test]
+    fn the_index_looks_at_little_of_the_lap() {
+        /// Segments a lookup may project, on average, whatever the circuit.
+        const LOOKED_AT: f32 = 64.0;
+        for (name, track) in every_track() {
+            let ribbon = &track.ribbon;
+            let n = ribbon.stations().len();
+            let probes = probes(ribbon);
+            let looked: usize = probes.iter().map(|&at| ribbon.projections(at)).sum();
+            let average = looked as f32 / probes.len() as f32;
+            assert!(
+                average < LOOKED_AT,
+                "{name}: a lookup projects {average:.0} of {n} segments, which is \
+                 not much of an index"
+            );
+        }
+    }
+
+    /// What the index costs to build and what it buys, circuit by circuit, with
+    /// the whole list built end to end at the bottom — which is what changing
+    /// circuit in the menu does.
+    ///
+    /// `cargo test --locked --lib the_lookup -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn the_lookup() {
+        println!(
+            "{:<26}{:>10}{:>9}{:>12}{:>12}{:>9}",
+            "circuit", "stations", "index", "walk", "indexed", "faster"
+        );
+        let mut probed = 0usize;
+        let (mut walked, mut looked) = (0.0f64, 0.0f64);
+        for (name, track) in every_track() {
+            let ribbon = &track.ribbon;
+            let probes = probes(ribbon);
+            let building = Instant::now();
+            let index = Index::new(ribbon.stations());
+            let built = building.elapsed();
+            assert!(!index.nodes.is_empty());
+
+            let walk = Instant::now();
+            let mut sink = 0.0f64;
+            for &at in &probes {
+                sink += ribbon.locate_exhaustively(at).s as f64;
+            }
+            let walk = walk.elapsed().as_secs_f64();
+            let look = Instant::now();
+            for &at in &probes {
+                sink -= ribbon.locate(at).s as f64;
+            }
+            let look = look.elapsed().as_secs_f64();
+            assert_eq!(sink, 0.0, "the two lookups did not agree");
+
+            let each = probes.len() as f64;
+            let segments: usize = probes.iter().map(|&at| ribbon.projections(at)).sum();
+            println!(
+                "{name:<26}{:>10}{:>7.2} ms{:>9.2} us{:>9.2} us{:>8.1}x   {:.0} of {} segments",
+                ribbon.stations().len(),
+                built.as_secs_f64() * 1e3,
+                walk / each * 1e6,
+                look / each * 1e6,
+                walk / look,
+                segments as f64 / each,
+                ribbon.stations().len(),
+            );
+            probed += probes.len();
+            walked += walk;
+            looked += look;
+        }
+        println!(
+            "\n{probed} lookups: {:.0} ms walking, {:.0} ms indexed, {:.1}x",
+            walked * 1e3,
+            looked * 1e3,
+            walked / looked
+        );
+
+        let building = Instant::now();
+        let built: Vec<Track> = circuits::all().iter().map(Track::new).collect();
+        println!(
+            "building all {} circuits: {:.0} ms",
+            built.len(),
+            building.elapsed().as_secs_f64() * 1e3
+        );
     }
 }
