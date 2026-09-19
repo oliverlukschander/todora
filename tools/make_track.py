@@ -25,17 +25,23 @@ move it deliberately; the point is that it cannot move by accident.
 
 Nothing else here is a network dependency at build or test time. The trace and
 the heights are baked into the module the moment it is generated, so the game
-and its tests never reach for either.
+and its tests never reach for either. Within a run the DEM samples are cached
+under ~/.cache/todora/dem, keyed by the coordinates asked for, so regenerating
+a circuit — or generating forty in a row and being rate-limited part way — does
+not ask the elevation service the same question twice.
 
 Nothing here scales anything: `src/track/mod.rs` decides how much of a real
 circuit a Todora lap is, and it decides it the same way for every circuit.
 """
 
+import hashlib
 import json
 import math
 import re
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -50,12 +56,39 @@ DEM = "https://api.open-meteo.com/v1/elevation"
 RADIUS = 6378137.0
 # Open-Meteo takes this many coordinates per request.
 BATCH = 100
+# Answers already had, so a second run costs nothing and a run that was cut off
+# part way picks up where it stopped. The DEM is a fixed dataset; a sample of it
+# does not go stale.
+CACHE = Path.home() / ".cache" / "todora" / "dem"
+# The elevation service rate-limits a burst. Forty circuits in a row is a burst.
+RETRIES = 6
 CIRCUITS = Path(__file__).resolve().parent.parent / "src" / "track" / "circuits"
 
 
 def fetch(url):
-    with urllib.request.urlopen(url, timeout=60) as response:
-        return json.load(response)
+    """One request, retried through a rate limit rather than abandoned."""
+    for attempt in range(RETRIES):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as refused:
+            if refused.code not in (429, 502, 503) or attempt == RETRIES - 1:
+                raise
+            wait = 2 ** attempt
+            print(f"  {refused.code} from the server; waiting {wait}s", file=sys.stderr)
+            time.sleep(wait)
+    raise RuntimeError("unreachable")
+
+
+def cached(url):
+    """`fetch`, but the answer is kept on disk against the question."""
+    CACHE.mkdir(parents=True, exist_ok=True)
+    where = CACHE / (hashlib.sha256(url.encode()).hexdigest()[:32] + ".json")
+    if where.exists():
+        return json.loads(where.read_text())
+    answer = fetch(url)
+    where.write_text(json.dumps(answer))
+    return answer
 
 
 def trace(circuit_id, revision):
@@ -90,7 +123,7 @@ def heights(fixes):
                 "longitude": ",".join(f"{lon:.6f}" for lon, _ in batch),
             }
         )
-        sampled += fetch(f"{DEM}?{query}")["elevation"]
+        sampled += cached(f"{DEM}?{query}")["elevation"]
     lowest = min(sampled)
     return [round(metres - lowest) for metres in sampled]
 
@@ -126,6 +159,14 @@ pub(super) const CIRCUIT: Circuit = Circuit {{
     // it is a corner, and a circuit wound tightly on itself has less room to do
     // it in than one made of straights.
     corners: 1.0,
+    // What one lap comes out as once the circuit has been shrunk and had its
+    // corners opened. Run `cargo test --locked --lib the_menu_shows_the_lap`
+    // and write down the figure it asks for.
+    lap: 0.0,
+    // The shared plan scale. Raise it only if the circuit cannot carry a road
+    // and a shoulder at 1, and only as far as it has to be raised: see
+    // `Circuit::plan_scale` for what a multiplier gives up.
+    plan_scale: 1.0,
     centreline: CENTRELINE,
 }};
 

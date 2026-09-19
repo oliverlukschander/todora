@@ -10,25 +10,44 @@
 //! bacinger/f1-circuits and it writes the module and registers it here.
 
 mod albert_park;
+mod algarve;
 mod americas;
 mod bahrain;
+mod baku;
 mod barcelona_catalunya;
+mod buenos_aires;
+mod estoril;
 mod gilles_villeneuve;
 mod hermanos_rodriguez;
+mod hockenheim;
+mod hungaroring;
 mod imola;
 mod indianapolis;
+mod interlagos;
 mod istanbul_park;
 mod jacarepagua;
+mod jeddah;
+mod kyalami;
 mod las_vegas;
 mod losail;
 mod madring;
+mod magny_cours;
 mod marina_bay;
+mod miami;
+mod monaco;
 mod monza;
+mod mugello;
+mod nurburgring;
 mod paul_ricard;
 mod red_bull_ring;
+mod sepang;
+mod shanghai;
 mod silverstone;
+mod sochi;
 mod spa_francorchamps;
 mod watkins_glen;
+mod yas_marina;
+mod zandvoort;
 
 pub(crate) struct Circuit {
     /// Stable and file-safe: it names the lap saved to disk.
@@ -36,12 +55,67 @@ pub(crate) struct Circuit {
     /// What the driver is told they are driving.
     pub(crate) name: &'static str,
     /// How hard this circuit's corners are pushed away from its own mean line.
-    /// 1 is the trace as surveyed. See [`super::ribbon::exaggerate_corners`] for
-    /// why that is not enough, and why the figure belongs to the circuit rather
-    /// than to the game: what a circuit can take before it grows into itself is
-    /// a property of its layout. Spielberg is wound tightly around a hillside
-    /// and has almost no room; Monza is three long straights and has plenty.
+    /// 1 is the trace as surveyed, and 1 is what every circuit now is.
+    ///
+    /// It was not. Monza was pushed three and a half times and Spa twice,
+    /// because the road was 8 m wide on a plan shrunk seven and a half times —
+    /// five times too wide for the land it was laid on — and the whole of
+    /// Monza's Rettifilo displaced the car by less than half a road width, so
+    /// the quick way through a chicane was not to steer. The road is 3.3 m now
+    /// and both of them are corners again as surveyed.
+    ///
+    /// The lever stays, at 1, because the property it was there for has not
+    /// gone away: `corners_are_corners` is what says a circuit has come out
+    /// mostly straight, and a circuit that fails it can be pushed away from its
+    /// own mean line until it does not. Nothing in the game needs that today,
+    /// and a circuit that did would be saying something about its own layout —
+    /// which is why this belongs to the circuit and not to the game.
     pub(crate) corners: f32,
+    /// What one lap of it comes out as, in metres, once it has been shrunk and
+    /// had its corners opened.
+    ///
+    /// Written down rather than measured, because the circuit menu shows it and
+    /// building all thirty-nine circuits to fill a menu is four tenths of a
+    /// second the menu does not have. It is the one number here that is not a
+    /// fact about the real circuit, so it is the one that can go stale:
+    /// `the_menu_shows_the_lap_it_will_drive` builds every circuit and holds
+    /// this to what came out, which is also where the figure to write comes
+    /// from when a new circuit is added or the pipeline moves.
+    ///
+    /// The menu shows it because [`Circuit::plan_scale`] took away the thing
+    /// that used to make it guessable: laps were all shrunk alike, so a longer
+    /// circuit meant a longer lap in the same proportion. Baku's does not.
+    pub(crate) lap: f32,
+    /// What this circuit's plan is multiplied by, on top of the scale every
+    /// circuit gets. 1 is the shared scale, and 1 is what almost every circuit
+    /// has.
+    ///
+    /// This is the one place Todora treats a circuit differently from the
+    /// others, and it is worth being clear about what it costs. Every circuit
+    /// is otherwise shrunk alike, which is what made a lap time mean the same
+    /// thing from one to the next and made the relative lengths of the real
+    /// circuits survive into the game: Spa is half again as long as Spielberg
+    /// in life and half again as long here. A circuit with a multiplier breaks
+    /// that. Baku at 2.4 comes out longer than Spa, which it is not.
+    ///
+    /// The alternative was a road that changes width from circuit to circuit,
+    /// and that is worse: the difficult circuit would get a different amount of
+    /// steering room as well as being difficult, and Baku would need a road
+    /// narrower than two cars before there was any verge at all. The other
+    /// alternative was raising the shared scale for all forty, which makes
+    /// every existing race substantially longer to pay for four.
+    ///
+    /// So: seconds, metres, the car and the road stay common, and the ratio of
+    /// one lap's length to another's does not. The circuit menu shows the
+    /// finished lap length for that reason. Records are never normalised by
+    /// this — cornering and acceleration do not scale linearly, so a lap of
+    /// Baku divided by 2.4 is not a lap of anything.
+    ///
+    /// Each one is the smallest multiplier that clears the fitted mesh and the
+    /// driving tests, found by trying them, not a number picked to reach a lap
+    /// length. `every_exception_is_needed` is what stops one outliving its
+    /// reason.
+    pub(crate) plan_scale: f32,
     /// Metres from the circuit centroid, at full size. Y is height above the
     /// lowest point on the lap. The last sample joins back to the first.
     pub(crate) centreline: &'static [[f32; 3]],
@@ -53,25 +127,44 @@ pub(crate) struct Circuit {
 /// was added when.
 const ALL: &[Circuit] = &[
     albert_park::CIRCUIT,
+    algarve::CIRCUIT,
     americas::CIRCUIT,
     bahrain::CIRCUIT,
+    baku::CIRCUIT,
     barcelona_catalunya::CIRCUIT,
+    buenos_aires::CIRCUIT,
+    estoril::CIRCUIT,
     gilles_villeneuve::CIRCUIT,
     hermanos_rodriguez::CIRCUIT,
+    hockenheim::CIRCUIT,
+    hungaroring::CIRCUIT,
     imola::CIRCUIT,
     indianapolis::CIRCUIT,
+    interlagos::CIRCUIT,
     istanbul_park::CIRCUIT,
     jacarepagua::CIRCUIT,
+    jeddah::CIRCUIT,
+    kyalami::CIRCUIT,
     las_vegas::CIRCUIT,
     losail::CIRCUIT,
     madring::CIRCUIT,
+    magny_cours::CIRCUIT,
     marina_bay::CIRCUIT,
+    miami::CIRCUIT,
+    monaco::CIRCUIT,
     monza::CIRCUIT,
+    mugello::CIRCUIT,
+    nurburgring::CIRCUIT,
     paul_ricard::CIRCUIT,
     red_bull_ring::CIRCUIT,
+    sepang::CIRCUIT,
+    shanghai::CIRCUIT,
     silverstone::CIRCUIT,
+    sochi::CIRCUIT,
     spa_francorchamps::CIRCUIT,
     watkins_glen::CIRCUIT,
+    yas_marina::CIRCUIT,
+    zandvoort::CIRCUIT,
 ];
 
 /// The circuit the game opens on. Named rather than taken off the top of the

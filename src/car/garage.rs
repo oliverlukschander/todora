@@ -57,18 +57,18 @@ const TOURER: Handling = Handling::SHOOTING_BRAKE;
 /// because both are the same claim — this car holds on — and downforce is how
 /// holding on survives a fast corner.
 const CLUBMAN: Handling = Handling {
-    grip: 16.8,
-    downforce: 0.0115,
-    top_speed: 19.8,
+    grip: 14.8,
+    downforce: 0.00981,
+    top_speed: 21.5,
     ..Handling::SHOOTING_BRAKE
 };
 
 /// Road speed, and less to hold on with. It runs out of grip before the others
 /// do and runs out of engine long after them.
 const EXPRESS: Handling = Handling {
-    grip: 12.3,
-    downforce: 0.0072,
-    top_speed: 28.8,
+    grip: 12.8,
+    downforce: 0.00801,
+    top_speed: 31.0,
     ..Handling::SHOOTING_BRAKE
 };
 

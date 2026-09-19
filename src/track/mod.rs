@@ -22,6 +22,9 @@
 //! loft, and knows where the start line is. The shape lives in [`ribbon`]; the
 //! cross-section in [`profile`].
 
+// A trace is thousands of surveyed coordinates, and sooner or later one of them
+// is 3.14 or 6.28 metres from the centroid of its circuit. It is a coordinate.
+#[allow(clippy::approx_constant)]
 mod circuits;
 mod markers;
 mod profile;
@@ -39,6 +42,11 @@ use ribbon::Ribbon;
 /// The car is the ruler: ~2.4 m long, ~1.1 m wide, 1 unit = 1 metre. Every
 /// circuit is scaled by this, so a longer circuit makes a longer lap rather than
 /// a bigger world, and a lap time means the same thing wherever it was set.
+///
+/// A few circuits are scaled by this *and* by a multiplier of their own,
+/// because no amount of narrowing the road makes them fit at the shared scale.
+/// See [`Circuit::plan_scale`], which is also where what that gives up is
+/// written down.
 const PLAN_SCALE: f32 = 0.4 / 3.0;
 /// Elevation as a fraction of the real circuit, then smoothed and grade-capped.
 /// The plan is scaled far harder than this, so the hills come out steeper than
@@ -81,13 +89,21 @@ const RUN_UP: f32 = 45.0;
 #[cfg(test)]
 const PINNED_TO_THE_CAP: f32 = 0.25;
 
-/// How much of its relief a circuit has to bring through the smoothing. Lower
-/// than it looks, because the smoothing span is fixed in metres while relief is
-/// not: a circuit whose height is in short features loses more of it than one
-/// whose height is in long climbs. Las Vegas is the worst of them at 73%, its
-/// rises being underpasses shorter than the span they are averaged over.
+/// How much of its relief a circuit has to bring through the smoothing.
+///
+/// Lower than it looks, because the smoothing span is fixed in metres while
+/// relief is not: a circuit whose height is in short features loses more of it
+/// than one whose height is in long climbs. The worst are the Nürburgring and
+/// Zandvoort at 65% and Hockenheim at 66%, and what the smoothing is refusing
+/// on all three is an elevation model with steps in it that no road has —
+/// 16 m between two fixes forty metres apart, which is a 40% gradient and is an
+/// embankment the model has mistaken for the road.
+///
+/// The bar has to be low enough to let that through and high enough to still
+/// catch a span long enough to iron the circuits flat, and it is: double the
+/// span and the worst goes to 45%, with five circuits under this figure.
 #[cfg(test)]
-const KEPT_RELIEF: f32 = 0.7;
+const KEPT_RELIEF: f32 = 0.6;
 
 /// How far behind the start plane the grid has to read, at the very least. Two
 /// car lengths: nearer than that and the lap would begin before the driver had
@@ -101,6 +117,62 @@ const CLEAR_OF_THE_LINE: f32 = 5.0;
 /// the elevation model was able to say in the first place.
 #[cfg(test)]
 const FLATTENED: f32 = 1.0;
+
+/// How far the trace may end up from the circuit built out of it, on average.
+///
+/// On average, and not at worst, because at worst is a question the retention
+/// guard already answers. Opening a corner to the target radius moves its apex
+/// by something like that radius, and the tighter the corner was the further it
+/// moves: the Nürburgring's worst fix ends up 45 m from the circuit, and that
+/// one fix is a hairpin that was far tighter than the loft can carry. Averaged
+/// over the whole trace it is 5.4 m, and that is the number that says whether
+/// the circuit as a whole is still where it was surveyed or has drifted off
+/// somewhere else.
+///
+/// The bar is the diameter of the tightest corner the game allows, which is the
+/// largest single change the pipeline is entitled to make to a corner. Nothing
+/// is near it: the Nürburgring is worst at 5.4 m and Spa is at 0.7.
+#[cfg(test)]
+const MOVED: f32 = 2.0 * ribbon::MIN_RADIUS;
+
+/// The least turning that ends one turn and starts another, rather than being
+/// the road not going perfectly straight in the middle of a corner. A fifth of
+/// a right angle.
+#[cfg(test)]
+const A_TURN: f32 = 0.35;
+
+/// Turning a circuit has to do in a lap, in whole turns, before it is a lap of
+/// a circuit rather than a lap of a ring.
+///
+/// A ring turns once. The circuits turn between two and five times — Monza is
+/// lowest at 2.0 and Monaco highest — so this has room under all of them and a
+/// long way to fall before it reaches a ring. It is the thing retention was
+/// invented to catch and cannot: a circuit can keep nine tenths of its length
+/// while the nine tenths it kept is a loop with the corners taken out of it.
+#[cfg(test)]
+const A_CIRCUIT_TURNS: f32 = 1.5;
+
+/// How much of its trace's turning a circuit has to come out with.
+///
+/// The other half of the same question, and the half that notices a circuit
+/// that was always going to be round. Gilles-Villeneuve is worst at 68% and
+/// Monza next at 77%; what they lose is the corner-opening pass cutting the
+/// corners, which is the pass working. Erase a chicane and this is what moves,
+/// because the turning that was in it is simply gone.
+#[cfg(test)]
+const TURNING_KEPT: f32 = 0.6;
+
+/// How many of its trace's changes of direction a circuit has to come out with.
+///
+/// Loose, because a change of direction is a threshold question and the two
+/// sides of it are sampled forty metres apart and forty centimetres apart.
+/// Buenos Aires is worst at four of eight, its other four being kinks of little
+/// more than [`A_TURN`] that the spline rounds into the corners either side.
+/// What it is here for is the wholesale case — a circuit that came out with
+/// two changes of direction where its trace had fourteen has not been shrunk,
+/// it has been replaced.
+#[cfg(test)]
+const CHANGES_KEPT: f32 = 0.5;
 
 /// How much of a circuit has to survive being shrunk and having its corners
 /// opened for what is left to still be that circuit. See [`Ribbon::kept`]: the
@@ -148,6 +220,9 @@ pub(crate) fn circuit_at(circuit: &Circuit) -> usize {
 #[derive(Message)]
 pub(crate) struct GoTo(pub &'static Circuit);
 
+/// Half the width of the road. What anything asking "how far off-line is a
+/// lot?" measures against — the drivers, and the harness that judges them.
+pub(crate) use profile::HALF_WIDTH as ROAD_HALF;
 /// The tightest corner the game allows, which is what a car's hardest stop is
 /// measured down to. Read by the garage's report in [`crate::car`], so the
 /// figure the corner markers are a ruler for comes from the same place the
@@ -172,10 +247,11 @@ impl Track {
     /// `every_circuit_carries_a_road` is what catches that, rather than the
     /// player pressing the track key.
     pub(crate) fn new(circuit: &'static Circuit) -> Self {
+        let plan = PLAN_SCALE * circuit.plan_scale;
         let control: Vec<Vec3> = circuit
             .centreline
             .iter()
-            .map(|p| Vec3::new(p[0] * PLAN_SCALE, p[1] * HEIGHT_SCALE, p[2] * PLAN_SCALE))
+            .map(|p| Vec3::new(p[0] * plan, p[1] * HEIGHT_SCALE, p[2] * plan))
             .collect();
         let ribbon = Ribbon::new(&control, circuit.corners);
         assert!(
@@ -225,13 +301,21 @@ impl Track {
         (pos - start.pos).reject_from(Vec3::Y).dot(start.tangent)
     }
 
+    /// Did the car cross the line near enough to the road for it to have been a
+    /// lap? The road, and a car's width of grass either side of it — a driver
+    /// who put two wheels on the verge over the line still drove the lap, and
+    /// one who came past out in the runoff did not.
+    ///
+    /// Written against the car rather than as a distance, because the road is
+    /// less than half the width it was and this has to keep meaning the same
+    /// thing after it moved.
     pub(crate) fn on_start_gate(&self, pos: Vec3) -> bool {
         let start = self.ribbon.start();
         (pos - start.pos)
             .reject_from(Vec3::Y)
             .dot(start.right)
             .abs()
-            < HALF_WIDTH + 1.5
+            < HALF_WIDTH + 2.0 * crate::car::HALF_TRACK
     }
 
     /// A cheap hash of the shape the car actually drives on.
@@ -271,6 +355,18 @@ impl Track {
     /// 0 at start/finish, approaching 1 at the end of the lap.
     pub(crate) fn progress(&self, pos: Vec3) -> f32 {
         self.ribbon.locate(pos).s / self.ribbon.length()
+    }
+
+    /// How sharply the circuit turns `by` metres further along the lap.
+    ///
+    /// Distance along the ribbon, not a straight line through the world. A
+    /// driver looking ahead wants to know what the road it is on does next, and
+    /// a probe fired down the car's nose leaves the road at the first corner —
+    /// it can land on a neighbouring straight and read that straight's
+    /// curvature as the corner it is about to arrive at. Following the ribbon
+    /// cannot: the probe goes where the road goes.
+    pub(crate) fn curvature_ahead(&self, from: &Ground, by: f32) -> f32 {
+        self.ribbon.along(from.s, by).curvature
     }
 
     /// How far out the car is held where it is standing. Inside the edge of the
@@ -349,6 +445,7 @@ impl Track {
             tangent: fix.tangent,
             right: fix.right,
             lateral: fix.lateral,
+            s: fix.s,
             edge: self.profile.reach(fix.at, fix.t, fix.lateral),
             slope: fix.slope,
             curvature: fix.curvature,
@@ -400,6 +497,9 @@ pub(crate) struct Ground {
     pub(crate) right: Vec3,
     /// Metres right of the centreline; negative is left.
     pub(crate) lateral: f32,
+    /// Plan distance round the lap from the start/finish line. What a driver
+    /// looking up the road counts from.
+    pub(crate) s: f32,
     /// How far the cross-section reaches from the centreline on this side, here.
     /// The wall is set [`WALL_INSET`] inside it.
     pub(crate) edge: f32,
@@ -518,6 +618,20 @@ mod tests {
                 "{name}: max grade {steepest} is past the cap of {}",
                 ribbon::MAX_GRADE
             );
+            // And what the cap does to get there is shave the crests, not press
+            // the circuit flat: within a per cent, the relief it leaves is the
+            // relief the smoothing handed it, the worst being Kyalami at 0.8%.
+            // Worth stating, because the two are easy to blame for each other's
+            // work — the relief a circuit loses, it loses entirely to the
+            // smoothing — and only one of them is guarded by the fraction
+            // below.
+            assert!(
+                track.ribbon.relief() > 0.98 * track.ribbon.smoothed_relief(),
+                "{name}: the grade cap took {:.2} m of the {:.2} m of relief the \
+                 smoothing left",
+                track.ribbon.smoothed_relief() - track.ribbon.relief(),
+                track.ribbon.smoothed_relief()
+            );
             let pinned = (0..n)
                 .filter(|&i| {
                     let a = stations[i].pos;
@@ -537,12 +651,7 @@ mod tests {
             let (low, high) = stations.iter().fold((f32::MAX, f32::MIN), |(l, h), s| {
                 (l.min(s.pos.y), h.max(s.pos.y))
             });
-            let (raw_low, raw_high) = track
-                .circuit()
-                .centreline
-                .iter()
-                .fold((f32::MAX, f32::MIN), |(l, h), p| (l.min(p[1]), h.max(p[1])));
-            let wanted = (raw_high - raw_low) * HEIGHT_SCALE;
+            let wanted = relief_of(track.circuit()) * HEIGHT_SCALE;
             let lost = wanted - (high - low);
             assert!(
                 high - low > KEPT_RELIEF * wanted || lost < FLATTENED,
@@ -823,6 +932,227 @@ mod tests {
         }
     }
 
+    /// The plan of a circuit, as the trace drew it and at the scale it is built
+    /// at. Heights left out: this is about where the circuit goes.
+    fn traced(circuit: &Circuit) -> Vec<Vec3> {
+        let plan = PLAN_SCALE * circuit.plan_scale;
+        circuit
+            .centreline
+            .iter()
+            .map(|p| Vec3::new(p[0] * plan, 0.0, p[2] * plan))
+            .collect()
+    }
+
+    /// The order a closed plan changes direction in: `1` for right and `-1` for
+    /// left, one entry each time the circuit stops turning one way and starts
+    /// turning the other by at least [`A_TURN`].
+    ///
+    /// Turning is accumulated rather than read off single steps, and a change
+    /// of direction only ends a turn once the turn is worth having ended. That
+    /// is what lets the same question be asked of a trace whose fixes are forty
+    /// metres apart and of a centreline whose stations are forty centimetres
+    /// apart: a wobble on either is absorbed into the turn it is inside, and
+    /// what comes out is the shape rather than the sampling.
+    ///
+    /// Two turns the same way running are then one entry, not two. Where one
+    /// long right ends and the next begins is a matter of how straight the road
+    /// got in between, and the answer moves by a turn or two between a trace
+    /// and the circuit splined from it — Albert Park's back section reads as
+    /// four rights on the trace and three on the circuit, and is the same four
+    /// corners either way. What does not move is the order of the *changes*: a
+    /// chicane is a left and then a right, and losing one is losing an entry.
+    fn turns(line: &[Vec3]) -> Vec<i8> {
+        let mut out: Vec<i8> = swings(line).into_iter().map(|(way, _)| way).collect();
+        out.dedup();
+        // The walk starts in the middle of whatever turn station zero is in, so
+        // one turn can come out as two, one at each end. They are the same turn.
+        if out.len() > 1 && out[0] == out[out.len() - 1] {
+            out.pop();
+        }
+        out
+    }
+
+    /// Every turn of at least [`A_TURN`] in the closed plan, as a direction and
+    /// how far it went through, in the order they come.
+    fn swings(line: &[Vec3]) -> Vec<(i8, f32)> {
+        let n = line.len();
+        let mut out = Vec::new();
+        let mut running = 0.0f32;
+        for i in 0..n {
+            let from = line[(i + 1) % n] - line[i];
+            let to = line[(i + 2) % n] - line[(i + 1) % n];
+            if from.length() < 1e-6 || to.length() < 1e-6 {
+                continue;
+            }
+            let turn = f32::atan2(to.cross(from).y, to.dot(from));
+            if running != 0.0 && turn.signum() != running.signum() && running.abs() >= A_TURN {
+                out.push((running.signum() as i8, running.abs()));
+                running = 0.0;
+            }
+            running += turn;
+        }
+        if running.abs() >= A_TURN {
+            out.push((running.signum() as i8, running.abs()));
+        }
+        out
+    }
+
+    /// A circuit still goes where it was traced.
+    ///
+    /// Retention is a guard against a circuit being rounded off into a ring,
+    /// and it is a good one, but it measures a length rather than a shape and
+    /// it starts *after* the spline: a corner the splining removed was never in
+    /// the lap it compares against. These two ask the shape directly.
+    ///
+    /// First, displacement. Every fix of the trace has to be near the finished
+    /// centreline — near being measured against the cross-section, because a
+    /// circuit displaced by less than its own road is a circuit the road still
+    /// covers, and one displaced by more has moved. The bar is generous on
+    /// purpose: splining a trace whose fixes are forty metres apart rounds its
+    /// corners by design, and opening a corner cuts it by design. What it
+    /// catches is a circuit that has gone somewhere else.
+    ///
+    /// Second, turn order. A chicane is a left and then a right; a hairpin is
+    /// one long turn. Lose either and the sequence of turns changes, and the
+    /// sequence is what a driver remembers a circuit by. Compared against the
+    /// raw trace, so it sees what the spline and the corner-opening pass did as
+    /// well as what the rest of the pipeline did.
+    #[test]
+    fn every_circuit_is_still_the_circuit_it_was_traced_from() {
+        for (name, track) in every_track() {
+            let drawn = traced(track.circuit());
+            let moved = drifted(&track, &drawn);
+            assert!(
+                moved < MOVED,
+                "{name}: the trace ends up {moved:.1} m from the circuit built \
+                 out of it on average, against {MOVED} m"
+            );
+
+            let (was, now) = (wound(&drawn), wound(&plan_of(&track)));
+            assert!(
+                now > A_CIRCUIT_TURNS,
+                "{name}: the circuit turns through {now:.1} laps' worth of \
+                 corners, which is not far off a ring's one"
+            );
+            assert!(
+                now > TURNING_KEPT * was,
+                "{name}: the trace turns through {was:.1} laps' worth of corners \
+                 and the circuit through {now:.1}"
+            );
+
+            let (was, now) = (turns(&drawn), turns(&plan_of(&track)));
+            assert_eq!(
+                now.first(),
+                was.first(),
+                "{name}: the trace and the circuit do not start turning the same way"
+            );
+            assert!(
+                now.len() as f32 >= CHANGES_KEPT * was.len() as f32,
+                "{name}: the trace changes direction {} times and the circuit {}",
+                was.len(),
+                now.len()
+            );
+        }
+    }
+
+    /// How far the trace ends up from the circuit built out of it, on average.
+    fn drifted(track: &Track, drawn: &[Vec3]) -> f32 {
+        drawn
+            .iter()
+            .map(|&fix| flat(fix - track.ribbon.locate(fix).point).length())
+            .sum::<f32>()
+            / drawn.len() as f32
+    }
+
+    /// The two measures above, put to things that are wrong on purpose.
+    ///
+    /// A property that has never been seen to fail is a property nobody knows
+    /// the shape of, and both of these are measures rather than assertions —
+    /// they have thresholds and detectors in them, and a detector that never
+    /// says no is a detector that says nothing.
+    ///
+    /// The first is a circuit moved bodily off where it was traced. The second
+    /// is the one the plan is actually about: a chicane taken out. A left and a
+    /// right within a few metres of each other is two entries in the sequence;
+    /// straighten the road between the same two points and both entries go, and
+    /// nothing about the length of the lap has to change for that to happen —
+    /// which is exactly what retention cannot see.
+    #[test]
+    fn the_identity_checks_notice_a_circuit_that_has_been_changed() {
+        let track = track();
+        let drawn = traced(track.circuit());
+        assert!(drifted(&track, &drawn) < MOVED);
+        let shoved: Vec<Vec3> = drawn.iter().map(|&p| p + Vec3::X * 3.0 * MOVED).collect();
+        assert!(
+            drifted(&track, &shoved) > MOVED,
+            "a circuit moved bodily off its own trace reads as being on it"
+        );
+
+        // A square lap with a chicane down each of its four sides. Squared off
+        // rather than round so that the corners and the chicanes are separate
+        // things: the four right-angles are one lap of turning between them, and
+        // the four chicanes are most of another.
+        let lay = |chicanes: bool| -> Vec<Vec3> {
+            let mut out = Vec::new();
+            let (mut at, mut heading) = (Vec3::ZERO, Vec3::Z);
+            let walk = |at: &mut Vec3, heading: Vec3, run: usize, out: &mut Vec<Vec3>| {
+                for _ in 0..run {
+                    *at += heading * 2.0;
+                    out.push(*at);
+                }
+            };
+            for _ in 0..4 {
+                walk(&mut at, heading, 20, &mut out);
+                if chicanes {
+                    heading = Quat::from_rotation_y(0.7) * heading;
+                    walk(&mut at, heading, 6, &mut out);
+                    heading = Quat::from_rotation_y(-0.7) * heading;
+                }
+                walk(&mut at, heading, 20, &mut out);
+                heading = Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2) * heading;
+            }
+            out
+        };
+        let (with, without) = (wound(&lay(true)), wound(&lay(false)));
+        assert!(
+            (without - 1.0).abs() < 0.05,
+            "the square without its chicanes should turn through one lap, not {without:.2}"
+        );
+        assert!(
+            without < TURNING_KEPT * with,
+            "taking the chicanes out of a circuit left it turning through \
+             {without:.2} laps against {with:.2}, which is not enough of a change \
+             to notice"
+        );
+        assert!(
+            (turns(&lay(false)).len() as f32) < CHANGES_KEPT * turns(&lay(true)).len() as f32,
+            "taking the chicanes out left the changes of direction at {} of {}",
+            turns(&lay(false)).len(),
+            turns(&lay(true)).len()
+        );
+    }
+
+    /// How far a closed plan turns through in a lap, in whole turns. A ring
+    /// comes out at one however big it is; a circuit comes out at as many
+    /// corners as it has.
+    fn wound(line: &[Vec3]) -> f32 {
+        swings(line).iter().map(|(_, through)| through).sum::<f32>() / std::f32::consts::TAU
+    }
+
+    /// The finished centreline, in plan.
+    fn plan_of(track: &Track) -> Vec<Vec3> {
+        track
+            .ribbon
+            .stations()
+            .iter()
+            .map(|s| flat(s.pos))
+            .collect()
+    }
+
+    fn flat(v: Vec3) -> Vec3 {
+        Vec3::new(v.x, 0.0, v.z)
+    }
+
     /// Shrinking a circuit cuts its corners, and a circuit is not allowed to be
     /// mostly corner-cutting. `Track::new` is what enforces that; this is the
     /// margin the circuits in the game actually have.
@@ -1002,6 +1332,15 @@ mod tests {
         );
     }
 
+    /// Scratch: the finished lap of each circuit, by module.
+    #[test]
+    #[ignore]
+    fn the_laps() {
+        for circuit in circuits::all() {
+            println!("{}|{:.1}", circuit.id, Track::new(circuit).ribbon.length());
+        }
+    }
+
     /// What every circuit came out as: the table the bars in these tests are set
     /// against, and the first thing to look at when a new one will not go in.
     ///
@@ -1024,7 +1363,7 @@ mod tests {
             let pinned = (0..n)
                 .filter(|&i| grade(i) > ribbon::MAX_GRADE * 0.98)
                 .count();
-            let window = (40.0 / (track.ribbon.length() / n as f32)) as usize;
+            let window = straight_window(&track, n);
             let straight = (0..n)
                 .filter(|&i| {
                     let from = stations[i].pos;
@@ -1053,6 +1392,49 @@ mod tests {
         }
     }
 
+    /// How much a circuit's elevation model says the road climbs.
+    ///
+    /// Not the raw range, which is the proxy this replaces and which one bad
+    /// sample can make up entirely. The model is a 90 m ground elevation read
+    /// at the trace's own fixes, on circuits that run between grandstands,
+    /// under bridges and through car parks, so a single fix tens of metres
+    /// above both of its neighbours is a building. Miami's raw range is 12 m
+    /// and 10 of them are one fix; Las Vegas's is 30 m and 11 of them are;
+    /// Hockenheim has a lone 16 m sample between a 6 and a 5.
+    ///
+    /// So a height is taken with its two neighbours and the middle one kept — a
+    /// hill two fixes wide is a hill, and one fix on its own is not. Nothing
+    /// downstream reads this: it is what the *test* expects the circuit to
+    /// climb, and correcting it is what stopped the smoothing being blamed for
+    /// refusing to build a grandstand.
+    fn relief_of(circuit: &Circuit) -> f32 {
+        let heights: Vec<f32> = circuit.centreline.iter().map(|p| p[1]).collect();
+        let n = heights.len();
+        let (low, high) = (0..n)
+            .map(|i| {
+                let mut three = [heights[(i + n - 1) % n], heights[i], heights[(i + 1) % n]];
+                three.sort_by(f32::total_cmp);
+                three[1]
+            })
+            .fold((f32::MAX, f32::MIN), |(l, h), y| (l.min(y), h.max(y)));
+        high - low
+    }
+
+    /// Stations in the straight line a circuit is measured against.
+    ///
+    /// 40 m of *source* circuit, which is 40 m of Todora on the thirty-five
+    /// circuits built at the shared scale and more on the four that are not.
+    /// The question being asked is about the layout — is there a corner here,
+    /// or a bend the road can be driven straight through — and the layout
+    /// belongs to the real circuit. Ask it with a fixed 40 m and a circuit
+    /// built at two and a half times the plan is asked whether a line fits down
+    /// a fortieth of itself rather than a fifteenth, which every circuit would
+    /// pass and which says nothing about any of them.
+    fn straight_window(track: &Track, n: usize) -> usize {
+        let step = track.ribbon.length() / n as f32;
+        (40.0 * track.circuit().plan_scale / step) as usize
+    }
+
     /// A corner has to be a corner: something the driver goes round, not a bend
     /// the road is wide enough to ignore.
     ///
@@ -1072,7 +1454,7 @@ mod tests {
         for (name, track) in every_track() {
             let stations = track.ribbon.stations();
             let n = stations.len();
-            let window = (40.0 / (track.ribbon.length() / n as f32)) as usize;
+            let window = straight_window(&track, n);
             let straight = (0..n)
                 .filter(|&i| {
                     let from = stations[i].pos;

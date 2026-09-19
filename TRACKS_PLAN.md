@@ -1,3 +1,13 @@
+> **Where this stands.** The prerequisite and stages 1 and 2 have landed; stage
+> 3, the bridge feature and Suzuka, has not. The screening runs this plan refers
+> to as `baseline`, `radius-5` and `radius-5-scales` were replaced once the
+> engine moved under them: `docs/track-screening` now holds `as-built`,
+> `shared-scale` and `corners-at-10`, which ask the same questions of the
+> circuits as they are now built. Two of this plan's figures were superseded by
+> what the implementation measured, and both are recorded where they were
+> changed: the 3.3 m road needs four plan multipliers rather than three, and
+> they are larger than the seeds here.
+
 Todora should admit all 40 source layouts through the same geometry and driving contracts. Do the lookup work first, then variable verges, then road proportions, then bridges. Keep the 75% retention bar. Each admission must pass the whole suite, not just construction.
 
 This is a researched implementation plan for the maintainer, based on Todora `3c1421e` and bacinger/f1-circuits `394d8fbe70ef2c0b0c8d23ff7bee61fa09606055`, checked on 2026-09-19. The engine has not been changed. The screening utility and results accompany this plan so the experiments can be repeated.

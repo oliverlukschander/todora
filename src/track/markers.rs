@@ -11,19 +11,27 @@
 //! point: the diamonds counting you in do not stop at the turn, they carry on
 //! round it, so the ones ahead are the shape of the corner before you can see
 //! the shape of the corner. Where it tightens they crowd up on the inside; where
-//! it opens they run away from you. The approach reaches 16 m back because that
+//! it opens they run away from you. The approach reaches 22 m back because that
 //! is the hardest stop the game has in it: the quickest car in the garage,
 //! flat out on the level, down to what it can carry through a corner at
-//! [`super::ribbon::MIN_RADIUS`], takes 16.0 m of road — `the_garage` measures
+//! [`super::ribbon::MIN_RADIUS`], takes 20.7 m of road — `the_garage` measures
 //! it. So the first diamond of a line is the brakes for the slowest corners and
 //! the ones after it are the brakes for everything quicker. They are all the
 //! same diamond the same distance apart, because a dotted line is read as a
 //! rhythm and a rhythm is only information while it is regular.
 //!
+//! It reached 16 m when the tightest corner the game allowed was 10 m across.
+//! A 5 m corner is a slower corner, a slower corner is a longer stop, and a
+//! longer stop is a longer braking zone to mark — so the line has to reach
+//! further back or the first diamond stops being the brakes and starts being a
+//! decoration somewhere inside them. What gives is the gap between diamonds
+//! rather than how many there are, because how many there are is the palette:
+//! see [`SPACING`] and [`PALETTE`].
+//!
 //! One line, three cars, and it does not move for any of them. The three stop
-//! from their own top speed in 4.6 m, 9.9 m and 16.0 m, so the quick car brakes
-//! at the first diamond of a line, the one the game ships on somewhere around
-//! the third, and the grippy one not until the last — and a long descent, which
+//! from their own top speed in 9.8 m, 12.6 m and 20.7 m, so the grippy car
+//! brakes at the third diamond of a line, the one the game ships on at the
+//! fourth, and the quick one not until the first — and a long descent, which
 //! carries a car past the speed it settles at, puts a little more on top of all
 //! three. That is the point of a ruler. A line of marks that moved with the car
 //! would be telling the driver what they already know, in a rhythm they would
@@ -72,7 +80,8 @@ use super::ribbon::{STEP, Station};
 /// Tighter than this and the car cannot carry its top speed through: a corner.
 /// A radius rather than a curvature, because a corner is a shape, and 35 m is
 /// the shape of one — at [`super::ribbon::MIN_RADIUS`] the game's tightest
-/// corner is 10 m, and above about 30 m the car simply does not lift.
+/// corner is 5 m, the car the game ships on holds 22.2 m/s on the flat and
+/// wants 35 m of radius to carry it, and above that it simply does not lift.
 const CORNER_RADIUS: f32 = 35.0;
 /// Bends with less than this much straight between them are one corner. Without
 /// it a chicane is four corners, each laying its own approach over the last
@@ -83,15 +92,23 @@ const MERGE: f32 = 6.0;
 /// scale of one station; a corner is not, and 3.6 m is enough to tell them apart
 /// without rounding off a real one.
 const SMOOTH: usize = 9;
-/// Stations from one diamond to the next: 3.2 m.
+/// Stations from one diamond to the next: 4.4 m.
 ///
 /// In stations rather than in metres because the line has to be evenly spaced
 /// and only this is. A gap in metres falls between two stations and rounds to a
 /// different number of them at different multiples, which is a rhythm that is
 /// regular everywhere except where it is not.
-const SPACING: usize = 8;
+///
+/// It was 8, which was 3.2 m, and what moved it is the corner target rather
+/// than taste: five diamonds have to cover the hardest stop in the game, that
+/// stop is now 20.7 m rather than 16.0, and five diamonds is not negotiable
+/// because five is the palette. So the rhythm slows instead of the line getting
+/// longer in marks — which is the right way round, because a driver reads the
+/// spacing and counts the marks, and there is no time to count.
+const SPACING: usize = 11;
 /// How far the line reaches back up the road from the corner, in diamonds. Five
-/// of them is 16 m, which is the whole of the hardest stop the car has in it.
+/// of them is 22 m, which covers the whole of the hardest stop the car has in
+/// it with a little over.
 const APPROACH: usize = 5;
 /// Half a diamond's diagonal. 0.4 m point to point, a third of the width of the
 /// car: enough to carry down a straight, where at 0.3 m a diamond was there when

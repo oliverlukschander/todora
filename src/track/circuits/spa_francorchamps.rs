@@ -8,7 +8,12 @@ use super::Circuit;
 pub(super) const CIRCUIT: Circuit = Circuit {
     id: "spa-francorchamps",
     name: "Spa-Francorchamps",
-    corners: 2.0,
+    // As surveyed, where it used to be pushed twice away from its own mean line
+    // to keep its corners from being driven straight through. See `monza`: the
+    // narrower road gave every circuit its corners back.
+    corners: 1.0,
+    lap: 901.5,
+    plan_scale: 1.0,
     centreline: CENTRELINE,
 };
 

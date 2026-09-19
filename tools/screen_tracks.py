@@ -195,18 +195,29 @@ def main():
     parser.add_argument("output", type=Path)
     parser.add_argument("--min-radius", type=float)
     parser.add_argument("--scale", action="append", default=[], metavar="ID=MULTIPLIER")
+    parser.add_argument(
+        "--shared-scale",
+        action="store_true",
+        help="ignore the per-circuit multipliers the modules carry",
+    )
     args = parser.parse_args()
     scales = {key: float(value) for key, value in (s.split("=") for s in args.scale)}
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
 
-    corners = {}
+    # What the circuits already in the game are built with, so that screening
+    # reproduces them rather than describing a different circuit of the same
+    # name. A --scale on the command line overrides a module's own.
+    corners, built = {}, {}
     for path in (ROOT / "src/track/circuits").glob("*.rs"):
         text = path.read_text()
         source_id = re.search(r"make_track.py (\S+)", text)
         factor = re.search(r"corners: ([\d.]+)", text)
+        multiplier = re.search(r"plan_scale: ([\d.]+)", text)
         if source_id and factor:
             corners[source_id[1]] = float(factor[1])
+        if source_id and multiplier:
+            built[source_id[1]] = float(multiplier[1])
 
     rows = []
     for path in sorted((args.source / "circuits").glob("*.geojson")):
@@ -219,7 +230,8 @@ def main():
         name = json.dumps(feature["properties"]["Name"], ensure_ascii=False)
         rows.append(
             f'("{path.stem}",{name},{corners.get(path.stem, 1.0)!r}_f32,'
-            f'{scales.get(path.stem, 1.0)!r}_f32,{crossing_count(points)},&[{coordinates}]),'
+            f'{scales.get(path.stem, 1.0 if args.shared_scale else built.get(path.stem, 1.0))!r}_f32,'
+            f'{crossing_count(points)},&[{coordinates}]),'
         )
     if not rows:
         parser.error("source has no circuits/*.geojson")
@@ -263,7 +275,7 @@ def main():
         "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=args.source, text=True).strip(),
         "source_pinned_at": REVISION,
         "radius_override": args.min_radius,
-        "plan_multipliers": scales,
+        "plan_multipliers": "shared scale only" if args.shared_scale else {**built, **scales},
         "cross_section": named,
         "heights": "zero; plan geometry only",
         "not_screened": "elevation, the loft's triangles, markers, lap timing, driving",

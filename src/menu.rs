@@ -41,6 +41,16 @@ use crate::track::{GoTo, Track, all_circuits, circuit_at};
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct MenuSet;
 
+/// One row of a page.
+struct Entry {
+    name: String,
+    /// What it is good at, where that is worth showing. A circuit is not good
+    /// at things — it is a place — so its rows carry none.
+    stars: Option<Stars>,
+    /// A number the row is worth reading with, to the right of the name.
+    aside: String,
+}
+
 /// Which menu is up.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Page {
@@ -73,15 +83,29 @@ impl Page {
     /// The rows of this page: what each one is called, and what it is good at
     /// where that is worth showing. A circuit is not good at things — it is a
     /// place — so its rows carry no rating and its page shows no headings.
-    fn entries(self) -> Vec<(&'static str, Option<Stars>)> {
+    fn entries(self) -> Vec<Entry> {
         match self {
             Page::Car => Spec::ALL
                 .iter()
-                .map(|spec| (spec.name(), Some(spec.sheet().stars)))
+                .map(|spec| Entry {
+                    name: spec.name().into(),
+                    stars: Some(spec.sheet().stars),
+                    aside: String::new(),
+                })
                 .collect(),
             Page::Circuit => all_circuits()
                 .iter()
-                .map(|circuit| (circuit.name, None))
+                .map(|circuit| Entry {
+                    name: circuit.name.into(),
+                    stars: None,
+                    // How long a lap of it is. The circuits used to be shrunk
+                    // alike, so a longer circuit was a longer lap in the same
+                    // proportion and the list had nothing to add to a name. A
+                    // few of them are not shrunk alike any more — see
+                    // `Circuit::plan_scale` — so the list says: Baku is three
+                    // laps of Spielberg, and nothing about the name says so.
+                    aside: format!("{:.0} m", circuit.lap),
+                })
                 .collect(),
         }
     }
@@ -101,6 +125,47 @@ impl Page {
 pub(crate) struct Menu {
     page: Option<Page>,
     at: usize,
+    /// The first row of the page that is on screen.
+    ///
+    /// Three cars fit on any screen and thirty-nine circuits do not, so the
+    /// circuit page is a window onto its list rather than the whole of it. The
+    /// window is only ever moved to keep the cursor inside it with [`MARGIN`]
+    /// rows of road ahead, so walking down the list scrolls it and walking back
+    /// up an already-visible row does not — a list that recentred on every step
+    /// would be a list where nothing stays where you last saw it.
+    from: usize,
+}
+
+/// Rows a page shows at once.
+///
+/// Thirteen, which is a screenful on anything and a third of the circuits. The
+/// panel is this tall whichever page is up and wherever the cursor is, because
+/// a panel that changed size would move the row under the cursor out from under
+/// it.
+const SHOWN: usize = 13;
+/// Rows kept between the cursor and the edge of the window while there are rows
+/// to spare, so that what is coming is visible before it is reached.
+const MARGIN: usize = 3;
+
+impl Menu {
+    /// Move the window so the cursor is inside it, and no further.
+    fn follow(&mut self, rows: usize) {
+        if rows <= SHOWN {
+            self.from = 0;
+            return;
+        }
+        let last = rows - SHOWN;
+        self.from = self
+            .from
+            .min(self.at.saturating_sub(MARGIN))
+            .max((self.at + MARGIN + 1).saturating_sub(SHOWN))
+            .min(last);
+    }
+
+    /// Whether row `at` is in the window.
+    fn on_screen(&self, at: usize) -> bool {
+        (self.from..self.from + SHOWN).contains(&at)
+    }
 }
 
 pub struct MenuPlugin;
@@ -133,6 +198,9 @@ const OUT_OF: u8 = 5;
 /// Americas" — because a name that wrapped onto a second line would make one row
 /// twice the height of the others and the list would stop being a list.
 const CURSOR: f32 = 12.0;
+/// Width of the figure beside a circuit's name. Wide enough for "1930 m", which
+/// is Baku.
+const ASIDE: f32 = 56.0;
 const NAME: f32 = 208.0;
 const RATING: f32 = OUT_OF as f32 * (PIP + PIP_GAP) + 14.0;
 /// One row, and the type on it. Small enough that seventeen circuits and the
@@ -242,7 +310,7 @@ fn setup(mut commands: Commands) {
                         });
 
                     for page in Page::ALL {
-                        for (at, (name, stars)) in page.entries().into_iter().enumerate() {
+                        for (at, entry) in page.entries().into_iter().enumerate() {
                             panel
                                 .spawn((
                                     Piece::Row { page, at },
@@ -257,7 +325,7 @@ fn setup(mut commands: Commands) {
                                 .with_children(|row| {
                                     row.spawn((
                                         RowName,
-                                        Text::new(name),
+                                        Text::new(entry.name),
                                         TextFont {
                                             font_size: FontSize::Px(ROW),
                                             ..default()
@@ -269,7 +337,23 @@ fn setup(mut commands: Commands) {
                                             ..default()
                                         },
                                     ));
-                                    for (_, out_of_five) in stars.into_iter().flat_map(Stars::rows)
+                                    if !entry.aside.is_empty() {
+                                        row.spawn((
+                                            Text::new(entry.aside),
+                                            TextFont {
+                                                font_size: FontSize::Px(ROW),
+                                                ..default()
+                                            },
+                                            TextColor(AMBER_DIM),
+                                            Node {
+                                                width: px(ASIDE),
+                                                justify_content: JustifyContent::End,
+                                                ..default()
+                                            },
+                                        ));
+                                    }
+                                    for (_, out_of_five) in
+                                        entry.stars.into_iter().flat_map(Stars::rows)
                                     {
                                         row.spawn((
                                             Node {
@@ -349,6 +433,10 @@ fn open(
         return;
     };
     menu.at = wanted.chosen(&spec, &track);
+    // Opened afresh each time, so the list arrives with the row being driven a
+    // margin down from the top rather than wherever it was left last time.
+    menu.from = menu.at.saturating_sub(MARGIN);
+    menu.follow(wanted.entries().len());
     menu.page = Some(wanted);
     *halt = Halt::Menu;
 }
@@ -383,8 +471,9 @@ fn walk(
         GamepadButton::DPadUp,
     ));
     if step != 0 {
-        let last = page.entries().len() as i32 - 1;
-        menu.at = (menu.at as i32 + step).clamp(0, last) as usize;
+        let rows = page.entries().len();
+        menu.at = (menu.at as i32 + step).clamp(0, rows as i32 - 1) as usize;
+        menu.follow(rows);
     }
 
     if pressed(&keys, &pads, KeyCode::Enter, GamepadButton::South) {
@@ -450,8 +539,8 @@ fn draw(
             (Piece::Panel, Some(_)) => true,
             // The headings name the three ratings, so they belong to a page
             // whose rows carry them.
-            (Piece::Heading, Some(up)) => up.entries().iter().any(|(_, rated)| rated.is_some()),
-            (Piece::Row { page, .. }, Some(up)) => *page == up,
+            (Piece::Heading, Some(up)) => up.entries().iter().any(|row| row.stars.is_some()),
+            (Piece::Row { page, at }, Some(up)) => *page == up && menu.on_screen(*at),
         };
         node.display = if shown { Display::Flex } else { Display::None };
 
@@ -546,6 +635,88 @@ mod tests {
     /// The cursor opens on what is already chosen, moves one row at a time, and
     /// stops at both ends rather than wrapping — a list this short is read, and
     /// a cursor that reappears at the other end has to be found again.
+    /// A list too long for the screen is a window onto itself, and the window
+    /// follows the cursor rather than the other way round.
+    ///
+    /// Three things. The cursor can still reach both ends, which is what makes
+    /// it a window rather than a limit. The window never shows a row that is
+    /// not there, at either end. And it only moves when it has to: walking back
+    /// up onto a row that is already on screen leaves the list where it is,
+    /// because a list that recentred on every step is a list where nothing
+    /// stays where you last saw it.
+    #[test]
+    fn a_list_too_long_for_the_screen_is_a_window_onto_itself() {
+        let rows = Page::Circuit.entries().len();
+        assert!(rows > SHOWN, "{rows} circuits all fit; nothing scrolls");
+        let mut menu = Menu::default();
+
+        for at in 0..rows {
+            menu.at = at;
+            menu.follow(rows);
+            assert!(menu.on_screen(at), "row {at} walked off the screen");
+            assert!(
+                menu.from + SHOWN <= rows,
+                "the window runs off the end of the list at row {at}"
+            );
+        }
+        // Walking back up: the window comes with the cursor, and stops.
+        for at in (0..rows).rev() {
+            menu.at = at;
+            menu.follow(rows);
+            assert!(
+                menu.on_screen(at),
+                "row {at} walked off the screen going back"
+            );
+        }
+        assert_eq!(menu.from, 0, "the window did not come back to the top");
+
+        // A step that stays inside the window does not move it.
+        menu.at = SHOWN * 2;
+        menu.follow(rows);
+        let settled = menu.from;
+        menu.at = SHOWN * 2 - 1;
+        menu.follow(rows);
+        assert_eq!(
+            menu.from, settled,
+            "the list scrolled for a row already on it"
+        );
+
+        // Three cars need no window at all.
+        let mut cars = Menu {
+            at: 2,
+            ..Menu::default()
+        };
+        cars.follow(Page::Car.entries().len());
+        assert_eq!(cars.from, 0);
+    }
+
+    /// The lap length a circuit's row shows is the lap that circuit builds.
+    ///
+    /// It is written into the module rather than measured, because building
+    /// thirty-nine circuits to fill a menu is four tenths of a second the menu
+    /// does not have — so this is what stops it being four tenths of a second's
+    /// worth of stale. It is also where the figure comes from when a circuit is
+    /// added: the message says what to write down.
+    #[test]
+    fn the_menu_shows_the_lap_it_will_drive() {
+        for (row, circuit) in Page::Circuit.entries().iter().zip(all_circuits()) {
+            let built = Track::new(circuit).length();
+            assert!(
+                (circuit.lap - built).abs() < 0.1,
+                "{}: the module says its lap is {:.1} m and the circuit builds \
+                 {built:.1} m — write `lap: {built:.1},` into its module",
+                circuit.name,
+                circuit.lap
+            );
+            assert_eq!(
+                row.aside,
+                format!("{:.0} m", circuit.lap),
+                "{}: the row shows a lap that is not this circuit's",
+                circuit.name
+            );
+        }
+    }
+
     #[test]
     fn the_cursor_starts_on_the_chosen_row_and_stops_at_both_ends() {
         let mut app = game();

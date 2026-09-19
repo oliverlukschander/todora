@@ -253,7 +253,11 @@ mod tests {
     #[test]
     fn esc_stops_the_car_and_the_clock_together_and_enter_starts_them_again() {
         let mut app = game();
-        run(&mut app, 700);
+        // Far enough to be past the line with the clock actually running, and
+        // no further: the throttle is held down and nothing is steering, so on
+        // a 3.3 m road the car is in the barrier shortly afterwards, and a car
+        // in the barrier is not a car that can be seen to start again.
+        run(&mut app, 400);
         assert!(
             app.world().resource::<LapTimer>().running(),
             "the car never reached the line, so there is no clock to stop"

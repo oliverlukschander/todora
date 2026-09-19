@@ -1,12 +1,12 @@
 {
-  "todora_commit": "ce9c57ac3d235c3023bc37c1cc4e720bcf767d38",
+  "todora_commit": "2abdb21940c1fe99c4882c33c01acf75a27797b0",
   "source_commit": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
   "source_pinned_at": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
-  "radius_override": 5.0,
-  "plan_multipliers": {},
+  "radius_override": null,
+  "plan_multipliers": "shared scale only",
   "cross_section": {
-    "HALF_WIDTH": "4.0",
-    "VERGE": "3.0",
+    "HALF_WIDTH": "1.65",
+    "VERGE": "2.0",
     "GRASS_OF_VERGE": "2.0 / 3.0",
     "SPARE": "0.15",
     "CLEARANCE": "0.25",

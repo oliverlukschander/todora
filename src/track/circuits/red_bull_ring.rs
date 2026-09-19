@@ -9,6 +9,8 @@ pub(super) const CIRCUIT: Circuit = Circuit {
     id: "red-bull-ring",
     name: "Red Bull Ring",
     corners: 1.0,
+    lap: 559.0,
+    plan_scale: 1.0,
     centreline: CENTRELINE,
 };
 

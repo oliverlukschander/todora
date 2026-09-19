@@ -23,13 +23,23 @@ const SUB: usize = 6;
 /// No corner may be tighter than this. A parallel curve offset by `w` stays
 /// regular only while `w` is inside the radius of curvature; past that it cusps
 /// and folds back through itself. Scaled to ⅓, Spielberg's hairpins come out at
-/// well under a metre of radius, so the corners have to be opened before the road
-/// can carry its full width through them.
+/// well under a metre of radius, so the corners have to be opened before the
+/// road can carry its width through them.
 ///
-/// This is one half of the contract the cross-section in [`super`] is checked
-/// against; the other half is [`Ribbon::min_separation`]. Together they are what
-/// lets the loft sweep the profile with no clamping anywhere.
-pub(crate) const MIN_RADIUS: f32 = 10.0;
+/// Opening a corner cuts it, and this is what decides how much gets cut. At
+/// 10 m it cut a great deal: more than a third of the source's circuits were
+/// rounded off into rings rather than shrunk, Monaco worst of all at a quarter
+/// of its lap kept. It had to be 10 m because the road was 8 m wide and the
+/// outermost rib of the cross-section has to stay inside the radius of the
+/// corner it is being swept round. The road is 3.3 m now, so the target can be
+/// 5 m, and at 5 m every circuit in the source keeps more than four fifths of
+/// its lap: the worst is Monaco at 81%, against 25%.
+///
+/// It is not the *only* thing the cross-section is checked against — see
+/// [`Ribbon::room`], which measures the corner here rather than the tightest
+/// one anywhere. This is what the corner-opening pass promises the fit it will
+/// deliver, and `every_circuit_carries_a_road` is what says it did.
+pub(crate) const MIN_RADIUS: f32 = 5.0;
 /// Rise over run, after smoothing. The DEM heights are quantised to whole metres
 /// and the plan is scaled far harder than the elevation, so a single 1 m DEM step
 /// otherwise lands inside one station and reads as a wall.
@@ -92,6 +102,17 @@ pub struct Ribbon {
     index: Index,
     length: f32,
     kept: f32,
+    /// How much the circuit rose and fell once the heights were smoothed and
+    /// before the grade cap shaved anything off it.
+    ///
+    /// Kept so that the two things that flatten a circuit can be told apart.
+    /// They are different mechanisms with different reasons and different
+    /// guards — smoothing is there because the elevation model is quantised to
+    /// the metre, the cap is there because a step in it would read as a wall —
+    /// and a test that measures their sum can only ever say that one of them
+    /// did something.
+    #[cfg(test)]
+    smoothed_relief: f32,
 }
 
 /// Where a world position sits relative to the circuit.
@@ -144,9 +165,15 @@ impl Ribbon {
             }
         }
         smooth_heights(&mut line);
+        #[cfg(test)]
+        let smoothed = relief(&line);
         cap_grade(&mut line);
         let mut ribbon = Self::from_polyline(line);
         ribbon.kept = ribbon.length / before.max(1e-4);
+        #[cfg(test)]
+        {
+            ribbon.smoothed_relief = smoothed;
+        }
         ribbon
     }
 
@@ -193,6 +220,37 @@ impl Ribbon {
         let step = self.length / n as f32;
         let steps = (back / step).round() as usize % n;
         &self.stations[(n - steps) % n]
+    }
+
+    /// How much the circuit rose and fell once its heights were smoothed, and
+    /// before the grade cap. What the smoothing alone can be blamed for.
+    #[cfg(test)]
+    pub(crate) fn smoothed_relief(&self) -> f32 {
+        self.smoothed_relief
+    }
+
+    /// How much the finished circuit rises and falls. What the smoothing *and*
+    /// the cap together left.
+    #[cfg(test)]
+    pub(crate) fn relief(&self) -> f32 {
+        let (low, high) = self
+            .stations
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(l, h), s| {
+                (l.min(s.pos.y), h.max(s.pos.y))
+            });
+        high - low
+    }
+
+    /// The station `by` metres further along the lap from plan distance `s`.
+    /// The stations are evenly spaced by construction, so this is arithmetic on
+    /// the spacing rather than a walk, and it wraps at the line like the lap
+    /// does.
+    pub fn along(&self, s: f32, by: f32) -> &Station {
+        let n = self.stations.len();
+        let step = self.length / n as f32;
+        let at = ((s + by) / step).round().rem_euclid(n as f32);
+        &self.stations[at as usize % n]
     }
 
     /// Tightest corner on the circuit.
@@ -390,6 +448,8 @@ impl Ribbon {
             stations,
             length,
             kept: 1.0,
+            #[cfg(test)]
+            smoothed_relief: 0.0,
         }
     }
 }
@@ -605,6 +665,15 @@ fn slack(best: f32) -> f32 {
 /// measured in plan, so the loft's spacing does not stretch on the climbs.
 fn flat(v: Vec3) -> Vec3 {
     Vec3::new(v.x, 0.0, v.z)
+}
+
+/// How much a polyline rises and falls.
+#[cfg(test)]
+fn relief(line: &[Vec3]) -> f32 {
+    let (low, high) = line
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(l, h), p| (l.min(p.y), h.max(p.y)));
+    high - low
 }
 
 fn closed_length(line: &[Vec3]) -> f32 {
@@ -924,12 +993,12 @@ mod tests {
     /// a lookup does not grow with the length of the lap.
     ///
     /// A fixed count rather than a fraction, because a fraction would pass by
-    /// the lap getting longer. Today the worst circuit is Spa at 28 segments of
-    /// its 2,172 and the best is Indianapolis at 11 of 1,264 — the count follows
-    /// how much circuit crowds into one box, not how much circuit there is. The
-    /// bar has room in it because that crowding is the circuit's business and
-    /// this is not a tuning target; it is here to notice the day the index stops
-    /// pruning.
+    /// the lap getting longer. Today the worst circuit reads 36 segments and
+    /// the best 12, on laps of between 1,244 and 4,824 of them — the count
+    /// follows how much circuit crowds into one box, not how much circuit there
+    /// is, which is the whole claim. The bar has room in it because that
+    /// crowding is the circuit's business and this is not a tuning target; it
+    /// is here to notice the day the index stops pruning.
     ///
     /// Counted in segments projected rather than in seconds, so it reads the
     /// same on a loaded machine as on an idle one. The seconds are in
@@ -985,7 +1054,12 @@ mod tests {
                 sink -= ribbon.locate(at).s as f64;
             }
             let look = look.elapsed().as_secs_f64();
-            assert_eq!(sink, 0.0, "the two lookups did not agree");
+            // Not to the bit: the two sums are over the same numbers in the
+            // same order, but a release build is free to vectorise one loop and
+            // not the other, and adding doubles in a different order is a
+            // different answer in the last place. What is held to the bit is in
+            // `the_index_agrees_with_the_walk`, one fix at a time.
+            assert!(sink.abs() < 1e-6, "the two lookups did not agree: {sink}");
 
             let each = probes.len() as f64;
             let segments: usize = probes.iter().map(|&at| ribbon.projections(at)).sum();

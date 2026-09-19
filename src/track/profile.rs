@@ -29,23 +29,60 @@ use bevy::{
 use super::markers;
 use super::ribbon::Ribbon;
 
-/// Half of the 8 m road, kerbs and edge lines included.
+/// Half of the 3.3 m road, kerbs and edge lines included.
 ///
-/// The brief called for 12 m. At ⅓ plan scale, Spielberg passes within 14.7 m
-/// of itself, which caps the whole cross-section at 7.3 m either side there. A
-/// 12 m road would spend all of that on asphalt and leave no verge at all — and
-/// at 1.1 m wide, the car reads better against 8 m than it did against 12.
-pub(super) const HALF_WIDTH: f32 = 4.0;
+/// The road used to be 8 m, and 8 m was the thing every other compromise in the
+/// game was paying for. The plan is shrunk about seven and a half times and the
+/// road was not, so it came out five times too wide for the land it was laid
+/// on: corners had to be exaggerated before they were corners at all, a circuit
+/// needed 5.5 m either side of its centreline before it could be built, and
+/// more than half of the source's circuits could not be. At 3.3 m the road is
+/// three cars wide rather than seven — half again as generous as a real circuit
+/// is, in car widths, instead of two and a half times as generous — and the
+/// land it is laid on is nearly big enough for it.
+///
+/// It is not the old road multiplied. The kerb and the edge line are sized for
+/// what they are, because a kerb scaled by 0.41 is a strip a wheel cannot land
+/// on and a line scaled by 0.41 is too thin to see; what gives instead is the
+/// asphalt, which had 2.6 m of room either side of the car and now has 0.86.
+pub(crate) const HALF_WIDTH: f32 = 1.65;
 /// Half-width of the asphalt itself: the kerbs and edge lines sit inside
 /// [`HALF_WIDTH`], so this is where a wheel starts rumbling.
-pub(super) const TARMAC_HALF: f32 = 3.15;
+///
+/// What is left after the kerb and the line, and what it has to leave is a car:
+/// the outside of the outer tyre is [`ROLLING_HALF`] from the middle, so this
+/// is 0.86 m of asphalt either side of a car sitting on the centreline. That is
+/// the number the narrower road actually costs, and it is why the kerb is worth
+/// keeping wide — a driver who runs out of asphalt here lands on a kerb rather
+/// than in the grass.
+pub(super) const TARMAC_HALF: f32 = HALF_WIDTH - KERB_WIDTH - LINE_WIDTH;
 /// Where the white edge line stops and the kerb begins.
-const KERB_INNER: f32 = 3.30;
+const KERB_INNER: f32 = HALF_WIDTH - KERB_WIDTH;
+/// How wide the kerb is, and the white line inside it.
+///
+/// The kerb is a place to put a wheel, so it is sized against the wheel: a
+/// little wider than the tyre is, which is what makes riding it a thing the
+/// driver chooses rather than a thing that happens. The line is paint and is
+/// sized to be seen — a twentieth of the road, where multiplying the old one
+/// down would have given a sixtieth.
+const KERB_WIDTH: f32 = 0.25;
+const LINE_WIDTH: f32 = 0.08;
+/// Half the width of the car's rolling footprint: the outside of the outer
+/// tyre. What the asphalt has to be able to hold.
+const ROLLING_HALF: f32 = crate::car::HALF_TRACK + crate::car::WHEEL_WIDTH / 2.0;
+const _: () = assert!(TARMAC_HALF > 2.0 * ROLLING_HALF);
+const _: () = assert!(KERB_WIDTH > crate::car::WHEEL_WIDTH);
 /// Height of the kerb's outer lip, which the verge hangs off.
 pub(super) const KERB_TOP: f32 = 0.05;
 /// How far the verge reaches beyond the kerb on a circuit with room for all of
 /// it. A stretch of circuit with less gets less — see [`Profile::fit`].
-pub(super) const VERGE: f32 = 3.0;
+///
+/// Sized against the car rather than against the road, because what a verge is
+/// for is somewhere to put a car that has run out of road: a spun one is 2.4 m
+/// long and this is most of that. Scaling the old 3 m down with the road would
+/// have left 1.2 m, which is a car's width of grass and nowhere to have an
+/// accident.
+pub(super) const VERGE: f32 = 2.0;
 /// The whole cross-section at its widest, either side of the centreline.
 pub(super) const EDGE: f32 = HALF_WIDTH + VERGE;
 /// How much of the verge is grass before the lip it falls away over.
@@ -583,31 +620,38 @@ mod tests {
         }
     }
 
-    /// The cross-section a circuit with room gets is the one the game shipped
-    /// with, to the last bit.
+    /// The cross-section a circuit with room gets, rib by rib and by name.
     ///
-    /// The table of heights became a table of slopes so that the verge could be
-    /// any width; this is what says the change of description was not also a
-    /// change of shape. Every one of the old ribs, by name.
+    /// Written out rather than derived, because everything else in this module
+    /// derives it and a table that checks its own derivation checks nothing.
+    /// This is the road: 3.3 m across the outsides of the kerbs, of which
+    /// 2.64 m is asphalt, a white line 0.08 m wide either side of that, and a
+    /// kerb 0.25 m wide outside each line standing 5 cm proud. Then two metres
+    /// of verge, grass for the first 1.33 and a lip for the last 0.67, arriving
+    /// at −0.62 m.
+    ///
+    /// That the asphalt holds the whole car and the kerb holds a wheel — the
+    /// reason the road was cut up this way rather than multiplied down from the
+    /// old one — is said at compile time, beside the widths themselves.
     #[test]
-    fn a_full_verge_is_the_section_that_was_there_before() {
+    fn a_full_verge_is_the_section_it_says_it_is() {
         let was: &[(f32, f32, Band)] = &[
-            (-7.00, -0.95, Band::Skirt),
-            (-6.00, -0.20, Band::Grass),
-            (-4.00, 0.05, Band::Kerb),
-            (-3.30, 0.00, Band::Line),
-            (-3.15, 0.00, Band::Tarmac),
-            (3.15, 0.00, Band::Line),
-            (3.30, 0.00, Band::Kerb),
-            (4.00, 0.05, Band::Grass),
-            (6.00, -0.20, Band::Skirt),
-            (7.00, -0.95, Band::End),
+            (-3.65000, -0.61667, Band::Skirt),
+            (-2.98333, -0.11667, Band::Grass),
+            (-1.65000, 0.05, Band::Kerb),
+            (-1.40000, 0.00, Band::Line),
+            (-1.32000, 0.00, Band::Tarmac),
+            (1.32000, 0.00, Band::Line),
+            (1.40000, 0.00, Band::Kerb),
+            (1.65000, 0.05, Band::Grass),
+            (2.98333, -0.11667, Band::Skirt),
+            (3.65000, -0.61667, Band::End),
         ];
         let now = section(VERGE, VERGE);
         assert_eq!(now.len(), was.len());
         for (rib, was) in now.iter().zip(was) {
-            assert!((rib.0 - was.0).abs() < 1e-6, "{} against {}", rib.0, was.0);
-            assert!((rib.1 - was.1).abs() < 1e-6, "{} against {}", rib.1, was.1);
+            assert!((rib.0 - was.0).abs() < 1e-4, "{} against {}", rib.0, was.0);
+            assert!((rib.1 - was.1).abs() < 1e-4, "{} against {}", rib.1, was.1);
             assert_eq!(rib.2, was.2);
         }
         // Symmetric when both sides are given the same room, which is the one
@@ -906,28 +950,28 @@ mod tests {
     /// pleasant amount of grass, and a stretch of circuit is not unbuildable
     /// for having 1.4. What it cost was real — it is the reason none of the six
     /// circuits that fail for want of room could be let in, including three
-    /// that have 5 m of envelope at their tightest and the full 7 everywhere
+    /// that have 5 m of envelope at their tightest and the full road everywhere
     /// else. What it bought was nothing that could be stated.
     ///
     /// The floor is now the sum of what has to fit on the shoulder: the wall
     /// the car is held at, and the footprint of a corner marker with its
     /// clearances, on grass that is two thirds of the verge. Lowering it is not
     /// the same as removing it, and this is what says so — an oval whose two
-    /// straights run 9 m apart has 4.25 m of cross-section to give against a
-    /// road that is 4 m to the kerb, and it is turned away with the place
-    /// named. Widen the same oval to 13 m and it is a circuit.
+    /// straights run 4.2 m apart has 1.85 m of cross-section to give against a
+    /// road that is 1.65 m to the kerb, and it is turned away with the place
+    /// named. Widen the same oval to 6 m and it is a circuit.
     #[test]
     fn a_circuit_with_nowhere_to_put_a_shoulder_is_still_refused() {
-        let cramped = Profile::fit(&oval(9.0, 120.0));
+        let cramped = Profile::fit(&oval(4.2, 120.0));
         let why = cramped
             .err()
-            .expect("9 m apart is not a road and two verges");
+            .expect("4.2 m apart is not a road and two verges");
         assert!(why.contains("round the lap"), "{why}");
         assert!(why.contains("verge"), "{why}");
 
         // The same shape with room for a shoulder, which is what makes the
         // refusal above a bar rather than a wall.
-        let roomy = Profile::fit(&oval(13.0, 120.0)).expect("13 m apart is a circuit");
+        let roomy = Profile::fit(&oval(6.0, 120.0)).expect("6 m apart is a circuit");
         let (narrowest, widest) = roomy.span();
         assert!(
             narrowest >= HALF_WIDTH + LEAST_VERGE,
@@ -939,10 +983,10 @@ mod tests {
         // that radius, and that is the tightest the cross-section gets. Down
         // the straights it is the 13 m gap less the clearance instead, which is
         // wider — see `a_pinch_near_along_the_lap_is_still_a_pinch`.
-        let bend = (1.0 - SPARE) * 6.5;
+        let bend = (1.0 - SPARE) * 3.0;
         assert!(
             (narrowest - bend).abs() < 0.05,
-            "{narrowest} m at the ends, where a 6.5 m corner allows {bend:.2}"
+            "{narrowest} m at the ends, where a 3 m corner allows {bend:.2}"
         );
         assert!(widest <= EDGE);
     }
@@ -964,18 +1008,18 @@ mod tests {
     /// touches the centreline there and nothing else, and the road running on
     /// ahead is tangent to that disc rather than inside it, so a station's
     /// neighbours drop out by geometry instead of by a rule. Here is the shape
-    /// that used to be exempt: the straights of this oval are 29 m apart round
-    /// the lap and 13 m apart across it, and the verge between them is fitted
-    /// to the 13.
+    /// that used to be exempt: the straights of this oval are 21 m apart round
+    /// the lap and 6 m apart across it, and the verge between them is fitted
+    /// to the 6.
     #[test]
     fn a_pinch_near_along_the_lap_is_still_a_pinch() {
-        let ribbon = oval(13.0, 12.0);
-        let apart = 12.0 + std::f32::consts::PI * 6.5;
+        let ribbon = oval(6.0, 12.0);
+        let apart = 12.0 + std::f32::consts::PI * 3.0;
         assert!(
             apart < 60.0,
             "the straights are {apart:.0} m apart round the lap"
         );
-        let profile = Profile::fit(&ribbon).expect("13 m apart is a circuit");
+        let profile = Profile::fit(&ribbon).expect("6 m apart is a circuit");
 
         // The middle of one straight, where there is no corner to blame and the
         // only thing nearby is the other straight. Its `right` points across
@@ -995,11 +1039,11 @@ mod tests {
         );
         let facing = profile.reach(middle, 0.0, 1.0);
         assert!(
-            (facing - (6.5 - CLEARANCE)).abs() < 0.05,
-            "{facing} m of cross-section across a 13 m gap, where {:.2} is what \
+            (facing - (3.0 - CLEARANCE)).abs() < 0.05,
+            "{facing} m of cross-section across a 6 m gap, where {:.2} is what \
              the gap allows — the old fit would have given it the full {EDGE}, \
              because the two straights are near each other round the lap",
-            6.5 - CLEARANCE
+            3.0 - CLEARANCE
         );
         // And the side facing outward, where there is nothing at all, keeps
         // everything the cross-section has.
@@ -1076,8 +1120,13 @@ mod tests {
         for circuit in circuits::all() {
             let track = Track::new(circuit);
             let lap = track.ribbon.length();
+            // A sanity range rather than a design target: the circuits are
+            // shrunk alike and come out the length they come out. The top of it
+            // is set by Baku, which is 6 km of city street built at two and a
+            // half times the shared plan scale because nothing narrower fits
+            // between its old-town walls — see `Circuit::plan_scale`.
             assert!(
-                (400.0..1200.0).contains(&lap),
+                (400.0..2100.0).contains(&lap),
                 "{} laps {lap} m",
                 circuit.name
             );

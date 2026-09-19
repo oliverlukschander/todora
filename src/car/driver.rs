@@ -20,7 +20,50 @@ use bevy::prelude::*;
 
 use super::level;
 use super::physics::{Car, Controls, GRAVITY, Handling};
-use crate::track::Track;
+use crate::track::{ROAD_HALF, Track};
+
+/// Metres of road between one look-ahead probe and the next.
+///
+/// The resolution of the look-ahead, not its reach — how far each driver looks
+/// is a count of these and is part of what makes it that driver. A corner at
+/// the game's tightest radius is 5 m of road; sampling every 1.5 m puts three
+/// probes inside one, where the old 3 m against a 10 m radius put three inside
+/// one as well. The same statement about a road half the width.
+const PROBE: f32 = 1.5;
+/// How hard the driver winds the wheel to come back to the middle of the road,
+/// at a full road half-width off it.
+///
+/// Per road half-width and not per metre, which is the correction: a metre off
+/// line is most of the way to the grass on a 3.3 m road and a quarter of the
+/// way there on the 8 m road this was tuned against, and a driver that pulls
+/// the same amount in both cases is either asleep on one road or sawing at the
+/// wheel on the other. The figure itself is what the old per-metre gain came to
+/// at the edge of the old road, so on that road nothing has changed.
+const PULL: f32 = 0.64;
+/// How hard it winds the wheel to point back down the road, per radian of
+/// error. This is the damping — the term that stops [`PULL`] overshooting — and
+/// it is about the car and the road's direction rather than the road's width,
+/// so it did not move.
+const STRAIGHTEN: f32 = 1.6;
+/// How wrong it has to look before the clumsy driver touches the wheel at all.
+///
+/// In the units of `correction`, which is worth unpacking, because it is a
+/// claim about a person: this is the nose eleven degrees off the road, or the
+/// car half way from the middle of the road to the grass, or some mix of the
+/// two. Under that, a driver on a keyboard does nothing — there is no
+/// small input available to them, so the alternative to doing nothing is full
+/// lock, and full lock for a nose that is nearly straight is a swerve.
+///
+/// It used to be one degree, and one degree was never a keyboard driver's idea
+/// of crooked. It was a figure that happened to stay out of trouble on an 8 m
+/// road, because on an 8 m road full lock has room to be wrong in: the swerve
+/// it causes is a fifth of the road. On a 3.3 m road the same swerve is half
+/// the road, the correction for it is another swerve, and the car saws itself
+/// into the grass and stays there. Every circuit goes round anywhere from 0.26
+/// to at least 0.36, and this is the middle of that; at 0.22 the clumsy driver
+/// gets 90% of the way round Estoril against a bar of 90, which is not a
+/// different kind of behaviour so much as an unlucky place to stand.
+const NOTICES: f32 = 0.30;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Style {
@@ -32,6 +75,35 @@ pub(crate) struct Driver {
     pub style: Style,
     /// What the driver is reacting to: the world as it was a reaction time ago.
     seen: VecDeque<Seen>,
+}
+
+/// What makes one driver that driver, rather than the other one.
+struct Habits {
+    /// Frames of delay at 120 Hz: the world it is reacting to is the world as
+    /// it was this long ago.
+    reaction: usize,
+    /// Probes up the road, [`PROBE`] apart.
+    lookahead: usize,
+    /// How far past its own corner limit it gets before the brakes go on.
+    late: f32,
+    /// How much of the tyre it *plans* to use in a corner.
+    ///
+    /// Not how much is there — how much it leaves itself. The rest is the
+    /// margin for a bump, a slide, and for not being exactly on the line when
+    /// the corner arrives, and that last one is why this is smaller than it
+    /// was: on an 8 m road a car a metre and a half wide of its line is still
+    /// on the asphalt, and on a 3.3 m road it is in the grass with a tenth of
+    /// the drag it had. Monaco is where that showed — its line comes
+    /// immediately after Rascasse, and a plain driver planning on 70% of the
+    /// tyre arrived at Anthony Noghès 5% too fast, ran wide, bogged down in the
+    /// grass and crossed its own start line at 3 m/s.
+    ///
+    /// The clumsy driver keeps the old figure, and that is the point of it
+    /// rather than an oversight. It is the driver who does not plan: it brakes
+    /// late on purpose, and a margin it left itself deliberately would be a
+    /// different driver. It pays for the optimism by being off the road half
+    /// the time, which is what it is there to show.
+    plans_on: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -49,12 +121,30 @@ impl Driver {
         }
     }
 
-    /// Frames of delay at 120 Hz, probes up the road three metres apart, and
-    /// how far past the limit before the brakes go on.
-    fn habits(&self) -> (usize, usize, f32) {
+    /// What makes this driver that driver.
+    ///
+    /// The lookahead counts are what they are so that the *distances* are what
+    /// they were: 48 m for the plain driver and 18 m for the clumsy one, which
+    /// is the difference between seeing the corner and arriving at it. Halving
+    /// the probe spacing without doubling the counts would have quietly made
+    /// both drivers short-sighted and called it the narrower road's fault. 48 m
+    /// is also comfortably past the hardest stop the game has in it, which is
+    /// what the plain driver's promise — if it cannot get round, nobody can —
+    /// rests on.
+    fn habits(&self) -> Habits {
         match self.style {
-            Style::Plain => (0, 16, 1.04),
-            Style::Clumsy => (18, 6, 1.15),
+            Style::Plain => Habits {
+                reaction: 0,
+                lookahead: 32,
+                late: 1.04,
+                plans_on: 0.55,
+            },
+            Style::Clumsy => Habits {
+                reaction: 18,
+                lookahead: 12,
+                late: 1.15,
+                plans_on: 0.70,
+            },
         }
     }
 
@@ -66,7 +156,12 @@ impl Driver {
         transform: &Transform,
         car: &Car,
     ) -> Controls {
-        let (reaction, lookahead, late) = self.habits();
+        let Habits {
+            reaction,
+            lookahead,
+            late,
+            plans_on,
+        } = self.habits();
         let heading = level(*transform.forward());
         let ground = track.ground(transform.translation);
         // The way the lap runs, not the way the car happens to be pointing:
@@ -75,20 +170,26 @@ impl Driver {
         // Signed, so facing the wrong way reads as half a turn of error rather
         // than as no error at all.
         let astray = f32::atan2(heading.cross(ahead).y, heading.dot(ahead));
-        let correction = astray * 1.6 + ground.lateral * 0.16;
+        let correction = astray * STRAIGHTEN + PULL * ground.lateral / ROAD_HALF;
 
         // Hold a speed the tyres can corner at, looking at the tightest bend
         // between here and as far up the road as this driver looks. Conservative
         // about grip — no credit for downforce — and it knows a descent has the
         // hill working against the brakes.
-        let hold = 0.7 * handling.grip * ground.grip;
+        let hold = plans_on * handling.grip * ground.grip;
         let downhill = (-ground.slope * ground.tangent.dot(heading) * GRAVITY).max(0.0);
         let stopping = (0.75 * handling.brake * ground.grip - downhill).max(hold * 0.4);
+        // Up the road, not off down the car's nose. A straight-line probe
+        // leaves the road at the first corner: three metres past the apex it is
+        // out in the grass, and on a circuit that doubles back it lands on the
+        // neighbouring straight and reports that straight's curvature as the
+        // corner about to arrive. Stepping along the ribbon by arc distance
+        // follows whatever road the car is on, round the corner and through it.
         let mut limit = handling.top_speed;
         for step in 0..=lookahead {
-            let reach = step as f32 * 3.0;
-            let probe = track.ground(transform.translation + ahead * reach);
-            let corner = hold / probe.curvature.abs().max(0.002);
+            let reach = step as f32 * PROBE;
+            let bend = track.curvature_ahead(&ground, reach);
+            let corner = hold / bend.abs().max(0.002);
             limit = limit.min((corner + 2.0 * stopping * reach).sqrt());
         }
         let speed = car.velocity.length();
@@ -118,9 +219,9 @@ impl Driver {
                 Controls {
                     throttle: if too_fast { 0.0 } else { 1.0 },
                     brake: if too_fast { 1.0 } else { 0.0 },
-                    steer: if correction > 0.03 {
+                    steer: if correction > NOTICES {
                         1.0
-                    } else if correction < -0.03 {
+                    } else if correction < -NOTICES {
                         -1.0
                     } else {
                         0.0
@@ -206,15 +307,21 @@ mod tests {
             lap.distance += speed * dt;
             let ground = track.ground(transform.translation);
             let heading = level(*transform.forward());
-            if ground.lateral.abs() > 4.0 {
+            // Off the road is past the kerb, and in the weeds is most of the
+            // way out to where the car is held. Both read off the road rather
+            // than off the numbers the road happened to have when these were
+            // written.
+            let off = ROAD_HALF;
+            let weeds = ROAD_HALF + 0.5 * (ground.edge - ROAD_HALF);
+            if ground.lateral.abs() > off {
                 lap.off_road += dt;
             }
-            if ground.lateral.abs() > 5.5 {
+            if ground.lateral.abs() > weeds {
                 lap.in_the_weeds += dt;
             }
             if ground.slope * ground.tangent.dot(heading) < -0.04 {
                 lap.descending += dt;
-                if ground.lateral.abs() > 4.0 {
+                if ground.lateral.abs() > off {
                     lap.off_road_descending += dt;
                 }
             }
@@ -573,7 +680,7 @@ mod tests {
             balanced.distance
         );
         assert!(
-            loose.off_road < 3.0,
+            loose.off_road < 6.0,
             "off the road {:.1} s on the loose setup",
             loose.off_road
         );

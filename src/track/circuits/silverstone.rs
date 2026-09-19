@@ -21,6 +21,8 @@ pub(super) const CIRCUIT: Circuit = Circuit {
     // down only 45% of the lap, which is Spielberg's figure, and it comes
     // through keeping 90% of itself with the full cross-section to spare.
     corners: 1.0,
+    lap: 762.8,
+    plan_scale: 1.0,
     centreline: CENTRELINE,
 };
 
