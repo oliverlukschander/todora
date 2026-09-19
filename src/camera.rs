@@ -8,9 +8,9 @@ use crate::car::{Car, level};
 use crate::track::Track;
 use crate::world::SKY;
 
-// Framed on the car, which is about 1.9 m long.
-const BACK: f32 = 6.8;
-const HEIGHT: f32 = 3.5;
+// A close, low chase view with room to read the road ahead.
+const BACK: f32 = 6.0;
+const HEIGHT: f32 = 2.8;
 const LOOK_AHEAD: f32 = 1.8;
 const LOOK_HEIGHT: f32 = 0.6;
 const FOLLOW_XZ: f32 = 6.5;
