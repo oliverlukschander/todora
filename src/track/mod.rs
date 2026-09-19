@@ -137,10 +137,10 @@ const GOING_NOWHERE: f32 = 1.5;
 /// And 65 m is not there to spend. The run-up wants to be straight, or the car
 /// arrives at the line slower for having cornered on the way, and a straight is
 /// what the circuits have least of behind their lines: Spielberg has 48 m of it,
-/// Monza 97, and Spa none at all, because Spa's line is inside La Source. At 45
-/// every circuit sets the car down pointing very nearly the way the line does;
-/// at 75 Spielberg sets it down sideways, mid-corner. `the_grid_is_a_run_up_to
-/// _the_line` is what holds that.
+/// Monza 97, and Silverstone barely any, because its line is on the Hamilton
+/// Straight and Club is 45 m behind it. At 45 every circuit sets the car down
+/// pointing very nearly the way the line does; at 75 Spielberg sets it down
+/// sideways, mid-corner. `the_grid_is_a_run_up_to_the_line` is what holds that.
 const RUN_UP: f32 = 45.0;
 /// How much of a lap may sit at [`ribbon::MAX_GRADE`] before the cap has
 /// stopped backing the hills up and started being their shape. At the cap the
@@ -1546,7 +1546,13 @@ mod tests {
     /// and the third is edited by hand — so the way they go wrong is quietly:
     /// a circuit generated twice under two names, a circuit whose trace was
     /// refreshed from `master` while the rest came from a pinned commit, a
-    /// provenance entry left behind by a module that was deleted.
+    /// provenance entry left behind by a module that was deleted, a trace
+    /// turned to begin somewhere other than the line recorded for it.
+    ///
+    /// That last one is why the line is checked here rather than in the game:
+    /// the game cannot tell, because the first sample of the trace *is* the
+    /// line as far as it is concerned, wherever it happens to be. Only the two
+    /// files can disagree, so only the two files can be held together.
     ///
     /// Reading the repository from a test is unusual and is the point. What is
     /// being checked is not what the code does with the data; it is that the
@@ -1594,6 +1600,17 @@ mod tests {
             assert!(
                 recorded.contains(&format!("\"source_id\": \"{source}\"")),
                 "{source} is not in the provenance file"
+            );
+            let line = text
+                .split("start/finish line, ")
+                .nth(1)
+                .and_then(|rest| rest.lines().next())
+                .unwrap_or_else(|| panic!("{module} does not say where its line is"))
+                .trim_end_matches('.')
+                .replace(", ", ",\n      ");
+            assert!(
+                recorded.contains(&format!("\"line\": [\n      {line}\n    ]")),
+                "{module} begins at {line}, which is not the line recorded for it"
             );
             sources.push(source);
         }

@@ -6,7 +6,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 145,
-    "lap_km": 5.279
+    "lap_km": 5.279,
+    "line": [
+      -37.84976,
+      144.96864
+    ]
   },
   "algarve": {
     "source_id": "pt-2008",
@@ -15,7 +19,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 100,
-    "lap_km": 4.657
+    "lap_km": 4.657,
+    "line": [
+      37.23211,
+      -8.63081
+    ]
   },
   "americas": {
     "source_id": "us-2012",
@@ -24,7 +32,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 170,
-    "lap_km": 5.526
+    "lap_km": 5.526,
+    "line": [
+      30.13176,
+      -97.63965
+    ]
   },
   "bahrain": {
     "source_id": "bh-2002",
@@ -33,7 +45,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 93,
-    "lap_km": 5.424
+    "lap_km": 5.424,
+    "line": [
+      26.03177,
+      50.51054
+    ]
   },
   "baku": {
     "source_id": "az-2016",
@@ -42,7 +58,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 85,
-    "lap_km": 5.949
+    "lap_km": 5.949,
+    "line": [
+      40.37269,
+      49.85325
+    ]
   },
   "barcelona_catalunya": {
     "source_id": "es-1991",
@@ -51,7 +71,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 149,
-    "lap_km": 4.67
+    "lap_km": 4.67,
+    "line": [
+      41.57003,
+      2.26122
+    ]
   },
   "buenos_aires": {
     "source_id": "ar-1952",
@@ -60,7 +84,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 89,
-    "lap_km": 4.299
+    "lap_km": 4.299,
+    "line": [
+      -34.69405,
+      -58.46126
+    ]
   },
   "estoril": {
     "source_id": "pt-1972",
@@ -69,7 +97,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 82,
-    "lap_km": 4.171
+    "lap_km": 4.171,
+    "line": [
+      38.74902,
+      -9.39307
+    ]
   },
   "gilles_villeneuve": {
     "source_id": "ca-1978",
@@ -78,7 +110,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 101,
-    "lap_km": 4.37
+    "lap_km": 4.37,
+    "line": [
+      45.50182,
+      -73.52325
+    ]
   },
   "hermanos_rodriguez": {
     "source_id": "mx-1962",
@@ -87,7 +123,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 100,
-    "lap_km": 4.307
+    "lap_km": 4.307,
+    "line": [
+      19.40623,
+      -99.09434
+    ]
   },
   "hockenheim": {
     "source_id": "de-1932",
@@ -96,7 +136,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 118,
-    "lap_km": 4.559
+    "lap_km": 4.559,
+    "line": [
+      49.32777,
+      8.56587
+    ]
   },
   "hungaroring": {
     "source_id": "hu-1986",
@@ -105,7 +149,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 140,
-    "lap_km": 4.381
+    "lap_km": 4.381,
+    "line": [
+      47.58026,
+      19.24589
+    ]
   },
   "imola": {
     "source_id": "it-1953",
@@ -114,7 +162,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 83,
-    "lap_km": 4.904
+    "lap_km": 4.904,
+    "line": [
+      44.34406,
+      11.7167
+    ]
   },
   "indianapolis": {
     "source_id": "us-1909",
@@ -123,7 +175,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 125,
-    "lap_km": 4.088
+    "lap_km": 4.088,
+    "line": [
+      39.79315,
+      -86.23885
+    ]
   },
   "interlagos": {
     "source_id": "br-1940",
@@ -132,7 +188,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 170,
-    "lap_km": 4.303
+    "lap_km": 4.303,
+    "line": [
+      -23.70374,
+      -46.69991
+    ]
   },
   "istanbul_park": {
     "source_id": "tr-2005",
@@ -141,7 +201,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 84,
-    "lap_km": 5.313
+    "lap_km": 5.313,
+    "line": [
+      40.95213,
+      29.40615
+    ]
   },
   "jacarepagua": {
     "source_id": "br-1977",
@@ -150,7 +214,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 92,
-    "lap_km": 4.967
+    "lap_km": 4.967,
+    "line": [
+      -22.97485,
+      -43.39523
+    ]
   },
   "jeddah": {
     "source_id": "sa-2021",
@@ -159,7 +227,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 151,
-    "lap_km": 6.203
+    "lap_km": 6.203,
+    "line": [
+      21.63105,
+      39.10508
+    ]
   },
   "kyalami": {
     "source_id": "za-1961",
@@ -168,7 +240,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 85,
-    "lap_km": 4.526
+    "lap_km": 4.526,
+    "line": [
+      -25.99878,
+      28.06992
+    ]
   },
   "las_vegas": {
     "source_id": "us-2023",
@@ -177,7 +253,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 99,
-    "lap_km": 6.228
+    "lap_km": 6.228,
+    "line": [
+      36.1099,
+      -115.1612
+    ]
   },
   "losail": {
     "source_id": "qa-2004",
@@ -186,7 +266,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 106,
-    "lap_km": 5.427
+    "lap_km": 5.427,
+    "line": [
+      25.48908,
+      51.44968
+    ]
   },
   "madring": {
     "source_id": "es-2026",
@@ -195,7 +279,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 115,
-    "lap_km": 5.436
+    "lap_km": 5.436,
+    "line": [
+      40.46518,
+      -3.61689
+    ]
   },
   "magny_cours": {
     "source_id": "fr-1960",
@@ -204,7 +292,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 94,
-    "lap_km": 4.464
+    "lap_km": 4.464,
+    "line": [
+      46.86408,
+      3.16371
+    ]
   },
   "marina_bay": {
     "source_id": "sg-2008",
@@ -213,7 +305,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 115,
-    "lap_km": 4.948
+    "lap_km": 4.948,
+    "line": [
+      1.29173,
+      103.86414
+    ]
   },
   "miami": {
     "source_id": "us-2022",
@@ -222,7 +318,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 102,
-    "lap_km": 5.421
+    "lap_km": 5.421,
+    "line": [
+      25.95909,
+      -80.23737
+    ]
   },
   "monaco": {
     "source_id": "mc-1929",
@@ -231,7 +331,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 159,
-    "lap_km": 3.328
+    "lap_km": 3.328,
+    "line": [
+      43.73543,
+      7.42122
+    ]
   },
   "monza": {
     "source_id": "it-1922",
@@ -240,7 +344,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 124,
-    "lap_km": 5.793
+    "lap_km": 5.793,
+    "line": [
+      45.61897,
+      9.28122
+    ]
   },
   "mugello": {
     "source_id": "it-1914",
@@ -249,7 +357,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 128,
-    "lap_km": 5.249
+    "lap_km": 5.249,
+    "line": [
+      43.99759,
+      11.37147
+    ]
   },
   "nurburgring": {
     "source_id": "de-1927",
@@ -258,7 +370,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 132,
-    "lap_km": 5.141
+    "lap_km": 5.141,
+    "line": [
+      50.33554,
+      6.94763
+    ]
   },
   "paul_ricard": {
     "source_id": "fr-1969",
@@ -267,7 +383,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 202,
-    "lap_km": 5.825
+    "lap_km": 5.825,
+    "line": [
+      43.25202,
+      5.79157
+    ]
   },
   "red_bull_ring": {
     "source_id": "at-1969",
@@ -276,7 +396,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 80,
-    "lap_km": 4.307
+    "lap_km": 4.307,
+    "line": [
+      47.22002,
+      14.76512
+    ]
   },
   "sepang": {
     "source_id": "my-1999",
@@ -285,7 +409,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 103,
-    "lap_km": 5.555
+    "lap_km": 5.555,
+    "line": [
+      2.76053,
+      101.73564
+    ]
   },
   "shanghai": {
     "source_id": "cn-2004",
@@ -294,7 +422,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 140,
-    "lap_km": 5.454
+    "lap_km": 5.454,
+    "line": [
+      31.33684,
+      121.21838
+    ]
   },
   "silverstone": {
     "source_id": "gb-1948",
@@ -303,7 +435,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 134,
-    "lap_km": 5.884
+    "lap_km": 5.884,
+    "line": [
+      52.07049,
+      -1.02069
+    ]
   },
   "sochi": {
     "source_id": "ru-2014",
@@ -312,7 +448,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 101,
-    "lap_km": 5.839
+    "lap_km": 5.839,
+    "line": [
+      43.4097,
+      39.96807
+    ]
   },
   "spa_francorchamps": {
     "source_id": "be-1925",
@@ -321,7 +461,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 152,
-    "lap_km": 6.986
+    "lap_km": 6.986,
+    "line": [
+      50.44425,
+      5.96502
+    ]
   },
   "suzuka": {
     "source_id": "jp-1962",
@@ -330,7 +474,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 171,
-    "lap_km": 5.818
+    "lap_km": 5.818,
+    "line": [
+      34.84334,
+      136.54028
+    ]
   },
   "watkins_glen": {
     "source_id": "us-1956",
@@ -339,7 +487,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 85,
-    "lap_km": 5.454
+    "lap_km": 5.454,
+    "line": [
+      42.34105,
+      -76.92884
+    ]
   },
   "yas_marina": {
     "source_id": "ae-2009",
@@ -348,7 +500,11 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 132,
-    "lap_km": 5.299
+    "lap_km": 5.299,
+    "line": [
+      24.46359,
+      54.60773
+    ]
   },
   "zandvoort": {
     "source_id": "nl-1948",
@@ -357,6 +513,10 @@
     "revision": "394d8fbe70ef2c0b0c8d23ff7bee61fa09606055",
     "heights": "Open-Meteo DEM",
     "fixes": 118,
-    "lap_km": 4.26
+    "lap_km": 4.26,
+    "line": [
+      52.38841,
+      4.54049
+    ]
   }
 }

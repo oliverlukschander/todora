@@ -885,9 +885,10 @@ mod tests {
     /// Full throttle from the grid, and the speed as the line goes by.
     ///
     /// Spielberg and Monza have a straight behind their lines and reach 20 m/s
-    /// of the 22.2 the car actually holds on the flat. Spa has no straight at
-    /// all — its line is inside La Source — so it comes out of the hairpin at
-    /// half of that. Still a rolling start, and still Spa.
+    /// of the 22.2 the car actually holds on the flat. Silverstone has the least
+    /// of one — its line is on the Hamilton Straight, which is not 45 m long, so
+    /// the grid slot sits back in Club — and arrives at 14.2. Still a rolling
+    /// start, and still Silverstone.
     #[test]
     fn the_run_up_reaches_the_line_at_speed() {
         for circuit in crate::track::all_circuits() {
