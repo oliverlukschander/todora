@@ -8,6 +8,7 @@ repository = "https://github.com/oliverlukschander/todora"
 
 [dependencies]
 bevy = "0.19"
+lyon_tessellation = "1.0.22"
 rodio = { version = "0.22.2", default-features = false, features = ["symphonia-mp3"] }
 ureq = { version = "2.12", default-features = false, features = ["tls"] }
 

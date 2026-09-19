@@ -26,6 +26,7 @@ use bevy::prelude::*;
 use crate::car::{Controls, Player};
 use crate::ghost::clear::{ResetGhosts, ResetRequest};
 use crate::hud::{AMBER, AMBER_DIM, FRONT};
+use crate::sound::SoundToggle;
 use crate::ui::Navigation;
 
 /// What is standing in front of the game, if anything.
@@ -69,6 +70,7 @@ impl Plugin for PausePlugin {
         app.init_resource::<Halt>()
             .init_resource::<Selection>()
             .add_message::<ResetRequest>()
+            .add_message::<SoundToggle>()
             .add_message::<bevy::window::CursorMoved>()
             .add_systems(Startup, setup)
             .add_systems(
@@ -93,12 +95,21 @@ struct Banner;
 enum Action {
     #[default]
     Resume,
+    Music,
+    Effects,
     ResetCurrent,
     ResetAll,
     Quit,
 }
 impl Action {
-    const ALL: [Self; 4] = [Self::Resume, Self::ResetCurrent, Self::ResetAll, Self::Quit];
+    const ALL: [Self; 6] = [
+        Self::Resume,
+        Self::Music,
+        Self::Effects,
+        Self::ResetCurrent,
+        Self::ResetAll,
+        Self::Quit,
+    ];
 }
 
 #[derive(Resource, Default)]
@@ -145,27 +156,37 @@ fn setup(mut commands: Commands) {
                     panel.spawn(label("Your lap will be right here.", 17.0, AMBER_DIM));
                     for (action, title) in [
                         (Action::Resume, "Resume"),
+                        (Action::Music, "Music / M"),
+                        (Action::Effects, "Sound effects / F8"),
                         (Action::ResetCurrent, "Reset this ghost"),
                         (Action::ResetAll, "Reset all ghosts"),
                         (Action::Quit, "Quit game"),
                     ] {
-                        panel
-                            .spawn((
-                                Button,
-                                action,
-                                Node {
-                                    padding: UiRect::all(px(12)),
-                                    border: UiRect::all(px(2)),
-                                    border_radius: BorderRadius::all(px(8)),
-                                    justify_content: JustifyContent::Center,
-                                    ..default()
-                                },
-                                BackgroundColor(crate::ui::SURFACE),
-                                BorderColor::all(LINE),
-                            ))
-                            .with_children(|button| {
-                                button.spawn(label(title, 17.0, TEXT));
-                            });
+                        let mut button = panel.spawn((
+                            Button,
+                            action,
+                            Node {
+                                padding: UiRect::all(px(12)),
+                                border: UiRect::all(px(2)),
+                                border_radius: BorderRadius::all(px(8)),
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            BackgroundColor(crate::ui::SURFACE),
+                            BorderColor::all(LINE),
+                        ));
+                        match action {
+                            Action::Music => {
+                                button.insert(SoundToggle::Music);
+                            }
+                            Action::Effects => {
+                                button.insert(SoundToggle::Effects);
+                            }
+                            _ => {}
+                        }
+                        button.with_children(|button| {
+                            button.spawn(label(title, 17.0, TEXT));
+                        });
                     }
                     panel.spawn((
                         crate::ghost::clear::Notice,
@@ -197,6 +218,7 @@ fn watch(
     mut selected: ResMut<Selection>,
     time: Res<Time<Real>>,
     mut resets: MessageWriter<ResetRequest>,
+    mut toggles: MessageWriter<SoundToggle>,
     mut exits: MessageWriter<AppExit>,
 ) {
     let mouse_moved = cursor
@@ -244,7 +266,8 @@ fn watch(
             .iter()
             .position(|a| *a == selected.action)
             .unwrap();
-        selected.action = Action::ALL[(at as i32 + nudge.y).clamp(0, 3) as usize];
+        selected.action =
+            Action::ALL[(at as i32 + nudge.y).clamp(0, Action::ALL.len() as i32 - 1) as usize];
     }
     if previous != selected.action {
         resets.write(ResetRequest(None));
@@ -258,6 +281,12 @@ fn watch(
         match selected.action {
             Action::Resume => {
                 *halt = Halt::Nothing;
+            }
+            Action::Music => {
+                toggles.write(SoundToggle::Music);
+            }
+            Action::Effects => {
+                toggles.write(SoundToggle::Effects);
             }
             Action::ResetCurrent => {
                 resets.write(ResetRequest(Some(ResetGhosts::Current)));
@@ -385,6 +414,21 @@ mod tests {
             };
             press(&mut app, KeyCode::Escape, GamepadButton::Start);
             assert_eq!(app.world().resource::<Selection>().action, Action::Resume);
+            for (wanted, which) in [
+                (Action::Music, SoundToggle::Music),
+                (Action::Effects, SoundToggle::Effects),
+            ] {
+                press(&mut app, KeyCode::ArrowDown, GamepadButton::DPadDown);
+                assert_eq!(app.world().resource::<Selection>().action, wanted);
+                press(&mut app, KeyCode::Enter, GamepadButton::South);
+                assert_eq!(*app.world().resource::<Halt>(), Halt::Pause);
+                let toggles: Vec<_> = app
+                    .world_mut()
+                    .resource_mut::<Messages<SoundToggle>>()
+                    .drain()
+                    .collect();
+                assert_eq!(toggles, vec![which]);
+            }
             for (wanted, scope) in [
                 (Action::ResetCurrent, ResetGhosts::Current),
                 (Action::ResetAll, ResetGhosts::All),

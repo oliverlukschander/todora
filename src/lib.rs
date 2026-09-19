@@ -48,18 +48,23 @@ pub(crate) struct Reset;
 /// Where the assets are, relative to Bevy's base path. Under `cargo run` that
 /// base is the crate and the assets sit in `assets/`. Inside a macOS bundle the
 /// base is `Contents/MacOS`, where the executable is, and the assets sit in
-/// `Contents/Resources`, where Finder expects resources to be.
+/// `Contents/Resources`, where Finder expects resources to be. A Linux package
+/// keeps `assets/` next to the binary; Bevy still resolves a relative path
+/// from the process cwd, so that case is handed an absolute path.
 fn asset_folder() -> String {
-    let bundled = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.to_str().map(|s| s.contains(".app/Contents/MacOS/")))
-        .unwrap_or(false);
-    if bundled {
-        "../Resources/assets"
-    } else {
-        "assets"
+    let Ok(exe) = std::env::current_exe() else {
+        return "assets".into();
+    };
+    if exe.to_string_lossy().contains(".app/Contents/MacOS/") {
+        return "../Resources/assets".into();
     }
-    .to_string()
+    if let Some(dir) = exe.parent() {
+        let beside = dir.join("assets");
+        if beside.is_dir() {
+            return beside.to_string_lossy().into_owned();
+        }
+    }
+    "assets".into()
 }
 
 pub struct GamePlugin;

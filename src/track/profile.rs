@@ -453,6 +453,50 @@ impl Profile {
         )
     }
 
+    /// Separate the textured road from the painted lines, kerbs and verge.
+    /// Both meshes retain the exact loft positions and normals; the finish
+    /// stripe stays with the paint, so textures cannot dim its white surface.
+    pub(super) fn surfaces(&self, ribbon: &Ribbon) -> (Mesh, Mesh) {
+        let mut scenery = self.loft(ribbon);
+        let n = ribbon.stations().len();
+        let band = self
+            .at(0)
+            .iter()
+            .position(|rib| rib.2 == Band::Tarmac)
+            .unwrap();
+        let first = (band * n + STRIPE) * 4;
+        let end = (band + 1) * n * 4;
+        let positions = scenery
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .unwrap()
+            .as_float3()
+            .unwrap()[first..end]
+            .to_vec();
+        let normals = scenery
+            .attribute(Mesh::ATTRIBUTE_NORMAL)
+            .unwrap()
+            .as_float3()
+            .unwrap()[first..end]
+            .to_vec();
+        let uvs: Vec<_> = positions.iter().map(|p| [p[0] / 0.8, p[2] / 0.8]).collect();
+        let Some(Indices::U32(indices)) = scenery.indices_mut() else {
+            unreachable!("loft uses u32 indices");
+        };
+        let road_indices: Vec<_> = indices
+            .drain((band * n + STRIPE) * 6..(band + 1) * n * 6)
+            .map(|i| i - first as u32)
+            .collect();
+        let road = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+        .with_inserted_indices(Indices::U32(road_indices));
+        (scenery, road)
+    }
+
     /// Sweep the cross-section along the centreline: one strip per profile band,
     /// one quad per station, closing round to the start.
     ///
@@ -630,6 +674,48 @@ mod tests {
         circuits::all()
             .iter()
             .map(|circuit| (circuit.name, Track::new(circuit)))
+    }
+
+    #[test]
+    fn textured_road_preserves_every_original_face() {
+        for (name, track) in every_track() {
+            let original = track.profile.loft(&track.ribbon);
+            let (scenery, road) = track.profile.surfaces(&track.ribbon);
+            let faces = |mesh: &Mesh| {
+                let positions = mesh
+                    .attribute(Mesh::ATTRIBUTE_POSITION)
+                    .unwrap()
+                    .as_float3()
+                    .unwrap();
+                mesh.indices()
+                    .unwrap()
+                    .iter()
+                    .map(|i| positions[i])
+                    .collect::<Vec<_>>()
+            };
+            let mut combined = faces(&scenery);
+            let n = track.ribbon.stations().len();
+            let band = track
+                .profile
+                .at(0)
+                .iter()
+                .position(|rib| rib.2 == Band::Tarmac)
+                .unwrap();
+            combined.splice(
+                (band * n + STRIPE) * 6..(band * n + STRIPE) * 6,
+                faces(&road),
+            );
+            assert_eq!(
+                combined,
+                faces(&original),
+                "{name}: texture changed the surface"
+            );
+            assert!(road.attribute(Mesh::ATTRIBUTE_COLOR).is_none());
+            assert_eq!(
+                road.attribute(Mesh::ATTRIBUTE_UV_0).unwrap().len(),
+                road.count_vertices()
+            );
+        }
     }
 
     /// A cross-section is a cross-section however wide its two verges are:
