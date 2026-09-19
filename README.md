@@ -14,7 +14,9 @@ Acceleration builds more gradually: the default GT on flat road reaches displaye
 
 All forty laps are shorter: most by about 10%, with smaller reductions on the tightest circuits to keep the roads separate. Finished laps range from 446 m at Magny-Cours to 1,807 m at Baku. The shared plan scale is 0.12 and the elevation scale is 0.252; corner opening targets 4.5 m. The menu lists the rebuilt lengths. Surface fingerprints automatically reject ghosts recorded on the previous layouts.
 
-**Ghost reset:** press **Esc**, then **Reset this ghost** (current circuit and driving mode) or **Reset all ghosts**. Click the same button again to confirm. This removes the corresponding saved best times and restarts your lap. **Cmd+Q** on macOS, **Ctrl+Q** elsewhere, or **Quit game** in the pause menu exits with audio stopped and radio shutdown signalled; native window/menu quit also cleans up sound.
+**Pause controls:** arrows, D-pad or left stick select a highlighted action; **Enter / A** activates it. Held directions repeat at the same pace. **Esc / B / Start** resumes, and reopening selects Resume.
+
+**Ghost reset:** press **Esc**, then **Reset this ghost** (current circuit and driving mode) or **Reset all ghosts**. Activate the same button again to confirm; moving selection cancels confirmation. This removes the corresponding saved best times and restarts your lap. **Cmd+Q** on macOS, **Ctrl+Q** elsewhere, or **Quit game** in the pause menu exits with audio stopped and radio shutdown signalled; native window/menu quit also cleans up sound.
 
 ## Design history
 
@@ -64,7 +66,7 @@ cargo run
 
 **W** and **S** are the pedals — **S** brakes while you are rolling and reverses once you have stopped. **A** and **D** steer, **Space** is the handbrake, **R** starts again — car on the grid, clock at zero, marks wiped — **T** opens the list of circuits and **C** the garage, **Scroll** zooms. Arrow keys work too, and **Shift** still brakes. **1**, **2** and **3** slide the setup between understeer, balanced and oversteer. **G** shows and hides the ghost. **Esc** stops the game where it stands and **Enter** starts it again.
 
-On an Xbox controller, the left stick steers, **A** accelerates, **X** brakes/reverses and **B** applies the handbrake. RT/LT also work as analogue pedals. **RB** resets the car to the start, **LB** opens the garage, **View** opens circuits, **Y** toggles the ghost and **Start** pauses/resumes. The D-pad adjusts handling while driving; stick up/down is reserved for menus. In menus, **LB / RB** switch between Circuits and Garage & setup, the stick or D-pad browses, **A** confirms and **B** or **Start** goes back.
+On an Xbox controller, the left stick steers, **A** accelerates, **X** brakes/reverses and **B** applies the handbrake. RT/LT also work as analogue pedals. **RB** resets the car to the start, **LB** opens the garage, **View** opens circuits, **Y** toggles the ghost and **Start** pauses/resumes. The D-pad matches the arrow keys: up accelerates, down brakes/reverses, and left/right steer. Stick up/down is reserved for menus; change handling in the garage or with 1/2/3. In menus, **LB / RB** switch between Circuits and Garage & setup, the stick or D-pad browses, **A** confirms and **B** or **Start** goes back.
 
 Choose a driving mode in **Garage & setup** by clicking its button or cycling with **M** / controller **Y**, then **Apply & drive**:
 

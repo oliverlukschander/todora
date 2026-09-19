@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use super::{Ghost, Recording, store};
 use crate::{Reset, lap::LapTimer, pause::Halt};
 
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ResetGhosts {
     Current,
     All,
@@ -12,12 +12,15 @@ pub(crate) enum ResetGhosts {
 #[derive(Component)]
 pub(crate) struct Notice;
 
+#[derive(Message)]
+pub(crate) struct ResetRequest(pub Option<ResetGhosts>);
+
 #[derive(Resource, Default)]
 pub(super) struct Confirmation(Option<ResetGhosts>);
 
-pub(super) fn buttons(
+pub(super) fn handle_reset(
     halt: Res<Halt>,
-    buttons: Query<(&ResetGhosts, &Interaction), Changed<Interaction>>,
+    mut requests: MessageReader<ResetRequest>,
     mut notices: Query<&mut Text, With<Notice>>,
     mut confirmation: ResMut<Confirmation>,
     mut ghost: ResMut<Ghost>,
@@ -25,24 +28,29 @@ pub(super) fn buttons(
     mut reset: MessageWriter<Reset>,
 ) {
     if *halt != Halt::Pause {
+        requests.clear();
         confirmation.0 = None;
         for mut text in &mut notices {
             text.0 = "Reset removes saved best times and restarts the lap.".into();
         }
         return;
     }
-    for (&scope, interaction) in &buttons {
-        if *interaction != Interaction::Pressed {
+    for request in requests.read() {
+        let Some(scope) = request.0 else {
+            confirmation.0 = None;
+            for mut text in &mut notices {
+                text.0 = "Reset removes saved best times and restarts the lap.".into();
+            }
             continue;
-        }
+        };
         let message = if confirmation.0 != Some(scope) {
             confirmation.0 = Some(scope);
             match scope {
                 ResetGhosts::Current => {
-                    "Click again to erase this circuit/mode’s ghost and best time. Your lap will restart."
+                    "Confirm again to erase this circuit/mode’s ghost and best time. Your lap will restart."
                 }
                 ResetGhosts::All => {
-                    "Click again to erase every circuit/mode’s ghost and best time. Your lap will restart."
+                    "Confirm again to erase every circuit/mode’s ghost and best time. Your lap will restart."
                 }
             }
         } else {
@@ -85,7 +93,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reset_needs_two_clicks_and_clears_the_board_and_partial_recording() {
+    fn reset_needs_two_activations_and_clears_the_board_and_partial_recording() {
         let mut app = App::new();
         let car = app.world_mut().spawn_empty().id();
         let mut recording = Recording::default();
@@ -102,20 +110,16 @@ mod tests {
         .init_resource::<Confirmation>()
         .init_resource::<LapTimer>()
         .add_message::<Reset>()
-        .add_systems(Update, buttons);
+        .add_message::<ResetRequest>()
+        .add_systems(Update, handle_reset);
         app.world_mut().resource_mut::<LapTimer>().remember(42.0);
-        let button = app
-            .world_mut()
-            .spawn((ResetGhosts::Current, Interaction::Pressed))
-            .id();
+        app.world_mut()
+            .write_message(ResetRequest(Some(ResetGhosts::Current)));
         app.update();
         assert!(app.world().resource::<Ghost>().best.is_some());
         assert_eq!(app.world().resource::<LapTimer>().best, Some(42.0));
-        app.world_mut().entity_mut(button).insert(Interaction::None);
-        app.update();
         app.world_mut()
-            .entity_mut(button)
-            .insert(Interaction::Pressed);
+            .write_message(ResetRequest(Some(ResetGhosts::Current)));
         app.update();
         let ghost = app.world().resource::<Ghost>();
         assert!(ghost.best.is_none());
@@ -125,13 +129,19 @@ mod tests {
         assert_eq!(app.world().resource::<Messages<Reset>>().len(), 1);
 
         // Leaving the menu cancels a pending confirmation.
-        app.world_mut().entity_mut(button).insert(Interaction::None);
-        app.update();
         app.world_mut()
-            .entity_mut(button)
-            .insert(Interaction::Pressed);
+            .write_message(ResetRequest(Some(ResetGhosts::Current)));
         app.update();
         assert!(app.world().resource::<Confirmation>().0.is_some());
+        app.world_mut().write_message(ResetRequest(None));
+        app.update();
+        assert!(
+            app.world().resource::<Confirmation>().0.is_none(),
+            "moving focus cancels confirmation"
+        );
+        app.world_mut()
+            .write_message(ResetRequest(Some(ResetGhosts::Current)));
+        app.update();
         *app.world_mut().resource_mut::<Halt>() = Halt::Nothing;
         app.update();
         assert!(app.world().resource::<Confirmation>().0.is_none());

@@ -1,6 +1,7 @@
 //! Circuit browsing and a garage with draft car/setup choices.
 //! Browsing pauses the game; only Apply commits a selection.
 mod view;
+use crate::ui::Navigation;
 
 use crate::{
     Reset,
@@ -103,41 +104,6 @@ fn searchable(text: &str) -> String {
             _ => vec![c],
         })
         .collect()
-}
-
-/// A deliberate stick tilt moves once, then repeats using real time while
-/// the game clock is paused. Hysteresis stops small thumb movements chattering.
-#[derive(Default)]
-struct StickNavigation {
-    direction: IVec2,
-    repeat_at: f64,
-}
-
-impl StickNavigation {
-    fn step(&mut self, stick: Vec2, now: f64) -> IVec2 {
-        let threshold = if self.direction == IVec2::ZERO {
-            0.55
-        } else {
-            0.35
-        };
-        let direction = if stick.abs().max_element() < threshold {
-            IVec2::ZERO
-        } else if stick.x.abs() > stick.y.abs() {
-            IVec2::new(stick.x.signum() as i32, 0)
-        } else {
-            IVec2::new(0, -stick.y.signum() as i32)
-        };
-        if direction != self.direction {
-            self.direction = direction;
-            self.repeat_at = now + 0.35;
-            direction
-        } else if direction != IVec2::ZERO && now >= self.repeat_at {
-            self.repeat_at = now + 0.12;
-            direction
-        } else {
-            IVec2::ZERO
-        }
-    }
 }
 
 #[derive(Component, Clone, Copy)]
@@ -270,7 +236,7 @@ fn walk(
     pads: Query<&Gamepad>,
     mut wheel: MessageReader<MouseWheel>,
     mut scroll_remainder: Local<f32>,
-    mut navigation: Local<StickNavigation>,
+    mut navigation: Local<Navigation>,
     time: Res<Time<Real>>,
     mut menu: ResMut<Menu>,
     mut halt: ResMut<Halt>,
@@ -289,43 +255,12 @@ fn walk(
         .sum();
     let Some(page) = menu.page else {
         *scroll_remainder = 0.0;
-        *navigation = StickNavigation::default();
+        *navigation = Navigation::default();
         return;
     };
-    let stick = pads
-        .iter()
-        .map(Gamepad::left_stick)
-        .max_by(|a, b| a.length_squared().total_cmp(&b.length_squared()))
-        .unwrap_or_default();
-    let nudge = navigation.step(stick, time.elapsed_secs_f64());
-    let step = (nudge.y
-        + i32::from(pressed(
-            &keys,
-            &pads,
-            KeyCode::ArrowDown,
-            GamepadButton::DPadDown,
-        ))
-        - i32::from(pressed(
-            &keys,
-            &pads,
-            KeyCode::ArrowUp,
-            GamepadButton::DPadUp,
-        )))
-    .clamp(-1, 1);
-    let horizontal = (nudge.x
-        + i32::from(pressed(
-            &keys,
-            &pads,
-            KeyCode::ArrowRight,
-            GamepadButton::DPadRight,
-        ))
-        - i32::from(pressed(
-            &keys,
-            &pads,
-            KeyCode::ArrowLeft,
-            GamepadButton::DPadLeft,
-        )))
-    .clamp(-1, 1);
+    let nudge = navigation.read(&keys, &pads, time.elapsed_secs_f64());
+    let step = nudge.y;
+    let horizontal = nudge.x;
     if step != 0 {
         menu.move_by(step * if page == Page::Circuit { 2 } else { 1 });
     }
@@ -864,6 +799,40 @@ mod tests {
     }
 
     #[test]
+    fn dpad_and_arrow_navigation_match_in_both_menus_including_held_repeat() {
+        for open in [KeyCode::KeyC, KeyCode::KeyT] {
+            let mut keyboard = game();
+            let mut gamepad = game();
+            let controller = gamepad.world_mut().spawn(Gamepad::default()).id();
+            for app in [&mut keyboard, &mut gamepad] {
+                app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                    std::time::Duration::from_millis(100),
+                ));
+                press(app, open);
+                app.world_mut()
+                    .resource_mut::<ButtonInput<KeyCode>>()
+                    .reset_all();
+            }
+            for (key, button) in [
+                (KeyCode::ArrowDown, GamepadButton::DPadDown),
+                (KeyCode::ArrowRight, GamepadButton::DPadRight),
+                (KeyCode::ArrowLeft, GamepadButton::DPadLeft),
+                (KeyCode::ArrowUp, GamepadButton::DPadUp),
+            ] {
+                press(&mut keyboard, key);
+                pad_press(&mut gamepad, controller, button);
+                for _ in 0..7 {
+                    let a = keyboard.world().resource::<Menu>();
+                    let b = gamepad.world().resource::<Menu>();
+                    assert_eq!((a.at, a.setup), (b.at, b.setup));
+                    keyboard.update();
+                    gamepad.update();
+                }
+            }
+        }
+    }
+
+    #[test]
     fn xbox_x_is_not_garage_and_start_pauses_resumes_and_backs_out() {
         let mut app = game();
         let controller = app.world_mut().spawn(Gamepad::default()).id();
@@ -912,7 +881,7 @@ mod tests {
 
     #[test]
     fn menu_stick_ignores_drift_and_repeats_at_a_readable_pace() {
-        let mut stick = StickNavigation::default();
+        let mut stick = Navigation::default();
         assert_eq!(stick.step(Vec2::splat(0.2), 0.0), IVec2::ZERO);
         assert_eq!(stick.step(Vec2::Y, 0.1), IVec2::NEG_Y);
         assert_eq!(stick.step(Vec2::Y, 0.2), IVec2::ZERO);

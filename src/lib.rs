@@ -86,24 +86,13 @@ impl Plugin for GamePlugin {
     }
 }
 
-#[derive(Component)]
-pub(crate) struct Quit;
-
-fn quit(
-    keys: Res<ButtonInput<KeyCode>>,
-    buttons: Query<&Interaction, (With<Quit>, Changed<Interaction>)>,
-    mut exit: MessageWriter<AppExit>,
-) {
+fn quit(keys: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppExit>) {
     let modifier = if cfg!(target_os = "macos") {
         [KeyCode::SuperLeft, KeyCode::SuperRight]
     } else {
         [KeyCode::ControlLeft, KeyCode::ControlRight]
     };
-    if (keys.any_pressed(modifier) && keys.just_pressed(KeyCode::KeyQ))
-        || buttons
-            .iter()
-            .any(|interaction| *interaction == Interaction::Pressed)
-    {
+    if keys.any_pressed(modifier) && keys.just_pressed(KeyCode::KeyQ) {
         exit.write(AppExit::Success);
     }
 }
@@ -113,7 +102,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn quit_requires_the_modifier_or_the_quit_button() {
+    fn quit_shortcut_requires_the_modifier() {
         let mut app = App::new();
         app.init_resource::<ButtonInput<KeyCode>>()
             .add_systems(Update, quit);
@@ -130,13 +119,6 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(modifier);
-        app.update();
-        assert!(app.should_exit().is_some());
-
-        let mut app = App::new();
-        app.init_resource::<ButtonInput<KeyCode>>()
-            .add_systems(Update, quit);
-        app.world_mut().spawn((Quit, Interaction::Pressed));
         app.update();
         assert!(app.should_exit().is_some());
     }

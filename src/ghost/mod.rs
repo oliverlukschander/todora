@@ -47,7 +47,7 @@ pub struct GhostPlugin;
 impl Plugin for GhostPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<clear::Confirmation>()
-            .add_systems(Update, clear::buttons.before(GhostSet))
+            .add_systems(Update, clear::handle_reset.before(GhostSet))
             .add_systems(Startup, setup)
             .add_systems(
                 PreUpdate,
