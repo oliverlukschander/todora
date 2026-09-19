@@ -257,7 +257,15 @@ impl Plugin for TrackPlugin {
         app.insert_resource(Track::new(circuits::first()))
             .add_message::<GoTo>()
             .add_systems(Startup, setup)
-            .add_systems(PreUpdate, switch.in_set(TrackSet).after(MenuSet));
+            .add_systems(PreUpdate, switch.in_set(TrackSet).after(MenuSet))
+            .add_systems(
+                Update,
+                (
+                    markers::rebuild.run_if(resource_changed::<Track>),
+                    markers::show,
+                )
+                    .chain(),
+            );
     }
 }
 

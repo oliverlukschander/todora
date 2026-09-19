@@ -1,78 +1,13 @@
-//! Corner markers: little diamonds standing up the verge and round the bend.
-//!
-//! A marker belongs to the circuit and to nothing else. It says where the corner
-//! is and nothing about how to drive it, so nothing here knows what the car can
-//! do — this reads the same curvature the loft is swept over, finds where the
-//! road starts to turn, and lays a line of diamonds along the verge either side
-//! of it. A new circuit gets its markers the moment it gets its centreline, with
-//! no more said about it than the trace already says.
-//!
-//! The line covers the corner *and* the approach to it, which is the whole
-//! point: the diamonds counting you in do not stop at the turn, they carry on
-//! round it, so the ones ahead are the shape of the corner before you can see
-//! the shape of the corner. Where it tightens they crowd up on the inside; where
-//! it opens they run away from you. The approach reaches 22 m back because that
-//! is the hardest stop the game has in it: the quickest car in the garage,
-//! flat out on the level, down to what it can carry through a corner at
-//! [`super::ribbon::MIN_RADIUS`], takes 20.7 m of road — `the_garage` measures
-//! it. So the first diamond of a line is the brakes for the slowest corners and
-//! the ones after it are the brakes for everything quicker. They are all the
-//! same diamond the same distance apart, because a dotted line is read as a
-//! rhythm and a rhythm is only information while it is regular.
-//!
-//! It reached 16 m when the tightest corner the game allowed was 10 m across.
-//! A 5 m corner is a slower corner, a slower corner is a longer stop, and a
-//! longer stop is a longer braking zone to mark — so the line has to reach
-//! further back or the first diamond stops being the brakes and starts being a
-//! decoration somewhere inside them. What gives is the gap between diamonds
-//! rather than how many there are, because how many there are is the palette:
-//! see [`SPACING`] and [`PALETTE`].
-//!
-//! One line, three cars, and it does not move for any of them. The three stop
-//! from their own top speed in 9.8 m, 12.6 m and 20.7 m, so the grippy car
-//! brakes at the third diamond of a line, the one the game ships on at the
-//! fourth, and the quick one not until the first — and a long descent, which
-//! carries a car past the speed it settles at, puts a little more on top of all
-//! three. That is the point of a ruler. A line of marks that moved with the car
-//! would be telling the driver what they already know, in a rhythm they would
-//! have to learn again every time they changed car; a fixed one tells them where
-//! the corner is and leaves the rest to them.
-//!
-//! They stand up, and that is most of what makes them readable. From the driving
-//! seat the road ahead is seen almost edge-on: at 60 m the line of sight down to
-//! the verge is about three degrees, so a mark lying flat on it presents a
-//! twentieth of its own size and has all but vanished by the time it matters,
-//! while a mark standing up presents very nearly all of its height at any
-//! distance it can be seen at. Height is what a mark needs in order to keep its
-//! size, and it costs nothing on the ground — the footprint is the same 0.4 m
-//! diamond, because that was never the part that was too small.
-//!
-//! So a diamond is cut rather than drawn: the same four corners on the verge,
-//! brought up to a point [`TALL`] above the middle of them. Four faces, no
-//! bottom — it stands on the verge, and the one face nobody can see is the one
-//! not worth paying for. A pyramid is also the shape that gains height without
-//! gaining a vertical face: every face of it still leans more up than sideways,
-//! so the loft is still a surface seen from above and `loft_faces_up` still
-//! holds over the whole mesh rather than having to be told to look away.
-//!
-//! Nothing collides with them. The car runs through a standing diamond the way
-//! it used to run over a flat one, because a marker that could be hit would be
-//! a marker the driver went round rather than one they read, and these are only
-//! ever information. Off the road is already a gravel trap; it does not need
-//! furniture in it as well.
-//!
-//! These are the one mark on the circuit the loft cannot make. Every other one —
-//! the kerb stripes, the edge lines, the start/finish paint — is a strip of the
-//! sweep taking a colour, which fixes what shape it may be: a rectangle, square
-//! to the road, at least one station long, its whole band wide and flat on the
-//! ground. A diamond is a fifth of the width of the band it sits in, turned
-//! forty-five degrees to the road, and standing up off the ground, so no way of
-//! writing the table produces one. It is twelve vertices of its own instead,
-//! standing [`LIFT`] clear of a verge that is falling away under it. They go
-//! into the loft's own mesh rather than a second one, so there is still one
-//! surface, one material, and one thing to replace when the circuit changes.
+//! Subtle corner diamonds on both verges. The layout follows the circuit's
+//! corners and their approaches, with every other pair retained for display.
+//! Only the nearest four pairs within 60 m along the road in the driving
+//! direction are visible. Separate meshes let that limit follow the car
+//! without rebuilding the track or confusing nearby stretches at a crossing.
 
-use bevy::prelude::*;
+use bevy::{asset::RenderAssetUsages, prelude::*, render::render_resource::PrimitiveTopology};
+
+use super::Track;
+use crate::car::{Car, Player};
 
 use super::profile::{HALF_WIDTH, Profile, paint};
 use super::ribbon::{STEP, Station};
@@ -92,19 +27,8 @@ const MERGE: f32 = 6.0;
 /// scale of one station; a corner is not, and 3.6 m is enough to tell them apart
 /// without rounding off a real one.
 const SMOOTH: usize = 9;
-/// Stations from one diamond to the next: 4.4 m.
-///
-/// In stations rather than in metres because the line has to be evenly spaced
-/// and only this is. A gap in metres falls between two stations and rounds to a
-/// different number of them at different multiples, which is a rhythm that is
-/// regular everywhere except where it is not.
-///
-/// It was 8, which was 3.2 m, and what moved it is the corner target rather
-/// than taste: five diamonds have to cover the hardest stop in the game, that
-/// stop is now 20.7 m rather than 16.0, and five diamonds is not negotiable
-/// because five is the palette. So the rhythm slows instead of the line getting
-/// longer in marks — which is the right way round, because a driver reads the
-/// spacing and counts the marks, and there is no time to count.
+/// Base layout spacing: 4.4 m. Display keeps every other pair (8.8 m),
+/// while the approach stays at its original 22 m from the corner.
 const SPACING: usize = 11;
 /// How far the line reaches back up the road from the corner, in diamonds. Five
 /// of them is 22 m, which covers the whole of the hardest stop the car has in
@@ -142,9 +66,8 @@ pub(super) const ROOM: f32 = 2.0 * (HALF + CLEAR);
 /// vertical. `no_face_of_a_diamond_stands_on_its_edge` is what holds that as the
 /// shape changes.
 const TALL: f32 = 0.15;
-/// Faces a diamond has: four sides and no bottom. Named because the mesh is
-/// counted in [`super::profile`] as well as filled there.
-pub(super) const FACES: usize = 4;
+/// Faces a diamond has: four sides and no bottom.
+const FACES: usize = 4;
 /// Where on the shoulder the line of diamonds runs: half a metre out from the
 /// kerb, where the shoulder has that much grass to give.
 ///
@@ -158,29 +81,118 @@ const OUT: f32 = 0.5;
 /// How far a diamond floats above the verge. A hair, and only so the depth
 /// buffer has something to separate the two by: a fifth of the kerb's lip.
 const LIFT: f32 = 0.01;
-/// The line runs through these in order, one to a diamond, and starts again.
-///
-/// Five of them, which is [`APPROACH`], so one turn of the cycle is exactly the
-/// approach: from the diamond where the brakes go on for the slowest corners you
-/// see the whole palette once, in order, and the colour coming back round is the
-/// corner entry. A run of identical marks cannot say that — you would have to
-/// count them, and counting is what there is no time for.
-///
-/// They are the first five pool balls, which is where the diamonds came from and
-/// which is a set picked to be told apart across a table at a glance, brightened
-/// for a verge that is already green. White is not among them on purpose: it is
-/// what the edge lines and the kerb stripes are, and the road's paint and the
-/// circuit's markers should not be the same thing seen twice.
-#[cfg(test)]
-pub(super) const PALETTE_LEN: usize = PALETTE.len();
-
+/// Muted ochre, slate, brick, plum and bronze, shared by each left/right pair.
 const PALETTE: [(f32, f32, f32); 5] = [
-    (0.98, 0.80, 0.10), // yellow
-    (0.15, 0.50, 0.95), // blue
-    (0.90, 0.15, 0.12), // red
-    (0.62, 0.25, 0.80), // purple
-    (0.97, 0.48, 0.06), // orange
+    (0.36, 0.31, 0.19),
+    (0.21, 0.28, 0.34),
+    (0.36, 0.23, 0.21),
+    (0.29, 0.23, 0.32),
+    (0.37, 0.28, 0.19),
 ];
+const MAX_PAIRS: usize = 4;
+const VISIBLE_AHEAD: f32 = 60.0;
+
+/// One left/right pair, fixed at this distance around the lap.
+#[derive(Component)]
+pub(super) struct MarkerPair {
+    s: f32,
+}
+
+pub(super) fn rebuild(
+    mut commands: Commands,
+    track: Res<Track>,
+    old: Query<Entity, With<MarkerPair>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for entity in &old {
+        commands.entity(entity).despawn();
+    }
+    let material = materials.add(StandardMaterial {
+        perceptual_roughness: 1.0,
+        reflectance: 0.1,
+        ..default()
+    });
+    let stations = track.ribbon.stations();
+    let diamonds = diamonds(stations, &track.profile);
+    for ((at, step), pair) in markers(stations).into_iter().zip(diamonds.chunks_exact(2)) {
+        if step % 2 != 0 {
+            continue;
+        }
+        commands.spawn((
+            MarkerPair { s: stations[at].s },
+            Mesh3d(meshes.add(mesh(pair))),
+            MeshMaterial3d(material.clone()),
+            Visibility::Hidden,
+        ));
+    }
+}
+
+pub(super) fn show(
+    track: Res<Track>,
+    cars: Query<(&Car, &Transform), With<Player>>,
+    mut pairs: Query<(Entity, &MarkerPair, &mut Visibility)>,
+) {
+    let Ok((car, transform)) = cars.single() else {
+        for (_, _, mut visibility) in &mut pairs {
+            *visibility = Visibility::Hidden;
+        }
+        return;
+    };
+    let ground = track.ground_from(transform.translation, car.along);
+    let travel = if car.velocity.length_squared() > 1.0 {
+        car.velocity
+    } else {
+        *transform.forward()
+    };
+    let direction = if travel.dot(ground.tangent) < 0.0 {
+        -1.0
+    } else {
+        1.0
+    };
+    let mut ahead: Vec<_> = pairs
+        .iter()
+        .filter_map(|(entity, pair, _)| {
+            let distance = ((pair.s - ground.s) * direction).rem_euclid(track.ribbon.length());
+            (distance > 0.0 && distance <= VISIBLE_AHEAD).then_some((entity, distance))
+        })
+        .collect();
+    ahead.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
+    ahead.truncate(MAX_PAIRS);
+    for (entity, _, mut visibility) in &mut pairs {
+        *visibility = if ahead.iter().any(|&(next, _)| next == entity) {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+    }
+}
+
+fn mesh(pair: &[Diamond]) -> Mesh {
+    let mut positions = Vec::with_capacity(pair.len() * FACES * 3);
+    let mut normals = Vec::with_capacity(positions.capacity());
+    let mut colors = Vec::with_capacity(positions.capacity());
+    for diamond in pair {
+        for face in diamond.faces() {
+            let normal = (face[1] - face[0])
+                .cross(face[2] - face[0])
+                .normalize()
+                .to_array();
+            for corner in face {
+                positions.push(corner.to_array());
+                normals.push(normal);
+                colors.push(diamond.color);
+            }
+        }
+    }
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
+}
 
 /// How far off the centreline a diamond stands, on a shoulder whose grass is
 /// `grass` metres wide.
@@ -204,7 +216,7 @@ fn lateral(grass: f32) -> f32 {
     HALF_WIDTH + OUT.clamp(nearest, furthest)
 }
 
-/// One diamond, ready to go into the loft's mesh.
+/// One diamond, ready to go into its pair's mesh.
 pub(super) struct Diamond {
     /// The four corners it stands on, wound to face up: back, out, front, in.
     pub base: [Vec3; 4],
@@ -361,6 +373,116 @@ fn corners(stations: &[Station]) -> Vec<bool> {
 mod tests {
     use super::*;
     use crate::track::{Track, circuits};
+    use bevy::mesh::VertexAttributeValues;
+
+    #[test]
+    fn each_pair_has_two_complete_muted_diamonds() {
+        for (_, track) in every_track() {
+            for pair in diamonds(track.ribbon.stations(), &track.profile).chunks_exact(2) {
+                let mesh = mesh(pair);
+                assert_eq!(mesh.count_vertices(), 2 * FACES * 3);
+                let Some(VertexAttributeValues::Float32x4(colors)) =
+                    mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+                else {
+                    panic!("markers lost their colours");
+                };
+                for (diamond, vertices) in pair.iter().zip(colors.chunks_exact(FACES * 3)) {
+                    assert!(vertices.iter().all(|&color| color == diamond.color));
+                    assert!(diamond.color[..3].iter().all(|&channel| channel < 0.12));
+                }
+                let normals = mesh
+                    .attribute(Mesh::ATTRIBUTE_NORMAL)
+                    .unwrap()
+                    .as_float3()
+                    .unwrap();
+                assert!(
+                    normals
+                        .iter()
+                        .all(|n| Vec3::from(*n).is_finite() && n[1] > 0.0)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn only_the_next_four_alternating_pairs_show_on_each_circuit() {
+        let mut app = App::new();
+        app.init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .add_systems(
+                Update,
+                (rebuild.run_if(resource_changed::<Track>), show).chain(),
+            );
+        let player = app
+            .world_mut()
+            .spawn((Player, Car::default(), Transform::default()))
+            .id();
+        for (_, track) in every_track() {
+            let stations = track.ribbon.stations();
+            let positions: Vec<_> = [
+                0,
+                stations.len() / 4,
+                stations.len() / 2,
+                stations.len() - 1,
+            ]
+            .map(|at| stations[at])
+            .into_iter()
+            .collect();
+            let kept: Vec<_> = markers(stations)
+                .into_iter()
+                .filter(|&(_, step)| step % 2 == 0)
+                .map(|(at, _)| stations[at].s)
+                .collect();
+            let length = track.ribbon.length();
+            app.insert_resource(track);
+            for station in positions {
+                for (direction, speed) in [(1.0, 0.0), (-1.0, 0.0), (1.0, 10.0), (-1.0, 10.0)] {
+                    app.world_mut().entity_mut(player).insert((
+                        Car {
+                            along: Some(station.s),
+                            velocity: station.tangent * direction * speed,
+                            ..default()
+                        },
+                        Transform::from_translation(station.pos)
+                            .looking_to(station.tangent * direction, Vec3::Y),
+                    ));
+                    app.update();
+                    let world = app.world_mut();
+                    let from = world
+                        .resource::<Track>()
+                        .ground_from(station.pos, Some(station.s))
+                        .s;
+                    assert!((from - station.s).abs() < 0.01);
+                    let mut query = world.query::<(&MarkerPair, &Visibility)>();
+                    // A switch replaces every old pair, and never creates the skipped ones.
+                    assert_eq!(query.iter(world).count(), kept.len());
+                    assert!(query.iter(world).all(|(pair, _)| kept.contains(&pair.s)));
+                    let mut visible = Vec::new();
+                    let mut hidden_ahead = Vec::new();
+                    for (pair, visibility) in query.iter(world) {
+                        let distance = ((pair.s - from) * direction).rem_euclid(length);
+                        if *visibility == Visibility::Visible {
+                            assert!(
+                                distance > 0.0 && distance <= VISIBLE_AHEAD,
+                                "{}: from {} to {}, direction {}, distance {}",
+                                world.resource::<Track>().circuit.name,
+                                station.s,
+                                pair.s,
+                                direction,
+                                distance
+                            );
+                            visible.push(distance);
+                        } else if distance > 0.0 && distance <= VISIBLE_AHEAD {
+                            hidden_ahead.push(distance);
+                        }
+                    }
+                    assert!(visible.len() <= 4);
+                    assert_eq!(visible.len(), (visible.len() + hidden_ahead.len()).min(4));
+                    assert!(visible.iter().all(|v| hidden_ahead.iter().all(|h| v <= h)));
+                }
+            }
+        }
+    }
 
     /// Every circuit, so a new one has to clear the same bar as the old ones.
     fn every_track() -> impl Iterator<Item = (&'static str, Track)> {

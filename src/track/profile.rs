@@ -548,29 +548,6 @@ impl Profile {
             }
         }
 
-        // The corner markers, standing on the swept surface rather than lying in
-        // it: a diamond is smaller than a station, is not a rectangle and is not
-        // flat, so it is the one mark the sweep cannot make. See [`markers`],
-        // which brings its own colour with it. Same mesh and same material all
-        // the same — one triangle per face, flat-shaded off its own three
-        // corners, so the four sides of a marker catch the light differently and
-        // it reads as a solid rather than as a painted shape.
-        for diamond in markers::diamonds(stations, self) {
-            for face in diamond.faces() {
-                let normal = (face[1] - face[0])
-                    .cross(face[2] - face[0])
-                    .normalize_or(Vec3::Y)
-                    .to_array();
-                for corner in face {
-                    positions.push(corner.to_array());
-                    normals.push(normal);
-                    colors.push(diamond.color);
-                }
-                let base = (positions.len() - 3) as u32;
-                indices.extend_from_slice(&[base, base + 1, base + 2]);
-            }
-        }
-
         // What holds a bridge up, where there is one. Not part of the sweep:
         // the sweep makes one surface seen from above, and this is the only
         // thing in the mesh that is meant to be seen from below. Drawn only
@@ -675,8 +652,6 @@ pub(super) fn grip(lateral: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use bevy::mesh::VertexAttributeValues;
-
     use super::*;
     use crate::track::{Track, circuits, ribbon};
 
@@ -1264,54 +1239,6 @@ mod tests {
         assert_eq!(profile.reach(middle, 0.0, -1.0), EDGE);
     }
 
-    /// The diamonds get onto the road, on every circuit and on both sides of
-    /// it. What the [`markers`] tests cannot see: they check where a diamond
-    /// belongs, what shape it is and what colour it takes, this checks that all
-    /// of it reaches the mesh — four vertices of one colour apiece, on the end
-    /// of the swept strips, in every colour the palette has.
-    #[test]
-    fn the_diamonds_reach_the_mesh() {
-        for circuit in circuits::all() {
-            let track = Track::new(circuit);
-            let stations = track.ribbon.stations();
-            let diamonds = markers::diamonds(stations, &track.profile);
-            assert!(!diamonds.is_empty(), "{} has no diamonds", circuit.name);
-
-            let mesh = track.profile.loft(&track.ribbon);
-            let Some(VertexAttributeValues::Float32x4(colors)) =
-                mesh.attribute(Mesh::ATTRIBUTE_COLOR)
-            else {
-                panic!("the loft lost its paint");
-            };
-            let swept = stations.len() * BANDS * 4;
-            let standing = markers::FACES * 3;
-            let holding_up = track.profile.structure(&track.ribbon) * 4;
-            assert_eq!(
-                colors.len(),
-                swept + diamonds.len() * standing + holding_up,
-                "{}: the diamonds did not reach the mesh",
-                circuit.name
-            );
-            for (diamond, marker) in diamonds.iter().zip(colors[swept..].chunks_exact(standing)) {
-                assert!(
-                    marker.iter().all(|&c| c == diamond.color),
-                    "{}: a diamond reached the mesh in more than one colour",
-                    circuit.name
-                );
-            }
-            let mut shades: Vec<[f32; 4]> = diamonds.iter().map(|d| d.color).collect();
-            shades.dedup();
-            shades.sort_by(|a, b| a.partial_cmp(b).expect("colours are numbers"));
-            shades.dedup();
-            assert_eq!(
-                shades.len(),
-                markers::PALETTE_LEN,
-                "{} does not use the whole palette",
-                circuit.name
-            );
-        }
-    }
-
     /// One stripe is a whole number of stations and the lap is a whole number of
     /// stripe pairs, so the kerb pattern meets itself at the start/finish line.
     #[test]
@@ -1347,34 +1274,20 @@ mod tests {
             );
             let mesh = track.profile.loft(&track.ribbon);
             let verts = mesh.count_vertices();
-            // Two kinds of thing in one mesh: quads swept along the circuit, and
-            // the triangles the markers standing on it are made of.
+            // The road and bridge structure; markers have their own meshes.
             let quads =
                 track.ribbon.stations().len() * BANDS + track.profile.structure(&track.ribbon);
-            let faces =
-                markers::diamonds(track.ribbon.stations(), &track.profile).len() * markers::FACES;
-            assert_eq!(verts, quads * 4 + faces * 3);
+            assert_eq!(verts, quads * 4);
             let Some(Indices::U32(indices)) = mesh.indices() else {
                 panic!("loft lost its indices");
             };
-            assert_eq!(indices.len(), quads * 6 + faces * 3);
+            assert_eq!(indices.len(), quads * 6);
             assert!(indices.iter().all(|&i| (i as usize) < verts));
         }
     }
 
     /// Every triangle winds the same way round, so the circuit is not visible
     /// from below and invisible from above.
-    ///
-    /// Held over the whole mesh, corner markers included, now that the markers
-    /// stand up. That is a decision and not an oversight: it would have been
-    /// easy to scope this to the swept strips and let the markers do as they
-    /// like, but the invariant is worth more than the markers are. A face that
-    /// faced sideways would be a face seen edge-on from the car — a mark that
-    /// disappears at exactly the angle it is being read from, and one the
-    /// shading has nothing to light. So the marker is a pyramid: it gains all
-    /// of its height and none of a wall's, every face still leaning further up
-    /// than sideways. Give one a vertical side and this is what says so, which
-    /// is the check being here at all.
     ///
     /// What it is *not* held over is the structure under a bridge, and that is
     /// not a weakening of it. A soffit is a surface meant to be seen from
