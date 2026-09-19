@@ -248,9 +248,9 @@ fn draw_controls(
         "Left stick  Steer    A  Gas    X  Brake    B  Handbrake    RB  Reset\nStart  Pause    LB  Garage    View  Circuits    Y  Ghost"
     };
     let hint = format!(
-        "{hint}\nM  Omarchy: {}    F8  Sound: {}",
+        "{hint}\nM  Music: {}    F8  Effects: {}",
         sound.station(),
-        if sound.muted { "muted" } else { "on" }
+        if sound.effects { "on" } else { "off" }
     );
     if let Ok(mut text) = text.single_mut()
         && text.0 != hint

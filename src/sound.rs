@@ -20,9 +20,10 @@ pub struct SoundPlugin;
 impl Plugin for SoundPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Sound>()
+            .add_message::<SoundToggle>()
             .add_audio_source::<radio::Soundtrack>()
             .add_systems(Startup, start)
-            .add_systems(Update, update)
+            .add_systems(Update, (apply_toggles, update, draw_toggles).chain())
             .add_systems(Last, shutdown_on_exit);
     }
 }
@@ -30,7 +31,7 @@ impl Plugin for SoundPlugin {
 #[derive(Resource)]
 pub(crate) struct Sound {
     pub music: bool,
-    pub muted: bool,
+    pub effects: bool,
     signal: Arc<Signal>,
 }
 
@@ -38,10 +39,18 @@ impl Default for Sound {
     fn default() -> Self {
         Self {
             music: true,
-            muted: false,
+            effects: true,
             signal: Arc::new(Signal::default()),
         }
     }
+}
+
+/// Pause-menu buttons that turn the radio or the tyres off without touching
+/// the other. `M` and `F8` do the same job while driving.
+#[derive(Component, Message, Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum SoundToggle {
+    Music,
+    Effects,
 }
 
 impl Sound {
@@ -116,17 +125,20 @@ fn update(
     if sound.signal.shutting_down.load(Relaxed) {
         return;
     }
-    if keys.just_pressed(KeyCode::KeyM) {
+    // Garage already owns `M` for driving mode, so the radio key stays out of
+    // the menus. Pause is the other place the two toggles are offered, and the
+    // keys still work there.
+    if keys.just_pressed(KeyCode::KeyM) && *halt != Halt::Menu {
         sound.music = !sound.music;
         if sound.music {
             sound.signal.status.store(0, Relaxed);
         }
     }
-    if keys.just_pressed(KeyCode::F8) {
-        sound.muted = !sound.muted;
+    if keys.just_pressed(KeyCode::F8) && *halt != Halt::Menu {
+        sound.effects = !sound.effects;
     }
-    let audible = !sound.muted && windows.iter().all(|window| window.focused);
-    let (rolling, scrub, squeal) = if audible && !halt.stopped() {
+    let audible = windows.iter().all(|window| window.focused);
+    let (rolling, scrub, squeal) = if audible && sound.effects && !halt.stopped() {
         players
             .single()
             .map(|(car, pose)| {
@@ -145,10 +157,57 @@ fn update(
     } else {
         0.0
     };
-    sound.signal.enabled.store(sound.music, Relaxed);
+    sound.signal.enabled.store(audible && sound.music, Relaxed);
     sound.signal.music.store(music.to_bits(), Relaxed);
     sound.signal.scrub.store(scrub.to_bits(), Relaxed);
     sound.signal.squeal.store(squeal.to_bits(), Relaxed);
+}
+
+fn apply_toggles(
+    halt: Res<Halt>,
+    mut toggles: MessageReader<SoundToggle>,
+    mut sound: ResMut<Sound>,
+) {
+    if *halt != Halt::Pause || sound.signal.shutting_down.load(Relaxed) {
+        toggles.clear();
+        return;
+    }
+    for which in toggles.read() {
+        match which {
+            SoundToggle::Music => {
+                sound.music = !sound.music;
+                if sound.music {
+                    sound.signal.status.store(0, Relaxed);
+                }
+            }
+            SoundToggle::Effects => sound.effects = !sound.effects,
+        }
+    }
+}
+
+fn draw_toggles(
+    sound: Res<Sound>,
+    buttons: Query<(&SoundToggle, &Children)>,
+    mut texts: Query<&mut Text>,
+) {
+    for (&which, children) in &buttons {
+        let wanted = match which {
+            SoundToggle::Music => {
+                format!("Music  /  M    {}", if sound.music { "on" } else { "off" })
+            }
+            SoundToggle::Effects => format!(
+                "Sound effects  /  F8    {}",
+                if sound.effects { "on" } else { "off" }
+            ),
+        };
+        for child in children {
+            if let Ok(mut text) = texts.get_mut(*child)
+                && text.0 != wanted
+            {
+                text.0 = wanted.clone();
+            }
+        }
+    }
 }
 
 fn smooth(value: f32) -> f32 {
@@ -180,6 +239,40 @@ fn rolling_level(car: &Car, surface_grip: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pause_actions_toggle_music_and_effects_independently_and_update_labels() {
+        let mut app = App::new();
+        app.init_resource::<Sound>()
+            .insert_resource(Halt::Pause)
+            .add_message::<SoundToggle>()
+            .add_systems(Update, (apply_toggles, draw_toggles).chain());
+        app.world_mut()
+            .spawn(SoundToggle::Music)
+            .with_children(|parent| {
+                parent.spawn(Text::new(""));
+            });
+        app.world_mut().write_message(SoundToggle::Music);
+        app.update();
+        assert!(!app.world().resource::<Sound>().music);
+        assert!(app.world().resource::<Sound>().effects);
+        let mut labels = app.world_mut().query::<&Text>();
+        assert_eq!(labels.single(app.world()).unwrap().0, "Music  /  M    off");
+        app.world_mut().write_message(SoundToggle::Effects);
+        app.update();
+        assert!(!app.world().resource::<Sound>().effects);
+        app.world_mut().write_message(SoundToggle::Music);
+        app.update();
+        assert!(app.world().resource::<Sound>().music);
+        assert!(!app.world().resource::<Sound>().effects);
+        *app.world_mut().resource_mut::<Halt>() = Halt::Menu;
+        app.world_mut().write_message(SoundToggle::Effects);
+        app.update();
+        assert!(
+            !app.world().resource::<Sound>().effects,
+            "pause actions must not leak into other menus"
+        );
+    }
 
     #[test]
     fn both_exit_messages_and_native_world_cleanup_stop_audio() {
@@ -267,14 +360,23 @@ mod tests {
             .reset_all();
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyM);
+        app.update();
+        assert!(volume(&signal.music) > 0.0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::F8);
         app.update();
         assert_eq!(volume(&signal.squeal), 0.0);
         assert_eq!(volume(&signal.rolling), 0.0);
+        assert!(volume(&signal.music) > 0.0, "effects off leaves the radio");
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .reset_all();
-        app.world_mut().resource_mut::<Sound>().muted = false;
+        app.world_mut().resource_mut::<Sound>().effects = true;
         app.world_mut().resource_mut::<Sound>().music = true;
         app.world_mut().get_mut::<Window>(window).unwrap().focused = false;
         app.update();

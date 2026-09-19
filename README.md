@@ -10,13 +10,15 @@ The GT measures about **1.06 game units long and 0.45 across the body**, with ma
 
 Acceleration builds more gradually: the default GT on flat road reaches displayed 150 km/h in about 2.9 seconds and 200 in 5.0 seconds. It approaches 95% of its roughly 230 km/h top speed after 6.8 seconds.
 
-**Sound:** [CLIamp's Omarchy station](https://radio.cliamp.stream/omarchy/stream.pls) plays quietly in the background. **M** switches music on or off; **F8** mutes or restores all sound. There is no motor sound. Recorded wheel contact stays audible whenever the car moves, including coasting, with a quiet rolling texture that grows with speed. Rubber squeal builds near the grip limit and becomes brighter during a slide. Wheels go quiet at rest and on pause; grass keeps the rolling texture without tarmac squeal. Music continues through menus. [Tyre sample credits and license](assets/audio/CREDITS.md). All sound fades out when the window loses focus. Radio needs an internet connection and reconnects automatically; tyre feedback works offline. Music is streamed live, not bundled with the app.
+**Sound:** [CLIamp's Omarchy station](https://radio.cliamp.stream/omarchy/stream.pls) plays quietly in the background. **M** switches music on or off; **F8** switches tyre sound on or off. The two are independent — the radio can play with the wheels quiet, and the other way around. Both can also be toggled from the pause menu. There is no motor sound. Recorded wheel contact stays audible whenever the car moves, including coasting, with a quiet rolling texture that grows with speed. Rubber squeal builds near the grip limit and becomes brighter during a slide. Wheels go quiet at rest and on pause; grass keeps the rolling texture without tarmac squeal. Music continues through menus. [Tyre sample credits and license](assets/audio/CREDITS.md). All sound fades out when the window loses focus. Radio needs an internet connection and reconnects automatically; tyre feedback works offline. Music is streamed live, not bundled with the app.
 
 All forty laps are shorter: most by about 10%, with smaller reductions on the tightest circuits to keep the roads separate. Finished laps range from 446 m at Magny-Cours to 1,807 m at Baku. The shared plan scale is 0.12 and the elevation scale is 0.252; corner opening targets 4.5 m. The menu lists the rebuilt lengths. Surface fingerprints automatically reject ghosts recorded on the previous layouts.
 
 **Pause controls:** arrows, D-pad or left stick select a highlighted action; **Enter / A** activates it. Held directions repeat at the same pace. **Esc / B / Start** resumes, and reopening selects Resume.
 
 **Ghost reset:** press **Esc**, then **Reset this ghost** (current circuit and driving mode) or **Reset all ghosts**. Activate the same button again to confirm; moving selection cancels confirmation. This removes the corresponding saved best times and restarts your lap. **Cmd+Q** on macOS, **Ctrl+Q** elsewhere, or **Quit game** in the pause menu exits with audio stopped and radio shutdown signalled; native window/menu quit also cleans up sound.
+
+The circuit infields have continuous grass surfaces fitted to the verge boundaries, including Suzuka's crossing loops. Shared triangle edges prevent cracks, and the terrain follows the surrounding elevation with smooth shading. The road uses a [fine-grained racing asphalt texture](assets/textures/README.md), filtered for distance, with the painted lines and kerbs kept crisp. Road geometry and saved-ghost fingerprints are unchanged.
 
 ## Design history
 
@@ -109,7 +111,7 @@ The setup slider and the garage meet in one order: the car is the baseline and t
 
 There is no front and rear axle here to hand grip to, so understeer and oversteer are built out of what the model does have — the slide, the angle between where the car points and where it is going. The slider moves five dials together: how much more turn full lock asks for than the grip can give, how hard the nose is pulled back into line, how much grip the throttle spends at the limit, how hard a rear the driver has let go throws the tail round, and how eagerly the car rotates. That fourth one is what makes oversteer oversteer — on the loose setup, full throttle in a corner brings the tail round and the car turns more than the wheel asked; lift, and it catches. Every notch still turns at full lock and still refuses to spin; which one is quickest depends on who is driving. A driver who is still learning the circuit covers more ground on understeer, and one who is not is fractionally quicker on oversteer. The engine steps at a fixed 240 Hz whatever the frame rate, so a slow machine and a fast one drive the same car, and everything a car is lives in one `Handling` value, which is what makes the garage three numbers rather than three code paths.
 
-Needs a recent stable Rust (`rustup` on macOS). First Bevy compile is slow; later ones are not.
+Needs a recent stable Rust (`rustup`, or `omarchy install dev-env rust` on Omarchy). First Bevy compile is slow; later ones are not.
 
 ## Layout
 
@@ -199,6 +201,16 @@ tools/package_macos.sh
 ```
 
 Builds a release binary, wraps it in `dist/Todora.app` with its icon, and puts that in `dist/Todora.dmg` next to an Applications shortcut. It uses only what macOS ships with: QuickLook renders the icon from `art/icon/todora.svg`, `iconutil` packs it, `hdiutil` makes the disk image. The app is signed ad hoc, which is all this Mac needs; another Mac will ask for right-click → Open the first time, because there is no Developer ID behind it.
+
+## A Linux app
+
+```sh
+tools/package_linux.sh --install
+```
+
+Builds a release binary into `dist/Todora/` with its assets and icon, then installs it for this user: the game under `~/.local/share/todora`, an icon, and a desktop entry so Omarchy's launcher can find it. Same lockfile as the Mac package. Needs `rsvg-convert` for the icon (`librsvg` on Arch).
+
+Without `--install` it only writes `dist/Todora/`. Run that folder's `todora` binary, or `cargo run --release`.
 
 Rebuild the Omarchy GT from Blender:
 

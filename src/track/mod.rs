@@ -22,10 +22,12 @@
 //! loft, and knows where the start line is. The shape lives in [`ribbon`]; the
 //! cross-section in [`profile`].
 
+mod asphalt;
 // A trace is thousands of surveyed coordinates, and sooner or later one of them
 // is 3.14 or 6.28 metres from the centroid of its circuit. It is a coordinate.
 #[allow(clippy::approx_constant)]
 mod circuits;
+mod infield;
 mod markers;
 mod profile;
 mod ribbon;
@@ -241,6 +243,7 @@ impl Plugin for TrackPlugin {
                 (
                     markers::rebuild.run_if(resource_changed::<Track>),
                     markers::show,
+                    asphalt::prepare,
                 )
                     .chain(),
             );
@@ -250,6 +253,17 @@ impl Plugin for TrackPlugin {
 /// The loft, so a switch knows whose mesh to replace.
 #[derive(Component)]
 struct Loft;
+
+/// Grass filling the hole inside the loft.
+#[derive(Component)]
+struct Infield;
+
+#[derive(Component)]
+struct Asphalt;
+
+type LoftMesh = (With<Loft>, Without<Infield>, Without<Asphalt>);
+type InfieldMesh = (With<Infield>, Without<Loft>, Without<Asphalt>);
+type AsphaltMesh = (With<Asphalt>, Without<Loft>, Without<Infield>);
 
 /// Every circuit there is, in the order the menu lists them.
 pub(crate) fn all_circuits() -> &'static [Circuit] {
@@ -693,23 +707,50 @@ pub(crate) struct Ground {
 
 fn setup(
     mut commands: Commands,
+    assets: Res<AssetServer>,
     track: Res<Track>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let material = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        perceptual_roughness: 0.9,
+        ..default()
+    });
+    let (scenery, road) = track.profile.surfaces(&track.ribbon);
+    let road_material = materials.add(asphalt::material(&mut commands, &assets));
+    let mut road_entity = commands.spawn((
+        Asphalt,
+        Mesh3d(meshes.add(road)),
+        MeshMaterial3d(road_material),
+    ));
+    if !track.circuit.crossings.is_empty() {
+        road_entity.insert(NotShadowCaster);
+    }
     let mut loft = commands.spawn((
         Loft,
-        Mesh3d(meshes.add(track.profile.loft(&track.ribbon))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            perceptual_roughness: 0.9,
-            ..default()
-        })),
+        Mesh3d(meshes.add(scenery)),
+        MeshMaterial3d(material.clone()),
     ));
     // Keep the lower road readable beneath a crossing. The car and markers
     // still cast their own shadows; only the continuous track mesh opts out.
     if !track.circuit.crossings.is_empty() {
         loft.insert(NotShadowCaster);
+    }
+    let mut infield = commands.spawn((
+        Infield,
+        Mesh3d(meshes.add(infield::fill(&track.profile, &track.ribbon))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            perceptual_roughness: 0.9,
+            cull_mode: None,
+            ..default()
+        })),
+    ));
+    // The steep bank joins at an overpass self-shadow into jagged black
+    // wedges. As with the bridge loft, keep its lower approach readable.
+    if !track.circuit.crossings.is_empty() {
+        infield.insert(NotShadowCaster);
     }
 }
 
@@ -719,12 +760,15 @@ fn setup(
 /// corner-opening — a visible hitch, once, at the moment the world is replaced
 /// anyway, and the game is stopped behind the menu while it happens. The old
 /// mesh goes when the last handle to it does.
+#[allow(clippy::too_many_arguments)] // Bevy-managed resources and distinct surface queries.
 fn switch(
     mut commands: Commands,
     mut asked: MessageReader<GoTo>,
     mut track: ResMut<Track>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut loft: Query<(Entity, &mut Mesh3d), With<Loft>>,
+    mut loft: Query<(Entity, &mut Mesh3d), LoftMesh>,
+    mut bowl: Query<(Entity, &mut Mesh3d), InfieldMesh>,
+    mut road: Query<(Entity, &mut Mesh3d), AsphaltMesh>,
     mut reset: MessageWriter<Reset>,
 ) {
     let Some(GoTo(next)) = asked.read().last() else {
@@ -734,8 +778,25 @@ fn switch(
         return;
     }
     *track = Track::new(next);
+    let (scenery, asphalt) = track.profile.surfaces(&track.ribbon);
     if let Ok((entity, mut mesh)) = loft.single_mut() {
-        mesh.0 = meshes.add(track.profile.loft(&track.ribbon));
+        mesh.0 = meshes.add(scenery);
+        if next.crossings.is_empty() {
+            commands.entity(entity).remove::<NotShadowCaster>();
+        } else {
+            commands.entity(entity).insert(NotShadowCaster);
+        }
+    }
+    if let Ok((entity, mut mesh)) = road.single_mut() {
+        mesh.0 = meshes.add(asphalt);
+        if next.crossings.is_empty() {
+            commands.entity(entity).remove::<NotShadowCaster>();
+        } else {
+            commands.entity(entity).insert(NotShadowCaster);
+        }
+    }
+    if let Ok((entity, mut mesh)) = bowl.single_mut() {
+        mesh.0 = meshes.add(infield::fill(&track.profile, &track.ribbon));
         if next.crossings.is_empty() {
             commands.entity(entity).remove::<NotShadowCaster>();
         } else {
@@ -1380,6 +1441,8 @@ mod tests {
             app.world_mut().resource_mut::<Assets<Mesh>>().add(mesh)
         };
         let loft = app.world_mut().spawn((Loft, Mesh3d(road.clone()))).id();
+        let asphalt = app.world_mut().spawn((Asphalt, Mesh3d(road.clone()))).id();
+        let grass = app.world_mut().spawn((Infield, Mesh3d(road.clone()))).id();
 
         app.update();
         assert_eq!(
@@ -1442,10 +1505,14 @@ mod tests {
         let suzuka = circuits::all().iter().find(|c| c.id == "suzuka").unwrap();
         app.world_mut().write_message(GoTo(suzuka));
         app.update();
-        assert!(app.world().get::<NotShadowCaster>(loft).is_some());
+        for entity in [loft, asphalt, grass] {
+            assert!(app.world().get::<NotShadowCaster>(entity).is_some());
+        }
         app.world_mut().write_message(GoTo(circuits::first()));
         app.update();
-        assert!(app.world().get::<NotShadowCaster>(loft).is_none());
+        for entity in [loft, asphalt, grass] {
+            assert!(app.world().get::<NotShadowCaster>(entity).is_none());
+        }
     }
 
     /// A circuit that passes over itself, built to order.
