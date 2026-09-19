@@ -1508,6 +1508,85 @@ mod tests {
         }
     }
 
+    /// Every circuit in the game came from one pinned revision of one source,
+    /// exactly once, and says so in three places that agree.
+    ///
+    /// The three are the module's own header, the provenance file beside the
+    /// screening runs, and the list the menu is drawn from. They are written at
+    /// different times by different things — the generator writes the first two
+    /// and the third is edited by hand — so the way they go wrong is quietly:
+    /// a circuit generated twice under two names, a circuit whose trace was
+    /// refreshed from `master` while the rest came from a pinned commit, a
+    /// provenance entry left behind by a module that was deleted.
+    ///
+    /// Reading the repository from a test is unusual and is the point. What is
+    /// being checked is not what the code does with the data; it is that the
+    /// data is what it says it is.
+    #[test]
+    fn every_circuit_came_from_the_source_once() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let recorded = std::fs::read_to_string(root.join("docs/track-screening/sources.json"))
+            .expect("the provenance file is beside the screening runs");
+        let pinned = std::fs::read_to_string(root.join("tools/make_track.py"))
+            .expect("the generator")
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("REVISION = ")
+                    .map(|r| r.trim_matches('"').to_string())
+            })
+            .expect("the generator pins a revision");
+
+        let mut sources: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir(root.join("src/track/circuits")).expect("the circuits") {
+            let path = entry.expect("a directory entry").path();
+            if path.file_name().is_some_and(|name| name == "mod.rs") {
+                continue;
+            }
+            let module = path
+                .file_stem()
+                .expect("a module name")
+                .to_string_lossy()
+                .to_string();
+            let text = std::fs::read_to_string(&path).expect("a circuit module");
+            let source = text
+                .split("make_track.py ")
+                .nth(1)
+                .and_then(|rest| rest.split_whitespace().next())
+                .unwrap_or_else(|| panic!("{module} does not say what it was generated from"))
+                .to_string();
+            assert!(
+                text.contains(&pinned[..12]),
+                "{module} does not name the pinned revision of the source"
+            );
+            assert!(
+                recorded.contains(&format!("\"{module}\": {{")),
+                "{module} is not in the provenance file"
+            );
+            assert!(
+                recorded.contains(&format!("\"source_id\": \"{source}\"")),
+                "{source} is not in the provenance file"
+            );
+            sources.push(source);
+        }
+
+        assert_eq!(
+            sources.len(),
+            circuits::all().len(),
+            "there are {} circuit modules and {} circuits in the list",
+            sources.len(),
+            circuits::all().len()
+        );
+        assert_eq!(sources.len(), 40, "the source has forty circuits in it");
+        sources.sort();
+        let listed = sources.len();
+        sources.dedup();
+        assert_eq!(
+            sources.len(),
+            listed,
+            "a circuit of the source was built twice under two names"
+        );
+    }
+
     /// A bridge says where it came from, and says which half of it is which.
     ///
     /// The only thing in a circuit module that is not a fact about the real
