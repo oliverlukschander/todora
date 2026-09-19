@@ -25,8 +25,8 @@
 use bevy::prelude::*;
 
 /// The glTF is modelled at full size; this is the fraction of it we drive.
-/// 60% of the original 0.8 scale, to give the car room on the narrower tracks.
-pub(crate) const SCALE: f32 = 0.48;
+/// 54% of the original 0.8 scale, to give the car room on the narrower tracks.
+pub(crate) const SCALE: f32 = 0.432;
 /// From `tools/make_shooting_brake.py`, at driving scale.
 pub(crate) const WHEEL_RADIUS: f32 = 0.20 * SCALE;
 pub(crate) const WHEEL_WIDTH: f32 = 0.16 * SCALE;
@@ -153,15 +153,15 @@ impl Handling {
         downforce: 0.009,
         brake_bite: 0.25,
         handbrake_lets_go: 0.68,
-        power_lets_go: 0.45,
-        sliding_costs: 0.35,
+        power_lets_go: 0.40,
+        sliding_costs: 0.30,
         // Keep the previous low-speed turning radius with the shorter
-        // wheelbase: atan(tan(0.7) * 0.6), rather than scrubbing away the launch.
-        max_steer: 0.467_936_78,
+        // wheelbase: atan(tan(0.7) * 0.54), rather than scrubbing away the launch.
+        max_steer: 0.426_868_02,
         lock_margin: 1.1,
         steer_rate: 10.0,
         yaw_response: 11.0,
-        align: 3.2,
+        align: 3.6,
         kick: 2.0,
         top_speed: 24.0,
         accel: 9.5,
