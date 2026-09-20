@@ -1,4 +1,4 @@
-//! The asphalt image uses world-space UVs, so corners and the lap join tile cleanly.
+//! Shared repeating surface textures and linear-light mipmaps.
 use bevy::{
     image::{
         ImageAddressMode, ImageFilterMode, ImageLoaderSettings, ImageSampler,
@@ -8,14 +8,40 @@ use bevy::{
     render::render_resource::TextureFormat,
 };
 
+pub(super) const GRASS_TILE: f32 = 1.5;
+
 #[derive(Resource)]
 pub(super) struct Texture {
-    image: Handle<Image>,
-    ready: bool,
+    pending: Vec<Handle<Image>>,
 }
 
-pub(super) fn material(commands: &mut Commands, assets: &AssetServer) -> StandardMaterial {
-    let image = assets
+pub(super) fn materials(
+    commands: &mut Commands,
+    assets: &AssetServer,
+) -> (StandardMaterial, StandardMaterial) {
+    let asphalt = load(assets, "textures/racing-asphalt.png");
+    let grass = load(assets, "textures/circuit-grass.png");
+    commands.insert_resource(Texture {
+        pending: vec![asphalt.clone(), grass.clone()],
+    });
+    (
+        StandardMaterial {
+            base_color: Color::srgb(0.82, 0.82, 0.82),
+            base_color_texture: Some(asphalt),
+            unlit: true,
+            ..default()
+        },
+        StandardMaterial {
+            base_color_texture: Some(grass),
+            unlit: true,
+            cull_mode: None,
+            ..default()
+        },
+    )
+}
+
+fn load(assets: &AssetServer, path: &'static str) -> Handle<Image> {
+    assets
         .load_builder()
         .with_settings(|settings: &mut ImageLoaderSettings| {
             settings.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
@@ -28,18 +54,7 @@ pub(super) fn material(commands: &mut Commands, assets: &AssetServer) -> Standar
                 ..default()
             });
         })
-        .load("textures/racing-asphalt.png");
-    commands.insert_resource(Texture {
-        image: image.clone(),
-        ready: false,
-    });
-    StandardMaterial {
-        base_color: Color::srgb(0.82, 0.82, 0.82),
-        base_color_texture: Some(image),
-        perceptual_roughness: 0.96,
-        reflectance: 0.12,
-        ..default()
-    }
+        .load(path)
 }
 
 // PNGs arrive with one mip level. Build the smaller levels in linear light,
@@ -51,14 +66,13 @@ pub(super) fn prepare(
     let (Some(texture), Some(images)) = (texture.as_mut(), images.as_mut()) else {
         return;
     };
-    if texture.ready {
-        return;
-    }
-    let Some(mut image) = images.get_mut(&texture.image) else {
-        return;
-    };
-    mipmaps(&mut image);
-    texture.ready = true;
+    texture.pending.retain(|handle| {
+        let Some(mut image) = images.get_mut(handle) else {
+            return true;
+        };
+        mipmaps(&mut image);
+        false
+    });
 }
 
 fn mipmaps(image: &mut Image) {

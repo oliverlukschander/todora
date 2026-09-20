@@ -5,8 +5,8 @@ const TYRES: &[u8] = include_bytes!("../../assets/audio/tyres.s16le");
 pub(super) struct Tyres {
     position: f32,
     filtered: f32,
-    rolling_low: f32,
-    rolling_filtered: f32,
+    rolling_position: f32,
+    rolling_filters: [f32; 4],
     rolling: f32,
     scrub: f32,
     squeal: f32,
@@ -27,11 +27,18 @@ impl Tyres {
         self.position = (self.position + 0.76 + 0.22 * slide) % length as f32;
         // The same rubber sound: muted and low near the limit, opening up as it slides.
         self.filtered += (sample - self.filtered) * (0.14 + 0.25 * slide);
-        // Low-pass the recording twice for quiet tyre contact underneath the
-        // grip warning. No motor oscillators and no generated white-noise bed.
-        self.rolling_low += (sample - self.rolling_low) * 0.05;
-        self.rolling_filtered += (self.rolling_low - self.rolling_filtered) * 0.05;
-        self.rolling_filtered * self.rolling + self.filtered * (self.scrub + self.squeal)
+        // A separate, much slower read keeps rolling contact deep even while
+        // the cornering squeal rises. Four low-pass stages remove the upper
+        // harmonics, leaving a muffled bass rumble underneath the grip warning.
+        let at = self.rolling_position as usize;
+        let fraction = self.rolling_position.fract();
+        let mut rumble = read(at) * (1.0 - fraction) + read((at + 1) % length) * fraction;
+        self.rolling_position = (self.rolling_position + 0.09) % length as f32;
+        for low in &mut self.rolling_filters {
+            *low += (rumble - *low) * 0.014;
+            rumble = *low;
+        }
+        rumble * self.rolling * 0.75 + self.filtered * (self.scrub + self.squeal)
     }
 }
 

@@ -22,17 +22,18 @@
 //! loft, and knows where the start line is. The shape lives in [`ribbon`]; the
 //! cross-section in [`profile`].
 
-mod asphalt;
 // A trace is thousands of surveyed coordinates, and sooner or later one of them
 // is 3.14 or 6.28 metres from the centroid of its circuit. It is a coordinate.
+mod bridge;
 #[allow(clippy::approx_constant)]
 mod circuits;
 mod markers;
 mod profile;
 mod ribbon;
 mod terrain;
+mod textures;
 
-use bevy::{light::NotShadowCaster, prelude::*};
+use bevy::prelude::*;
 
 use crate::Reset;
 use crate::car::{Car, level};
@@ -243,7 +244,7 @@ impl Plugin for TrackPlugin {
                 (
                     markers::rebuild.run_if(resource_changed::<Track>),
                     markers::show,
-                    asphalt::prepare,
+                    textures::prepare,
                 )
                     .chain(),
             );
@@ -712,61 +713,48 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let material = materials.add(StandardMaterial {
-        base_color: Color::WHITE,
-        perceptual_roughness: 0.9,
-        ..default()
-    });
-    let (scenery, road) = track.profile.surfaces(&track.ribbon);
-    let road_material = materials.add(asphalt::material(&mut commands, &assets));
-    let mut road_entity = commands.spawn((
+    let (mut scenery, road, mut grass) = track.profile.surfaces(&track.ribbon);
+    let terrain = terrain::fill(&track.profile, &track.ribbon);
+    if let Some(details) = bridge::mesh(&track.profile, &track.ribbon, &terrain) {
+        scenery
+            .merge(&details)
+            .expect("bridge shares the scenery attributes");
+    }
+    grass
+        .merge(&terrain)
+        .expect("grass meshes share attributes");
+    let (road_material, grass_material) = textures::materials(&mut commands, &assets);
+    commands.spawn((
         Asphalt,
         Mesh3d(meshes.add(road)),
-        MeshMaterial3d(road_material),
+        MeshMaterial3d(materials.add(road_material)),
     ));
-    if !track.circuit.crossings.is_empty() {
-        road_entity.insert(NotShadowCaster);
-    }
-    let mut loft = commands.spawn((
+    commands.spawn((
         Loft,
         Mesh3d(meshes.add(scenery)),
-        MeshMaterial3d(material.clone()),
-    ));
-    // Keep the lower road readable beneath a crossing. The car and markers
-    // still cast their own shadows; only the continuous track mesh opts out.
-    if !track.circuit.crossings.is_empty() {
-        loft.insert(NotShadowCaster);
-    }
-    let mut terrain = commands.spawn((
-        Terrain,
-        Mesh3d(meshes.add(terrain::fill(&track.profile, &track.ribbon))),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::WHITE,
-            perceptual_roughness: 0.9,
-            cull_mode: None,
+            unlit: true,
             ..default()
         })),
     ));
-    // The steep bank joins at an overpass self-shadow into jagged black
-    // wedges. As with the bridge loft, keep its lower approach readable.
-    if !track.circuit.crossings.is_empty() {
-        terrain.insert(NotShadowCaster);
-    }
+    commands.spawn((
+        Terrain,
+        Mesh3d(meshes.add(grass)),
+        MeshMaterial3d(materials.add(grass_material)),
+    ));
 }
 
 /// Go where the menu said.
 ///
 /// Rebuild the spline and surrounding terrain once while the game is stopped
 /// behind the menu. The old meshes go when the last handles to them do.
-#[allow(clippy::too_many_arguments)] // Bevy-managed resources and distinct surface queries.
 fn switch(
-    mut commands: Commands,
     mut asked: MessageReader<GoTo>,
     mut track: ResMut<Track>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut loft: Query<(Entity, &mut Mesh3d), LoftMesh>,
-    mut ground: Query<(Entity, &mut Mesh3d), TerrainMesh>,
-    mut road: Query<(Entity, &mut Mesh3d), AsphaltMesh>,
+    mut loft: Query<&mut Mesh3d, LoftMesh>,
+    mut ground: Query<&mut Mesh3d, TerrainMesh>,
+    mut road: Query<&mut Mesh3d, AsphaltMesh>,
     mut reset: MessageWriter<Reset>,
 ) {
     let Some(GoTo(next)) = asked.read().last() else {
@@ -776,30 +764,24 @@ fn switch(
         return;
     }
     *track = Track::new(next);
-    let (scenery, asphalt) = track.profile.surfaces(&track.ribbon);
-    if let Ok((entity, mut mesh)) = loft.single_mut() {
+    let (mut scenery, asphalt, mut grass) = track.profile.surfaces(&track.ribbon);
+    let terrain = terrain::fill(&track.profile, &track.ribbon);
+    if let Some(details) = bridge::mesh(&track.profile, &track.ribbon, &terrain) {
+        scenery
+            .merge(&details)
+            .expect("bridge shares the scenery attributes");
+    }
+    if let Ok(mut mesh) = loft.single_mut() {
         mesh.0 = meshes.add(scenery);
-        if next.crossings.is_empty() {
-            commands.entity(entity).remove::<NotShadowCaster>();
-        } else {
-            commands.entity(entity).insert(NotShadowCaster);
-        }
     }
-    if let Ok((entity, mut mesh)) = road.single_mut() {
+    if let Ok(mut mesh) = road.single_mut() {
         mesh.0 = meshes.add(asphalt);
-        if next.crossings.is_empty() {
-            commands.entity(entity).remove::<NotShadowCaster>();
-        } else {
-            commands.entity(entity).insert(NotShadowCaster);
-        }
     }
-    if let Ok((entity, mut mesh)) = ground.single_mut() {
-        mesh.0 = meshes.add(terrain::fill(&track.profile, &track.ribbon));
-        if next.crossings.is_empty() {
-            commands.entity(entity).remove::<NotShadowCaster>();
-        } else {
-            commands.entity(entity).insert(NotShadowCaster);
-        }
+    if let Ok(mut mesh) = ground.single_mut() {
+        grass
+            .merge(&terrain)
+            .expect("grass meshes share attributes");
+        mesh.0 = meshes.add(grass);
     }
     // Everything that owns a piece of the old lap puts it back itself.
     reset.write(Reset);
@@ -1004,15 +986,14 @@ mod tests {
             for side in [-1.0f32, 1.0] {
                 // How far the grass reaches on this side *here*, which is what
                 // the reading out on it has to be taken against: the verge is
-                // fitted station by station now, so the depth at two thirds of
-                // the way out is not a constant of the game.
+                // fitted station by station, with grass at road height.
                 let edge = track.ground(start.translation + right * side).edge;
                 let lip = HALF_WIDTH + (2.0 / 3.0) * (edge - HALF_WIDTH);
                 for (across, grip, height) in [
                     (0.0, 1.0, 0.0),
                     (TARMAC_HALF - 0.01, 1.0, 0.0),
                     (HALF_WIDTH - 0.01, KERB_GRIP, KERB_TOP * (0.69 / 0.70)),
-                    (lip, GRASS_GRIP, KERB_TOP - 0.125 * (lip - HALF_WIDTH)),
+                    (lip, GRASS_GRIP, 0.0),
                 ] {
                     let ground = track.ground(start.translation + right * (side * across));
                     assert_eq!(ground.grip, grip, "{name}: grip {across} m off the line");
@@ -1528,22 +1509,21 @@ mod tests {
                 .get(&drawn)
                 .expect("the new loft was added")
                 .count_vertices(),
-            track.profile.loft(&track.ribbon).count_vertices(),
+            track.profile.surfaces(&track.ribbon).0.count_vertices(),
             "the loft drawn is not the one this circuit sweeps"
         );
 
-        // The same mesh entity is reused, so its shadow setting must follow
-        // the circuit both into a bridge and back out of one.
+        // All three materials retain their mesh entities when switching
+        // into a crossing and back out of it.
         let suzuka = circuits::all().iter().find(|c| c.id == "suzuka").unwrap();
-        app.world_mut().write_message(GoTo(suzuka));
-        app.update();
-        for entity in [loft, asphalt, grass] {
-            assert!(app.world().get::<NotShadowCaster>(entity).is_some());
-        }
-        app.world_mut().write_message(GoTo(circuits::first()));
-        app.update();
-        for entity in [loft, asphalt, grass] {
-            assert!(app.world().get::<NotShadowCaster>(entity).is_none());
+        for circuit in [suzuka, circuits::first()] {
+            let before =
+                [loft, asphalt, grass].map(|e| app.world().get::<Mesh3d>(e).unwrap().0.clone());
+            app.world_mut().write_message(GoTo(circuit));
+            app.update();
+            for (entity, old) in [loft, asphalt, grass].into_iter().zip(before) {
+                assert_ne!(app.world().get::<Mesh3d>(entity).unwrap().0, old);
+            }
         }
     }
 

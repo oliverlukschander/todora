@@ -55,20 +55,8 @@ pub(super) const KERB_TOP: f32 = 0.05;
 pub(super) const VERGE: f32 = 1.5;
 /// The whole cross-section at its widest, either side of the centreline.
 pub(super) const EDGE: f32 = HALF_WIDTH + VERGE;
-/// How much of the verge is grass before the lip it falls away over.
+/// Fraction of the verge reserved for the gently sloping grass beside the kerb.
 const GRASS_OF_VERGE: f32 = 2.0 / 3.0;
-/// How steeply the grass falls away from the kerb, and how steeply the lip
-/// outside it falls away from the grass.
-///
-/// The verge is described by its slopes rather than by the heights they arrive
-/// at, which is what lets it be any width. The old table named the heights —
-/// −0.20 m at the grass and −0.95 m at the lip — and those are what a 3 m verge
-/// comes to at these slopes, so a circuit with the room is unchanged to the
-/// last bit. A circuit without it gets a shallower verge instead of the same
-/// 0.95 m drop crammed into a fifth of the run, which would have been a cliff
-/// with a corner marker leaning off it.
-const GRASS_FALL: f32 = 0.125;
-const SKIRT_FALL: f32 = 0.75;
 /// How much of a corner's radius the outermost rib leaves unused on the inside
 /// of the bend.
 ///
@@ -144,8 +132,7 @@ pub(super) const GRASS_GRIP: f32 = 0.38;
 /// is the outer edge of its verge and the highest thing about the road below is
 /// the lip of its kerb, and the clearance a driver sees is between those two
 /// rather than between two centrelines.
-pub(super) const SECTION_DEEP: f32 =
-    GRASS_FALL * GRASS_OF_VERGE * VERGE + SKIRT_FALL * (VERGE - GRASS_OF_VERGE * VERGE);
+pub(super) const SECTION_DEEP: f32 = KERB_TOP;
 
 /// How thick the deck of a bridge is, from the road on top of it to the soffit
 /// underneath. The same figure [`super::DECK`] reserves when it decides how far
@@ -171,13 +158,14 @@ const SHOWS: f32 = 0.05;
 /// How deep the structure under a station is: a deck's worth over the span of a
 /// bridge, tapering out with its ramps, and nothing at all where the taper has
 /// got thin enough that a strip of it would be a strip of nothing.
-fn deep(station: &Station) -> f32 {
+pub(super) fn deep(station: &Station) -> f32 {
     let deep = DECK * station.deck;
     if deep <= SHOWS { 0.0 } else { deep }
 }
 /// Concrete. Not a [`Band`], because a band is a strip of the sweep and this is
 /// not swept — it exists only where the road is off the ground.
-const STRUCTURE: (f32, f32, f32) = (0.46, 0.45, 0.43);
+const STRUCTURE: (f32, f32, f32) = (0.19, 0.205, 0.215);
+pub(super) const SLAB_FRACTION: f32 = 0.35;
 
 /// Ribs in one cross-section, and strips between them.
 pub(super) const RIBS: usize = 10;
@@ -199,39 +187,17 @@ pub(super) type Section = [(f32, f32, Band); RIBS];
 pub(super) fn section(left: f32, right: f32) -> Section {
     let grass = |verge: f32| GRASS_OF_VERGE * verge;
     [
-        (
-            -(HALF_WIDTH + left),
-            KERB_TOP - fall(left, left),
-            Band::Skirt,
-        ),
-        (
-            -(HALF_WIDTH + grass(left)),
-            KERB_TOP - fall(grass(left), left),
-            Band::Grass,
-        ),
+        (-(HALF_WIDTH + left), 0.0, Band::Skirt),
+        (-(HALF_WIDTH + grass(left)), 0.0, Band::Grass),
         (-HALF_WIDTH, KERB_TOP, Band::Kerb),
         (-KERB_INNER, 0.0, Band::Line),
         (-TARMAC_HALF, 0.0, Band::Tarmac),
         (TARMAC_HALF, 0.0, Band::Line),
         (KERB_INNER, 0.0, Band::Kerb),
         (HALF_WIDTH, KERB_TOP, Band::Grass),
-        (
-            HALF_WIDTH + grass(right),
-            KERB_TOP - fall(grass(right), right),
-            Band::Skirt,
-        ),
-        (HALF_WIDTH + right, KERB_TOP - fall(right, right), Band::End),
+        (HALF_WIDTH + grass(right), 0.0, Band::Skirt),
+        (HALF_WIDTH + right, 0.0, Band::End),
     ]
-}
-
-/// How far a verge `verge` wide has fallen `across` metres out from the kerb.
-fn fall(across: f32, verge: f32) -> f32 {
-    let grass = GRASS_OF_VERGE * verge;
-    if across <= grass {
-        GRASS_FALL * across
-    } else {
-        GRASS_FALL * grass + SKIRT_FALL * (across - grass)
-    }
 }
 
 /// Height of a cross-section at `lateral`, above the road surface.
@@ -372,7 +338,7 @@ impl Profile {
     /// The verge widths are interpolated and the shape is rebuilt from them,
     /// rather than the ribs of the two stations being interpolated directly.
     /// They come to the same thing — every rib is a fixed fraction of the verge
-    /// and every height a fixed slope along it — and this way there is one
+    /// and every height fixed relative to the road — and this way there is one
     /// description of what a cross-section is.
     pub(super) fn between(&self, at: usize, t: f32) -> Section {
         let next = (at + 1) % self.left.len();
@@ -383,7 +349,7 @@ impl Profile {
     }
 
     /// Height of the cross-section at `lateral`, above the road surface. What
-    /// the car stands on: the kerb lip and the fall of the verge, read from the
+    /// the car stands on: the raised kerb and its transition to grass, read from the
     /// same ribs the mesh was swept from, at the same place along the lap.
     pub(super) fn height(&self, at: usize, t: f32, lateral: f32) -> f32 {
         height_of(&self.between(at, t), lateral)
@@ -401,8 +367,7 @@ impl Profile {
         HALF_WIDTH + verge
     }
 
-    /// How much grass the shoulder has on side `side` here, before the lip it
-    /// falls away over. What a corner marker has to stand on.
+    /// How much grass the shoulder has on side `side` here for a corner marker.
     pub(super) fn grass(&self, at: usize, t: f32, side: f32) -> f32 {
         GRASS_OF_VERGE * (self.reach(at, t, side) - HALF_WIDTH)
     }
@@ -453,48 +418,89 @@ impl Profile {
         )
     }
 
-    /// Separate the textured road from the painted lines, kerbs and verge.
-    /// Both meshes retain the exact loft positions and normals; the finish
-    /// stripe stays with the paint, so textures cannot dim its white surface.
-    pub(super) fn surfaces(&self, ribbon: &Ribbon) -> (Mesh, Mesh) {
-        let mut scenery = self.loft(ribbon);
+    /// Split the loft by material without moving any of its shared edges.
+    pub(super) fn surfaces(&self, ribbon: &Ribbon) -> (Mesh, Mesh, Mesh) {
+        let loft = self.loft(ribbon);
         let n = ribbon.stations().len();
-        let band = self
-            .at(0)
-            .iter()
-            .position(|rib| rib.2 == Band::Tarmac)
-            .unwrap();
-        let first = (band * n + STRIPE) * 4;
-        let end = (band + 1) * n * 4;
-        let positions = scenery
+        let positions = loft
             .attribute(Mesh::ATTRIBUTE_POSITION)
             .unwrap()
             .as_float3()
-            .unwrap()[first..end]
-            .to_vec();
-        let normals = scenery
+            .unwrap();
+        let normals = loft
             .attribute(Mesh::ATTRIBUTE_NORMAL)
             .unwrap()
             .as_float3()
-            .unwrap()[first..end]
-            .to_vec();
-        let uvs: Vec<_> = positions.iter().map(|p| [p[0] / 0.8, p[2] / 0.8]).collect();
-        let Some(Indices::U32(indices)) = scenery.indices_mut() else {
-            unreachable!("loft uses u32 indices");
+            .unwrap();
+        let bevy::mesh::VertexAttributeValues::Float32x4(colors) =
+            loft.attribute(Mesh::ATTRIBUTE_COLOR).unwrap()
+        else {
+            unreachable!()
         };
-        let road_indices: Vec<_> = indices
-            .drain((band * n + STRIPE) * 6..(band + 1) * n * 6)
-            .map(|i| i - first as u32)
-            .collect();
-        let road = Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-        )
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
-        .with_inserted_indices(Indices::U32(road_indices));
-        (scenery, road)
+        let mut groups = [Vec::new(), Vec::new(), Vec::new()];
+        for quad in 0..positions.len() / 4 {
+            let band = quad / n;
+            let group = if band >= BANDS {
+                0
+            } else {
+                match self.at(0)[band].2 {
+                    Band::Tarmac if quad % n >= STRIPE => 1,
+                    Band::Grass | Band::Skirt
+                        if deep(&ribbon.stations()[quad % n]) == 0.0
+                            && deep(&ribbon.stations()[(quad + 1) % n]) == 0.0 =>
+                    {
+                        2
+                    }
+                    _ => 0,
+                }
+            };
+            groups[group].push(quad);
+        }
+        let [scenery, road, grass] = std::array::from_fn(|group| {
+            let vertices: Vec<_> = groups[group]
+                .iter()
+                .flat_map(|q| q * 4..q * 4 + 4)
+                .collect();
+            let points: Vec<_> = vertices.iter().map(|&i| positions[i]).collect();
+            let mut mesh = Mesh::new(
+                PrimitiveTopology::TriangleList,
+                RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+            )
+            .with_inserted_attribute(
+                Mesh::ATTRIBUTE_NORMAL,
+                vertices.iter().map(|&i| normals[i]).collect::<Vec<_>>(),
+            )
+            .with_inserted_indices(Indices::U32(
+                (0..groups[group].len() as u32)
+                    .flat_map(|q| {
+                        let b = q * 4;
+                        [b, b + 1, b + 2, b + 1, b + 3, b + 2]
+                    })
+                    .collect(),
+            ));
+            if group == 0 {
+                mesh.insert_attribute(
+                    Mesh::ATTRIBUTE_COLOR,
+                    vertices.iter().map(|&i| colors[i]).collect::<Vec<_>>(),
+                );
+            } else {
+                let tile = if group == 1 {
+                    0.8
+                } else {
+                    super::textures::GRASS_TILE
+                };
+                mesh.insert_attribute(
+                    Mesh::ATTRIBUTE_UV_0,
+                    points
+                        .iter()
+                        .map(|p| [p[0] / tile, p[2] / tile])
+                        .collect::<Vec<_>>(),
+                );
+            }
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, points);
+            mesh
+        });
+        (scenery, road, grass)
     }
 
     /// Sweep the cross-section along the centreline: one strip per profile band,
@@ -544,7 +550,14 @@ impl Profile {
 
             for (i, ribs) in sections.iter().enumerate() {
                 let j = (i + 1) % n;
-                let color = ribs[band].2.paint(i);
+                let color = if matches!(ribs[band].2, Band::Grass | Band::Skirt)
+                    && (deep(&stations[i]) > 0.0 || deep(&stations[j]) > 0.0)
+                {
+                    let [r, g, b] = super::bridge::OBSIDIAN;
+                    paint(r, g, b)
+                } else {
+                    ribs[band].2.paint(i)
+                };
                 for (station, side) in [(i, 0), (i, 1), (j, 0), (j, 1)] {
                     positions.push(rim[station][side].to_array());
                     normals.push(rim_normal(station, side));
@@ -570,7 +583,8 @@ impl Profile {
         // the thickness of a deck, so that a bridge comes out of its own
         // embankment rather than beginning in mid-air.
         //
-        // Three strips: a soffit across the underside, and a fascia down each
+        // The slab uses part of the reserved depth; bridge::mesh fills the
+        // rest with girders. Three strips: a soffit and a fascia down each
         // side from the edge of the road to meet it. Between them they close
         // the one place a one-sided road would be seen through, which is from
         // underneath a bridge, which is exactly where a driver on the lower
@@ -586,7 +600,9 @@ impl Profile {
                 let rib = if side == 0 { ribs[0] } else { ribs[RIBS - 1] };
                 stations[at].pos + stations[at].right * rib.0 + Vec3::Y * rib.1
             };
-            let sink = |at: usize, side: usize| rim(at, side) - Vec3::Y * deep(&stations[at]);
+            let sink = |at: usize, side: usize| {
+                rim(at, side) - Vec3::Y * deep(&stations[at]) * SLAB_FRACTION
+            };
             // Each quad is given in the same order the swept ones are — this
             // station's two corners, then the next station's — and which way it
             // ends up facing is which way round those two corners go. The
@@ -677,10 +693,10 @@ mod tests {
     }
 
     #[test]
-    fn textured_road_preserves_every_original_face() {
+    fn material_split_preserves_every_original_face() {
         for (name, track) in every_track() {
             let original = track.profile.loft(&track.ribbon);
-            let (scenery, road) = track.profile.surfaces(&track.ribbon);
+            let (scenery, road, grass) = track.profile.surfaces(&track.ribbon);
             let faces = |mesh: &Mesh| {
                 let positions = mesh
                     .attribute(Mesh::ATTRIBUTE_POSITION)
@@ -690,25 +706,26 @@ mod tests {
                 mesh.indices()
                     .unwrap()
                     .iter()
-                    .map(|i| positions[i])
+                    .collect::<Vec<_>>()
+                    .chunks_exact(3)
+                    .map(|f| {
+                        [positions[f[0]], positions[f[1]], positions[f[2]]]
+                            .map(|p| p.map(f32::to_bits))
+                    })
                     .collect::<Vec<_>>()
             };
-            let mut combined = faces(&scenery);
-            let n = track.ribbon.stations().len();
-            let band = track
-                .profile
-                .at(0)
-                .iter()
-                .position(|rib| rib.2 == Band::Tarmac)
-                .unwrap();
-            combined.splice(
-                (band * n + STRIPE) * 6..(band * n + STRIPE) * 6,
-                faces(&road),
-            );
+            let mut combined: Vec<_> = [&scenery, &road, &grass]
+                .into_iter()
+                .flat_map(faces)
+                .collect();
+            let mut expected = faces(&original);
+            combined.sort_unstable();
+            expected.sort_unstable();
+            assert_eq!(combined, expected, "{name}: texture changed the surface");
+            assert!(grass.attribute(Mesh::ATTRIBUTE_COLOR).is_none());
             assert_eq!(
-                combined,
-                faces(&original),
-                "{name}: texture changed the surface"
+                grass.attribute(Mesh::ATTRIBUTE_UV_0).unwrap().len(),
+                grass.count_vertices()
             );
             assert!(road.attribute(Mesh::ATTRIBUTE_COLOR).is_none());
             assert_eq!(
@@ -720,7 +737,7 @@ mod tests {
 
     /// A cross-section is a cross-section however wide its two verges are:
     /// ordered outward, road untouched, verge reaching exactly as far as asked,
-    /// and falling at the slopes that describe it.
+    /// and joining the fill at road height.
     ///
     /// Asymmetric widths on purpose, including the extreme of one side at its
     /// widest and the other at its narrowest, which is the shape the old single
@@ -747,17 +764,13 @@ mod tests {
                 for k in 2..=7 {
                     assert_eq!(ribs[k], full[k], "the road moved at {left}/{right}");
                 }
-                // And the verge falls at its slopes rather than to a height.
+                // The fill joins at road height, independent of verge width.
                 for (verge, side) in [(left, -1.0f32), (right, 1.0)] {
-                    let lip = height_of(&ribs, side * (HALF_WIDTH + GRASS_OF_VERGE * verge));
-                    let edge = height_of(&ribs, side * (HALF_WIDTH + verge));
-                    let grass = GRASS_OF_VERGE * verge;
-                    assert!((lip - (KERB_TOP - GRASS_FALL * grass)).abs() < 1e-5);
-                    assert!(
-                        (edge - (KERB_TOP - GRASS_FALL * grass - SKIRT_FALL * (verge - grass)))
-                            .abs()
-                            < 1e-5
+                    assert_eq!(
+                        height_of(&ribs, side * (HALF_WIDTH + GRASS_OF_VERGE * verge)),
+                        0.0
                     );
+                    assert_eq!(height_of(&ribs, side * (HALF_WIDTH + verge)), 0.0);
                 }
             }
         }
@@ -770,8 +783,7 @@ mod tests {
     /// This is the road: 3.6 m across the outsides of the kerbs, of which
     /// 2.94 m is asphalt, a white line 0.08 m wide either side of that, and a
     /// kerb 0.25 m wide outside each line standing 5 cm proud. Then 1.5 metres
-    /// of verge, grass for the first metre and a lip for the last half, arriving
-    /// at −0.45 m.
+    /// of verge, easing down from the raised kerb to road height.
     ///
     /// That the asphalt holds the whole car and the kerb holds a wheel — the
     /// reason the road was cut up this way rather than multiplied down from the
@@ -779,16 +791,16 @@ mod tests {
     #[test]
     fn a_full_verge_is_the_section_it_says_it_is() {
         let was: &[(f32, f32, Band)] = &[
-            (-3.30000, -0.45000, Band::Skirt),
-            (-2.80000, -0.07500, Band::Grass),
+            (-3.30000, 0.00000, Band::Skirt),
+            (-2.80000, 0.00000, Band::Grass),
             (-1.80000, 0.05, Band::Kerb),
             (-1.55000, 0.00, Band::Line),
             (-1.47000, 0.00, Band::Tarmac),
             (1.47000, 0.00, Band::Line),
             (1.55000, 0.00, Band::Kerb),
             (1.80000, 0.05, Band::Grass),
-            (2.80000, -0.07500, Band::Skirt),
-            (3.30000, -0.45000, Band::End),
+            (2.80000, 0.00000, Band::Skirt),
+            (3.30000, 0.00000, Band::End),
         ];
         let now = section(VERGE, VERGE);
         assert_eq!(now.len(), was.len());
