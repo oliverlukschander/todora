@@ -10,14 +10,18 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-NAME=Todora
+NAME=${TODORA_APP_NAME:-Todora}
 BIN=todora
 ID=com.lukschander.todora
 VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
 APP="dist/$NAME.app"
 RES="$APP/Contents/Resources"
 
-cargo build --release --locked
+BUILD_ARGS=(--release --locked)
+if [[ -n "${TODORA_FEATURES:-}" ]]; then
+  BUILD_ARGS+=(--features "$TODORA_FEATURES")
+fi
+cargo build "${BUILD_ARGS[@]}"
 
 rm -rf "$APP" dist/dmg "dist/$NAME.dmg" dist/AppIcon.iconset dist/todora.svg.png
 mkdir -p "$APP/Contents/MacOS" "$RES"
@@ -57,7 +61,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --deep --sign - "$APP"
+if [[ -n "${TODORA_GAME_CENTER_PROFILE:-}" ]]; then
+  python3 tools/sign_game_center.py "$APP" "$TODORA_GAME_CENTER_PROFILE" "${TODORA_SIGN_IDENTITY:?Set TODORA_SIGN_IDENTITY to your Apple Development signing identity}"
+else
+  codesign --force --deep --sign - "$APP"
+fi
 
 mkdir -p dist/dmg
 cp -R "$APP" dist/dmg/

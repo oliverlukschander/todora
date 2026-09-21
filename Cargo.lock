@@ -5199,8 +5199,11 @@ name = "todora"
 version = "0.10.0"
 dependencies = [
  "bevy",
+ "cc",
  "lyon_tessellation",
  "rodio",
+ "serde",
+ "serde_json",
  "ureq",
 ]
 

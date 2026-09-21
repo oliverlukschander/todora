@@ -1,5 +1,18 @@
 # TODO
 
+## Game Center multiplayer
+
+An optional two-player shared-practice prototype is implemented for macOS.
+See [setup, controls and verification](docs/testing/multiplayer.md).
+
+- [ ] Finish Apple Developer setup under the developer's team: Todora App ID, Game Center,
+  App Store Connect record, development certificate and two-Mac profile.
+- [ ] Verify a live Game Center match between two signed Macs with distinct
+  accounts, including invitations, Internet latency, pause and disconnects.
+- [ ] Bring the native integration to tvOS after the single-player port works.
+- [ ] Evaluate authoritative racing and car contact after shared practice is
+  proven; the prototype keeps cars independent and has no collision handling.
+
 ## Apple TV / tvOS port
 
 Explore a native Apple TV version while preserving Todora's driving feel and

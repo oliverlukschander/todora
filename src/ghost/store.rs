@@ -121,9 +121,14 @@ fn remove_all_in(folder: &Path) -> io::Result<()> {
 
 /// Where this machine keeps what a game saves.
 fn folder() -> Option<PathBuf> {
+    #[cfg(all(target_os = "macos", feature = "game-center"))]
+    let base = crate::multiplayer::support_directory();
     #[cfg(target_os = "windows")]
     let base = std::env::var_os("APPDATA").map(PathBuf::from);
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(
+        target_os = "windows",
+        all(target_os = "macos", feature = "game-center")
+    )))]
     let base = {
         let home = std::env::var_os("HOME").map(PathBuf::from);
         if cfg!(target_os = "macos") {

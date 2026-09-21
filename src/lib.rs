@@ -6,6 +6,7 @@ mod input;
 mod lap;
 mod menu;
 mod minimap;
+mod multiplayer;
 mod pause;
 mod skid;
 mod sound;
@@ -93,6 +94,7 @@ impl Plugin for GamePlugin {
                 hud::HudPlugin,
                 minimap::MinimapPlugin,
             ))
+            .add_plugins(multiplayer::MultiplayerPlugin)
             .add_systems(Update, quit);
     }
 }

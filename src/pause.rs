@@ -80,7 +80,10 @@ impl Plugin for PausePlugin {
                         .in_set(HaltSet)
                         .after(bevy::input::InputSystems)
                         .after(bevy::ui::UiSystems::Focus),
-                    hold_the_clock.after(HaltSet).after(crate::menu::MenuSet),
+                    hold_the_clock
+                        .after(HaltSet)
+                        .after(crate::menu::MenuSet)
+                        .after(crate::multiplayer::ReadySet),
                 ),
             )
             .add_systems(Update, (show, highlight));
@@ -90,6 +93,8 @@ impl Plugin for PausePlugin {
 /// The banner, which is the only part of a pause there is to see.
 #[derive(Component)]
 struct Banner;
+#[derive(Component)]
+struct PauseNote;
 
 #[derive(Component, Clone, Copy, Default, PartialEq, Eq, Debug)]
 enum Action {
@@ -153,7 +158,10 @@ fn setup(mut commands: Commands) {
                 .with_children(|panel| {
                     panel.spawn(label("TODORA  /  SESSION PAUSED", 12.0, AMBER));
                     panel.spawn(label("Take a breather.", 36.0, TEXT));
-                    panel.spawn(label("Your lap will be right here.", 17.0, AMBER_DIM));
+                    panel.spawn((
+                        PauseNote,
+                        label("Your lap will be right here.", 17.0, AMBER_DIM),
+                    ));
                     for (action, title) in [
                         (Action::Resume, "Resume"),
                         (Action::Music, "Music / M"),
@@ -327,6 +335,7 @@ fn highlight(
 /// springs. One clock, so there is nothing to keep in agreement.
 fn hold_the_clock(
     halt: Res<Halt>,
+    session: Option<Res<crate::multiplayer::Session>>,
     mut time: ResMut<Time<Virtual>>,
     mut players: Query<&mut Controls, With<Player>>,
 ) {
@@ -335,8 +344,10 @@ fn hold_the_clock(
             *controls = Controls::default();
         }
     }
-    if halt.stopped() != time.is_paused() {
-        if halt.stopped() {
+    let stopped = session.as_ref().is_some_and(|s| s.blocks_drive())
+        || (halt.stopped() && !session.as_ref().is_some_and(|s| s.driving()));
+    if stopped != time.is_paused() {
+        if stopped {
             time.pause();
         } else {
             time.unpause();
@@ -347,9 +358,22 @@ fn hold_the_clock(
 /// The banner is the pause's own, not every halt's. A menu is already standing
 /// in front of the game and saying so; a second panel behind it saying the game
 /// is stopped is the same news twice, through each other.
-fn show(halt: Res<Halt>, mut banner: Query<&mut Visibility, With<Banner>>) {
-    if !halt.is_changed() {
+fn show(
+    halt: Res<Halt>,
+    session: Option<Res<crate::multiplayer::Session>>,
+    mut banner: Query<&mut Visibility, With<Banner>>,
+    mut note: Query<&mut Text, With<PauseNote>>,
+) {
+    if !halt.is_changed() && !session.as_ref().is_some_and(|s| s.is_changed()) {
         return;
+    }
+    for mut text in &mut note {
+        text.0 = if session.as_ref().is_some_and(|s| s.driving()) {
+            "The session continues. This lap is invalid."
+        } else {
+            "Your lap will be right here."
+        }
+        .into();
     }
     if let Ok(mut visibility) = banner.single_mut() {
         *visibility = if *halt == Halt::Pause {

@@ -239,7 +239,7 @@ fn finish(
         if let Ok(transform) = player.single() {
             recording.push(lap.time, 1.0, transform);
         }
-        if lap.best {
+        if lap.best && lap.valid {
             ghost.best = (recording.samples.len() > 1 && !recording.full).then_some(recording);
             if let (Some(best), Some(saved)) = (&ghost.best, &ghost.saved) {
                 saved.write(best);
@@ -369,6 +369,7 @@ mod tests {
         app.world_mut().write_message(LapFinished {
             time: 0.1,
             best: false,
+            valid: false,
         });
         app.update();
         let ghost = app.world().resource::<Ghost>();
@@ -393,6 +394,7 @@ mod tests {
         app.world_mut().write_message(LapFinished {
             time: 1.0,
             best: true,
+            valid: true,
         });
         app.update();
         let ghost = app.world().resource::<Ghost>();
@@ -432,6 +434,7 @@ mod tests {
         app.world_mut().write_message(LapFinished {
             time: 10.0,
             best: true,
+            valid: true,
         });
         app.update();
         assert!(app.world().resource::<Ghost>().best.is_none());

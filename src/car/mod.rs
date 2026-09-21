@@ -41,6 +41,8 @@ const LEAN_RATE: f32 = 9.0;
 
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct DriveSet;
+#[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
+pub(crate) struct CarResetSet;
 
 /// The car the player is driving. [`crate::input`] fills its [`Controls`].
 #[derive(Component)]
@@ -88,6 +90,7 @@ impl Plugin for CarPlugin {
             .add_systems(
                 PreUpdate,
                 (tune, restart)
+                    .in_set(CarResetSet)
                     .after(InputSet)
                     .after(MenuSet)
                     .after(TrackSet),

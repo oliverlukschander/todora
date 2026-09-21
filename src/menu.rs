@@ -128,6 +128,7 @@ impl Plugin for MenuPlugin {
                 PreUpdate,
                 (search, open, walk, clicks)
                     .chain()
+                    .run_if(crate::multiplayer::offline)
                     .in_set(MenuSet)
                     .after(HaltSet)
                     .after(InputSet)

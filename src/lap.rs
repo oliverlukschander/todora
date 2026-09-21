@@ -41,6 +41,7 @@ pub(crate) struct ClockSet;
 pub(crate) struct LapFinished {
     pub time: f32,
     pub best: bool,
+    pub valid: bool,
 }
 
 pub struct LapPlugin;
@@ -255,7 +256,11 @@ fn gate(
             let best = !timer.invalid
                 && timer.sectors.len() == track.sector_count()
                 && timer.best.is_none_or(|best| time < best);
-            finished.write(LapFinished { time, best });
+            finished.write(LapFinished {
+                time,
+                best,
+                valid: !timer.invalid,
+            });
             if !timer.invalid {
                 timer.last = Some(time);
             }
