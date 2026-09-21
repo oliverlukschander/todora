@@ -212,6 +212,10 @@ Builds a release binary, wraps it in `dist/Todora.app` with its icon, and puts t
 
 ## A Linux app
 
+Linux remains a supported single-player platform. Game Center is optional and
+macOS-only; enabling its Cargo feature on Linux leaves multiplayer disabled.
+Windows is optional and currently untested.
+
 ```sh
 tools/package_linux.sh --install
 ```
@@ -219,6 +223,9 @@ tools/package_linux.sh --install
 Builds a release binary into `dist/Todora/` with its assets and icon, then installs it for this user: the game under `~/.local/share/todora`, an icon, and a desktop entry so Omarchy's launcher can find it. Same lockfile as the Mac package. Needs `rsvg-convert` for the icon (`librsvg` on Arch).
 
 Without `--install` it only writes `dist/Todora/`. Run that folder's `todora` binary, or `cargo run --release`.
+
+See [Linux dependencies and verification](docs/testing/linux.md). The Linux
+workflow checks builds, tests, rendering and installation on each push and PR.
 
 Rebuild the Omarchy GT from Blender:
 

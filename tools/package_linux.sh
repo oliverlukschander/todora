@@ -19,21 +19,32 @@ for arg in "$@"; do
   esac
 done
 
+if [[ "$(uname -s)" != Linux ]]; then
+  echo "Build the Linux package on Linux (a Linux container also works)." >&2
+  exit 1
+fi
+
 NAME=Todora
 BIN=todora
 ID=com.lukschander.todora
-VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
 OUT="dist/$NAME"
 ICON_SRC=art/icon/todora.svg
 ICON_PNG="$OUT/todora.png"
 
-. "$HOME/.cargo/env"
+# Rust can come from rustup, the distribution, or a container image.
+if ! command -v cargo >/dev/null 2>&1 && [[ -f "$HOME/.cargo/env" ]]; then
+  . "$HOME/.cargo/env"
+fi
+command -v rsvg-convert >/dev/null 2>&1 || {
+  echo "Install rsvg-convert first (librsvg2-bin on Debian/Ubuntu; librsvg on Arch)." >&2
+  exit 1
+}
 
 cargo build --release --locked
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
-cp "target/release/$BIN" "$OUT/$BIN"
+cp "${CARGO_TARGET_DIR:-target}/release/$BIN" "$OUT/$BIN"
 cp -R assets "$OUT/assets"
 rsvg-convert -w 512 -h 512 "$ICON_SRC" -o "$ICON_PNG"
 
@@ -43,7 +54,7 @@ Type=Application
 Version=1.5
 Name=$NAME
 Comment=A 3rd-person arcade racer around forty scaled real circuits
-Exec=$PWD/$OUT/$BIN
+Exec="$PWD/$OUT/$BIN"
 Path=$PWD/$OUT
 Icon=$PWD/$ICON_PNG
 Terminal=false
@@ -71,7 +82,7 @@ Type=Application
 Version=1.5
 Name=$NAME
 Comment=A 3rd-person arcade racer around forty scaled real circuits
-Exec=$APPDIR/$BIN
+Exec="$APPDIR/$BIN"
 Path=$APPDIR
 Icon=todora
 Terminal=false

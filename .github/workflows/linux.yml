@@ -1,0 +1,61 @@
+name: Linux
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+      WGPU_BACKEND: vulkan
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libx11-dev libxkbcommon-x11-0 libwayland-dev libxkbcommon-dev librsvg2-bin desktop-file-utils mesa-vulkan-drivers xvfb xauth python3-pil
+          rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
+          rustup default 1.97.1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - run: cargo test --locked --all-targets
+      - name: Apple feature remains inert on Linux
+        run: cargo test --locked --features game-center unsupported_platform_keeps_multiplayer_inert
+      - name: Render circuits on Linux
+        run: |
+          cargo build --locked --features visual-check
+          xvfb-run -a -s '-screen 0 800x600x24' bash tools/check_linux.sh
+      - name: Build and install Linux package
+        env:
+          XDG_DATA_HOME: /tmp/Todora Install
+        run: |
+          tools/package_linux.sh --install
+          desktop-file-validate dist/Todora/todora.desktop "$XDG_DATA_HOME/applications/com.lukschander.todora.desktop"
+          ldd "$XDG_DATA_HOME/todora/todora" | tee dist/linux-check/linked-libraries.log
+          ! grep -q 'not found' dist/linux-check/linked-libraries.log
+          cd /tmp
+          set +e
+          timeout 20s xvfb-run -a -s '-screen 0 1280x720x24' "$XDG_DATA_HOME/todora/todora" > "$GITHUB_WORKSPACE/dist/linux-check/package.log" 2>&1
+          result=$?
+          set -e
+          test "$result" -eq 124
+          ! grep -E 'ERROR|panicked' "$GITHUB_WORKSPACE/dist/linux-check/package.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: linux-check
+          path: dist/linux-check

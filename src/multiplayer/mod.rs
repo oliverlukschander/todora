@@ -30,7 +30,10 @@ pub struct MultiplayerPlugin;
 impl Plugin for MultiplayerPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Session>();
-        if !cfg!(any(feature = "game-center", feature = "multiplayer-test")) {
+        if !cfg!(any(
+            all(target_os = "macos", feature = "game-center"),
+            feature = "multiplayer-test"
+        )) {
             return;
         }
         app.init_resource::<Transport>()

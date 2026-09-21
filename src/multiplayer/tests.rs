@@ -2,6 +2,28 @@ use super::*;
 use session::{Remote, VERSION};
 use std::collections::VecDeque;
 
+#[test]
+#[cfg(not(any(
+    all(target_os = "macos", feature = "game-center"),
+    feature = "multiplayer-test"
+)))]
+fn unsupported_platform_keeps_multiplayer_inert() {
+    let mut app = App::new();
+    app.add_plugins(MultiplayerPlugin);
+    // Updating without window, UI or native resources must remain safe, even
+    // when a Linux build has accidentally enabled the game-center feature.
+    app.update();
+    assert!(!app.world().resource::<Session>().active());
+    assert!(!app.world().contains_resource::<Transport>());
+    assert_eq!(
+        app.world_mut()
+            .query::<&MultiplayerButton>()
+            .iter(app.world())
+            .count(),
+        0
+    );
+}
+
 fn choice() -> Config {
     Config {
         circuit: "suzuka".into(),
