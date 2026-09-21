@@ -26,7 +26,7 @@ jobs:
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libudev-dev libx11-dev libxkbcommon-x11-0 libwayland-dev libxkbcommon-dev librsvg2-bin desktop-file-utils mesa-vulkan-drivers xvfb xauth python3-pil
+          sudo apt-get install -y libasound2-dev libudev-dev libx11-dev libxi6 libxcursor1 libxrandr2 libxkbcommon-x11-0 libwayland-dev libxkbcommon-dev librsvg2-bin desktop-file-utils mesa-vulkan-drivers xvfb xauth python3-pil
           rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
           rustup default 1.97.1
       - uses: Swatinem/rust-cache@v2

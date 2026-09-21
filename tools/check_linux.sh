@@ -14,6 +14,10 @@ PACKAGE=$(mktemp -d -t 'Todora Linux.XXXXXXXX')
 trap 'rm -rf "$PACKAGE"' EXIT
 cp "$BINARY" "$PACKAGE/todora"
 cp -R assets "$PACKAGE/assets"
+if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
+  export XDG_RUNTIME_DIR="$PACKAGE/runtime"
+  mkdir -m 700 "$XDG_RUNTIME_DIR"
+fi
 unset BEVY_ASSET_ROOT CARGO_MANIFEST_DIR
 cd /tmp
 
