@@ -119,7 +119,7 @@ const _: () = assert!(GRASS_OF_VERGE * LEAST_VERGE >= markers::ROOM);
 /// One kerb stripe and the start/finish paint, in stations. [`ribbon::STEP`] is
 /// the station spacing, so a stripe is two stations long: about a third of the
 /// 2.4 m car.
-const STRIPE: usize = 2;
+pub(super) const STRIPE: usize = 2;
 /// Fraction of tarmac grip the kerbs and the grass give back.
 pub(super) const KERB_GRIP: f32 = 0.72;
 pub(super) const GRASS_GRIP: f32 = 0.38;

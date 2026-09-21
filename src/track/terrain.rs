@@ -263,11 +263,119 @@ fn height(p: Vec2, lips: &[Vec<Vec3>; 2]) -> f32 {
     }
 }
 
+/// Collision samples the exact rendered triangles, indexed once into 10 m cells.
+/// This keeps the grass joined to the verge and avoids height-field/mesh drift.
+pub(super) struct Surface {
+    pub mesh: Mesh,
+    triangles: Vec<[Vec3; 3]>,
+    cells: HashMap<(i32, i32), Vec<usize>>,
+    min: Vec2,
+    max: Vec2,
+}
+impl Surface {
+    pub fn new(mesh: Mesh) -> Self {
+        let points = mesh
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .unwrap()
+            .as_float3()
+            .unwrap();
+        let indices: Vec<_> = mesh.indices().unwrap().iter().collect();
+        let triangles: Vec<_> = indices
+            .chunks_exact(3)
+            .map(|f| {
+                f.try_into()
+                    .map(|a: [usize; 3]| a.map(|i| Vec3::from_array(points[i])))
+                    .unwrap()
+            })
+            .collect();
+        let mut cells: HashMap<_, Vec<usize>> = HashMap::new();
+        let mut min = Vec2::splat(f32::INFINITY);
+        let mut max = Vec2::splat(f32::NEG_INFINITY);
+        for (i, tri) in triangles.iter().enumerate() {
+            let lo = tri.iter().map(|p| xz(*p)).reduce(Vec2::min).unwrap();
+            let hi = tri.iter().map(|p| xz(*p)).reduce(Vec2::max).unwrap();
+            min = min.min(lo);
+            max = max.max(hi);
+            for x in (lo.x / 10.0).floor() as i32..=(hi.x / 10.0).floor() as i32 {
+                for y in (lo.y / 10.0).floor() as i32..=(hi.y / 10.0).floor() as i32 {
+                    cells.entry((x, y)).or_default().push(i);
+                }
+            }
+        }
+        Self {
+            mesh,
+            triangles,
+            cells,
+            min,
+            max,
+        }
+    }
+    pub fn contains(&self, p: Vec2) -> bool {
+        p.cmpge(self.min + Vec2::splat(0.5)).all() && p.cmple(self.max - Vec2::splat(0.5)).all()
+    }
+    pub fn sample(&self, p: Vec2) -> Option<(f32, Vec2)> {
+        let cell = ((p.x / 10.0).floor() as i32, (p.y / 10.0).floor() as i32);
+        for &i in self.cells.get(&cell)? {
+            let [a, b, c] = self.triangles[i];
+            // Subtract and solve in f64. Boundary triangles can be long and
+            // very thin; f32 cross products cancel and misplace their height.
+            let ab = xz(b).as_dvec2() - xz(a).as_dvec2();
+            let ac = xz(c).as_dvec2() - xz(a).as_dvec2();
+            let ap = p.as_dvec2() - xz(a).as_dvec2();
+            let det = ab.perp_dot(ac);
+            if det.abs() < 1e-12 {
+                continue;
+            }
+            let u = ap.perp_dot(ac) / det;
+            let v = ab.perp_dot(ap) / det;
+            if u >= -1e-4 && v >= -1e-4 && u + v <= 1.0001 {
+                let dy_b = f64::from(b.y) - f64::from(a.y);
+                let dy_c = f64::from(c.y) - f64::from(a.y);
+                let gradient = Vec2::new(
+                    ((dy_b * ac.y - dy_c * ab.y) / det) as f32,
+                    ((ab.x * dy_c - ac.x * dy_b) / det) as f32,
+                );
+                return Some(((f64::from(a.y) + u * dy_b + v * dy_c) as f32, gradient));
+            }
+        }
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::profile::TARMAC_HALF;
     use super::*;
     use crate::track::{Track, all_circuits};
+
+    #[test]
+    fn driving_height_matches_rendered_grass_triangles() {
+        for id in ["red-bull-ring", "spa-francorchamps", "suzuka"] {
+            let track = Track::new(all_circuits().iter().find(|c| c.id == id).unwrap());
+            let surface = track.terrain();
+            for &[a, b, c] in surface.triangles.iter().step_by(17) {
+                // Tessellation retains nearly collinear boundary slivers;
+                // their rounded centroid need not lie inside the tiny face.
+                if xz(b - a).perp_dot(xz(c - a)).abs() < 1e-4 {
+                    continue;
+                }
+                let centre = (a + b + c) / 3.0;
+                let Some((y, gradient)) = surface.sample(xz(centre)) else {
+                    panic!(
+                        "{id}: missing ground {a:?} {b:?} {c:?}, area {}",
+                        xz(b - a).perp_dot(xz(c - a))
+                    );
+                };
+                assert!(
+                    (y - centre.y).abs() < 0.001,
+                    "{id}: grass collision differs from mesh: expected {}, got {y}, area {}, triangle {a:?} {b:?} {c:?}",
+                    centre.y,
+                    xz(b - a).perp_dot(xz(c - a))
+                );
+                assert!(gradient.is_finite());
+            }
+        }
+    }
 
     #[test]
     fn suzuka_has_continuous_low_ground_beneath_its_bridge() {
@@ -381,9 +489,13 @@ mod tests {
                     a * 0.1 + b * 0.8 + c * 0.1,
                     a * 0.1 + b * 0.1 + c * 0.8,
                 ] {
-                    let ground = track.ground_from(p, None);
+                    // Inspect the road geometry, not driveable ground: the
+                    // latter now correctly returns grass beneath the bridge.
+                    let road = track.fix(p, None);
+                    let road_height =
+                        road.point.y + track.profile.height(road.at, road.t, road.lateral);
                     assert!(
-                        ground.lateral.abs() + 0.05 >= TARMAC_HALF || p.y < ground.height - 0.02,
+                        road.lateral.abs() + 0.05 >= TARMAC_HALF || p.y < road_height - 0.02,
                         "{}: grass over road at {p}",
                         circuit.name
                     );

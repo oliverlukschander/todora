@@ -27,8 +27,8 @@ use super::Recording;
 use crate::car::Mode;
 use crate::track::Track;
 
-/// `TODORA LAP`, version 1. A file that does not start with this is not ours.
-const MAGIC: [u8; 8] = *b"TODORAL1";
+/// `TODORA LAP`, version 2 (four-wheel track limits). A file that does not start with this is not ours.
+const MAGIC: [u8; 8] = *b"TODORAL2";
 /// What one sample is written as: the clock, how far round, three of position,
 /// four of rotation.
 const FIELDS: usize = 9;
@@ -233,6 +233,13 @@ mod tests {
             );
         }
         lap
+    }
+
+    #[test]
+    fn pre_track_limits_ghosts_cannot_become_valid_references() {
+        let mut bytes = encode(&lap_of(10), 123);
+        bytes[..8].copy_from_slice(b"TODORAL1");
+        assert!(decode(&bytes, 123).is_none());
     }
 
     #[test]

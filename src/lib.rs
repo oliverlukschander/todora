@@ -5,33 +5,38 @@ mod hud;
 mod input;
 mod lap;
 mod menu;
+mod minimap;
 mod pause;
 mod skid;
 mod sound;
 mod track;
 mod ui;
+#[cfg(feature = "visual-check")]
+mod visual_check;
 mod world;
 
 use bevy::{asset::AssetPlugin, prelude::*};
 
 pub fn run() {
-    App::new()
-        .add_plugins(
-            DefaultPlugins
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: "Todora".into(),
-                        ..default()
-                    }),
-                    ..default()
-                })
-                .set(AssetPlugin {
-                    file_path: asset_folder(),
+    let mut app = App::new();
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Todora".into(),
                     ..default()
                 }),
-        )
-        .add_plugins(GamePlugin)
-        .run();
+                ..default()
+            })
+            .set(AssetPlugin {
+                file_path: asset_folder(),
+                ..default()
+            }),
+    )
+    .add_plugins(GamePlugin);
+    #[cfg(feature = "visual-check")]
+    visual_check::configure(&mut app);
+    app.run();
 }
 
 /// Start again: car on the grid, clock at zero, marks wiped. Sent by the reset
@@ -86,6 +91,7 @@ impl Plugin for GamePlugin {
                 skid::SkidPlugin,
                 sound::SoundPlugin,
                 hud::HudPlugin,
+                minimap::MinimapPlugin,
             ))
             .add_systems(Update, quit);
     }

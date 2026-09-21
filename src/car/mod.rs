@@ -24,7 +24,7 @@ use crate::track::{Track, TrackSet};
 pub(crate) use garage::Spec;
 pub(crate) use mode::Mode;
 pub(crate) use physics::{
-    Car, Controls, HALF_TRACK, Handling, REAR_AXLE, SCALE, Surface, WHEEL_WIDTH,
+    Car, Controls, FRONT_AXLE, HALF_TRACK, Handling, REAR_AXLE, SCALE, Surface, WHEEL_WIDTH,
 };
 pub(crate) use setup::Setup;
 

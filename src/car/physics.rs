@@ -234,6 +234,8 @@ pub(crate) struct Car {
     /// Seconds spent off the circuit getting nowhere. The track uses it to
     /// decide when to fetch the car back.
     pub stranded: f32,
+    /// Recovery invalidates the lap even when it lands back on asphalt.
+    pub recovered: bool,
     /// How far round the lap the car was last found, and `None` before it has
     /// been found at all.
     ///
@@ -384,7 +386,7 @@ pub(crate) fn step(
     }
     let soft = (1.0 - surface.grip).clamp(0.0, 1.0);
     if speed > 0.0 {
-        let rolling_drag = h.rolling * (1.0 + h.soft_ground * soft);
+        let rolling_drag = h.rolling * (1.0 + 0.75 * h.soft_ground * soft);
         resistance += h.drag * speed * forward.abs() + rolling_drag;
     }
     let climb = -GRAVITY * surface.slope / (1.0 + surface.slope * surface.slope).sqrt();
@@ -404,7 +406,7 @@ pub(crate) fn step(
     // ploughing through soft ground. And the slide itself: rubber scrubbing
     // across the road instead of rolling along it, from the slip where the
     // tyres start to mark.
-    let ploughing = h.off_road_drag * soft.powi(3) * speed;
+    let ploughing = 0.75 * h.off_road_drag * soft.powi(3) * speed;
     let scrubbing =
         h.scrub_drag * ((slip.abs() - MARK_FROM) / (MARK_FULL - MARK_FROM)).clamp(0.0, 1.0);
     let dragging = ploughing + scrubbing;
@@ -450,6 +452,37 @@ mod tests {
         grip: 0.38,
         slope: 0.0,
     };
+
+    #[test]
+    fn only_off_track_resistance_is_reduced_by_a_quarter() {
+        let h = Handling::SHOOTING_BRAKE;
+        // One short, straight coasting step isolates both off-road resistance
+        // terms without changing grip, engine braking or aerodynamic drag.
+        let dt = 0.0001;
+        let coast = |grip, handling: &Handling| {
+            let mut car = rolling(15.0);
+            step(
+                &mut car,
+                handling,
+                Vec3::NEG_Z,
+                Vec3::X,
+                Controls::default(),
+                Surface { grip, slope: 0.0 },
+                dt,
+            );
+            15.0 - car.velocity.length()
+        };
+        let baseline = Handling {
+            soft_ground: 0.0,
+            off_road_drag: 0.0,
+            ..h
+        };
+        let soft: f32 = 1.0 - GRASS.grip;
+        let old_extra = h.rolling * h.soft_ground * soft + h.off_road_drag * soft.powi(3) * 15.0;
+        let extra = (coast(GRASS.grip, &h) - coast(GRASS.grip, &baseline)) / dt;
+        assert!((extra / old_extra - 0.75).abs() < 0.003);
+        assert_eq!(coast(1.0, &h), coast(1.0, &baseline));
+    }
 
     #[test]
     fn a_crawl_coasts_to_rest() {
@@ -982,7 +1015,7 @@ mod tests {
     /// laps, and the grass here should cost most of a g at pace whether or not
     /// the driver is braking. A kerb is not the grass, and a car can crawl back.
     #[test]
-    fn the_grass_is_a_gravel_trap() {
+    fn grass_still_slows_the_car_and_allows_rejoining() {
         let coast = |surface: Surface| {
             let mut car = rolling(16.0);
             drive(&mut car, Controls::default(), surface, 1.0);
@@ -995,13 +1028,13 @@ mod tests {
             slope: 0.0,
         });
         assert!(
-            lost_in_grass > 0.55 * GRAVITY,
+            lost_in_grass > 0.45 * GRAVITY,
             "a second in the grass only shed {:.2} g",
             lost_in_grass / GRAVITY
         );
         // Over and above what lifting off costs on tarmac, which is itself a lot.
         assert!(
-            lost_in_grass - lost_on_road > 0.4 * GRAVITY,
+            lost_in_grass - lost_on_road > 0.3 * GRAVITY,
             "the grass adds only {:.2} g over tarmac",
             (lost_in_grass - lost_on_road) / GRAVITY
         );

@@ -2,7 +2,7 @@
 
 A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy.org/). Drive an Omarchy GT around forty scaled real circuits, with **T** for the list of them.
 
-[Download Todora 0.9.0 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.9.0/Todora.dmg) · [Release notes](docs/releases/v0.9.0.md)
+[Download Todora 0.10.0 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.10.0/Todora.dmg) · [Release notes](docs/releases/v0.10.0.md)
 
 The default garage choice is **OMARCHY GT #95**, a Blender-built recreation of the car David Heinemeier Hansson and his co-drivers drove to the **2014 Le Mans GTE Am class win**. It has the pale-blue and orange livery, yellow endurance lights, animated race wheels, rear wing and diffuser. Clubman and Express remain handling and colour variants of the shared model. [Model, reference sources and rebuild instructions](docs/models/omarchy-gt-95.md).
 
@@ -21,6 +21,8 @@ All forty laps are shorter: most by about 10%, with smaller reductions on the ti
 Each circuit sits on a grass rectangle extending 50 metres beyond the outermost verge. The verge and fill meet at road height and share a [natural grass texture](assets/textures/README.md); the raised kerbs remain 5 cm proud. Suzuka’s bridge has an obsidian deck, slim graphite rails, three underside girders and retaining walls fitted to the rendered terrain. Closed approach ends prevent gaps beneath the shoulders; the lower road remains open through the span. Circuit surfaces use unlit materials and shadow maps are disabled, so steep hills and the underpass stay readable. Grass and asphalt use world-space tiling, mipmaps and anisotropic filtering, with painted lines and kerbs kept crisp. The changed verge profile gives tracks new fingerprints, so previously saved ghosts are rejected rather than replayed against different ground.
 
 All forty racing directions have been [audited](docs/track-screening/directions.md). Paul Ricard now runs clockwise and Marina Bay anticlockwise; Buenos Aires was already correct. Ghosts from the two reversed layouts are automatically rejected.
+
+Todora 0.10.0 adds a circular mini-map, 4–8 mini-sectors per circuit, driveable surrounding grass with 25% less off-track resistance, persistent lap invalidity when all four wheels leave asphalt and kerbs, and a subtle rubbered racing path. Earlier ghosts are not loaded under the new track-limit rules. [Implementation and local testing notes](docs/testing/free-drive-features.md).
 
 ## Design history
 

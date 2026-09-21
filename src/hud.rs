@@ -39,6 +39,7 @@ impl Plugin for HudPlugin {
                 show,
                 draw_controls,
                 draw_clock,
+                draw_sector,
                 draw_g_meter,
                 draw_setup,
                 draw_car,
@@ -52,6 +53,10 @@ impl Plugin for HudPlugin {
 
 #[derive(Component)]
 struct ClockReadout;
+#[derive(Component)]
+struct SectorReadout;
+#[derive(Component)]
+struct InvalidReadout;
 
 #[derive(Component)]
 struct Needle;
@@ -78,7 +83,7 @@ struct DeltaReadout;
 struct CircuitName;
 
 #[derive(Component)]
-struct Instrument;
+pub(crate) struct Instrument;
 
 #[derive(Component)]
 struct ControlHints;
@@ -212,7 +217,7 @@ fn setup(mut commands: Commands) {
             Instrument,
             Node {
                 position_type: PositionType::Absolute,
-                top: px(24),
+                top: px(240),
                 right: px(24),
                 padding: UiRect::all(px(20)),
                 border_radius: BorderRadius::all(px(12)),
@@ -229,6 +234,8 @@ fn setup(mut commands: Commands) {
                 ClockReadout,
                 label(clock_text(&LapTimer::default()), 24.0, TEXT),
             ));
+            timing.spawn((InvalidReadout, label("", 18.0, BEHIND)));
+            timing.spawn((SectorReadout, label("", 17.0, AMBER_DIM)));
             timing.spawn((DeltaReadout, label("GHOST  --", 20.0, AMBER_DIM)));
         });
     commands.spawn((Instrument, ControlHints, label("WASD / Arrows  Drive    Space  Handbrake    R  Restart\nG  Ghost    Scroll  Zoom    Esc  Pause", 12.0, TEXT), Node {
@@ -407,4 +414,28 @@ fn clock_text(timer: &LapTimer) -> String {
         last,
         best
     )
+}
+
+fn draw_sector(
+    timer: Res<LapTimer>,
+    mut sectors: Query<(&mut Text, &mut TextColor), With<SectorReadout>>,
+    mut invalid: Query<&mut Text, (With<InvalidReadout>, Without<SectorReadout>)>,
+) {
+    if let Ok(mut text) = invalid.single_mut() {
+        text.0 = if timer.invalid { "LAP INVALID" } else { "" }.into();
+    }
+    if let Ok((mut text, mut color)) = sectors.single_mut() {
+        match timer.sector_notice {
+            Some(s) => {
+                text.0 = match s.delta {
+                    Some(d) => format!("SECTOR {}   {d:+.2}", s.number),
+                    None => format!("SECTOR {}   {}", s.number, format_time(s.time)),
+                };
+                color.0 = s
+                    .delta
+                    .map_or(AMBER_DIM, |d| if d <= 0.0 { AHEAD } else { BEHIND });
+            }
+            None => text.0.clear(),
+        }
+    }
 }

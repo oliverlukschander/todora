@@ -215,7 +215,8 @@ fn fade(
 
 /// Write down where the car is, every physics step the clock is running.
 fn record(timer: Res<LapTimer>, player: Query<&Transform, With<Player>>, mut ghost: ResMut<Ghost>) {
-    if !timer.running() {
+    if !timer.running() || timer.invalid {
+        ghost.recording = Recording::default();
         return;
     }
     let Ok(transform) = player.single() else {
@@ -267,6 +268,13 @@ fn reset(
         ghost.best = ghost.saved.as_ref().and_then(Saved::read);
         if let Some(best) = &ghost.best {
             timer.remember(best.duration());
+            let count = track.sector_count();
+            timer.best_sectors = (0..count)
+                .map(|i| {
+                    best.time_at((i + 1) as f32 / count as f32).unwrap_or(0.0)
+                        - best.time_at(i as f32 / count as f32).unwrap_or(0.0)
+                })
+                .collect();
         }
     } else if !restarted {
         return;
@@ -335,6 +343,37 @@ mod tests {
             );
         }
         lap
+    }
+
+    #[test]
+    fn an_invalid_lap_discards_its_recording_without_replacing_the_ghost() {
+        let mut app = App::new();
+        let mut timer = LapTimer::default();
+        timer.invalid = true;
+        app.add_message::<LapFinished>()
+            .insert_resource(timer)
+            .add_systems(Update, (finish, record).chain());
+        let player = app.world_mut().spawn((Player, Transform::IDENTITY)).id();
+        let best = lap_of(10);
+        let expected = best.samples.clone();
+        app.insert_resource(Ghost {
+            on: true,
+            delta: None,
+            best: Some(best),
+            recording: lap_of(4),
+            car: player,
+            saved: None,
+        });
+        app.update();
+        assert!(app.world().resource::<Ghost>().recording.samples.is_empty());
+        app.world_mut().write_message(LapFinished {
+            time: 0.1,
+            best: false,
+        });
+        app.update();
+        let ghost = app.world().resource::<Ghost>();
+        assert_eq!(ghost.best.as_ref().unwrap().samples, expected);
+        assert!(ghost.recording.samples.is_empty());
     }
 
     #[test]

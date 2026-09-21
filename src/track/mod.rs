@@ -30,6 +30,7 @@ mod circuits;
 mod markers;
 mod profile;
 mod ribbon;
+mod rubber;
 mod terrain;
 mod textures;
 
@@ -300,6 +301,7 @@ pub struct Track {
     circuit: &'static Circuit,
     ribbon: Ribbon,
     profile: Profile,
+    terrain: std::sync::OnceLock<terrain::Surface>,
 }
 
 impl Track {
@@ -358,6 +360,7 @@ impl Track {
             circuit,
             ribbon,
             profile,
+            terrain: std::sync::OnceLock::new(),
         }
     }
 
@@ -447,7 +450,6 @@ impl Track {
     /// Plan length of one lap. Circuits are not the same length — they are all
     /// shrunk alike rather than to a common size — so anything budgeting time or
     /// distance has to ask. Only the drivers' lap harness does, so far.
-    #[cfg(test)]
     pub(crate) fn length(&self) -> f32 {
         self.ribbon.length()
     }
@@ -544,27 +546,53 @@ impl Track {
         self.ribbon.along(from.s, by).curvature
     }
 
-    /// How far out the car is held where it is standing. Inside the edge of the
-    /// loft, wherever this circuit's verge had to stop *here* — the verge is
-    /// fitted station by station, so the wall follows it rather than being set
-    /// once to the narrowest place on the lap.
-    fn wall(&self, ground: &Ground) -> f32 {
-        ground.edge - WALL_INSET
+    fn terrain(&self) -> &terrain::Surface {
+        self.terrain
+            .get_or_init(|| terrain::Surface::new(terrain::fill(&self.profile, &self.ribbon)))
     }
 
-    /// Sit the car on the loft, hold it inside the outermost strip, and fetch it
-    /// back if it has stranded itself out there.
+    pub(crate) fn map_points(&self) -> impl Iterator<Item = (Vec3, f32)> + '_ {
+        self.ribbon.stations().iter().map(|s| (s.pos, s.s))
+    }
+
+    pub(crate) fn bridge_at(&self, along: f32) -> bool {
+        profile::deep(self.ribbon.along(along, 0.0)) > 0.0
+    }
+
+    pub(crate) fn sector_count(&self) -> usize {
+        (self.length() / 180.0).ceil().clamp(4.0, 8.0) as usize
+    }
+
+    /// A lap remains legal while any tyre contact overlaps asphalt or kerb.
+    pub(crate) fn legal_contact(&self, at: &Transform, was: Option<f32>) -> bool {
+        use crate::car::{FRONT_AXLE, HALF_TRACK, REAR_AXLE, WHEEL_WIDTH};
+        let forward = level(*at.forward());
+        let right = forward.cross(Vec3::Y);
+        [FRONT_AXLE, -REAR_AXLE].into_iter().any(|axle| {
+            [-HALF_TRACK, HALF_TRACK].into_iter().any(|side| {
+                let hub = at.translation + forward * axle + right * side;
+                let fix = self.fix(hub, was);
+                fix.lateral.abs() <= HALF_WIDTH + WHEEL_WIDTH * 0.5
+                    && (hub.y - fix.point.y).abs() < 0.5
+            })
+        })
+    }
+
+    /// Follow the road or surrounding grass; recover at the terrain boundary
+    /// or when stranded. Only a raised bridge still needs an edge barrier.
     ///
     /// This is the only thing the circuit does to the car. Everything else the
     /// road asks of it — grip, the pull of a climb, the kerb under a wheel —
     /// reaches the car through [`Track::ground`], so the driving model stays in
     /// one place.
     pub(crate) fn hold(&self, transform: &mut Transform, car: &mut Car, dt: f32) {
-        let mut ground = self.ground_from(transform.translation, car.along);
+        let ground = self.ground_from(transform.translation, car.along);
         // Off the road and going nowhere: a spin into the barrier leaves the car
         // nose-first against it, where everything it does is outward and
         // everything outward is taken away.
-        if ground.lateral.abs() > HALF_WIDTH && car.velocity.length() < GOING_NOWHERE {
+        if car.velocity.length() < GOING_NOWHERE
+            && (ground.lateral.abs() > HALF_WIDTH || ground.grip <= profile::GRASS_GRIP)
+        {
             car.stranded += dt;
         } else {
             car.stranded = 0.0;
@@ -574,22 +602,29 @@ impl Track {
             return;
         }
 
-        let wall = self.wall(&ground);
-        if ground.lateral.abs() > wall {
-            let held = ground.lateral.clamp(-wall, wall);
-            let correction = ground.right * (held - ground.lateral);
-            transform.translation += Vec3::new(correction.x, 0.0, correction.z);
-            // Absorb the outward impact, retaining motion along the circuit.
+        // Only the outer terrain boundary recovers the car. The bridge rails
+        // still guard a drop from its raised deck, using the existing bounce.
+        if ground.lateral.abs() > ground.edge {
+            let p = Vec2::new(transform.translation.x, transform.translation.z);
+            if !self.terrain().contains(p) {
+                self.rescue(transform, car);
+                return;
+            }
+        }
+        let fix = self.fix(transform.translation, car.along);
+        if profile::deep(&self.ribbon.stations()[fix.at]) > 0.0
+            && ground.lateral.abs() > ground.edge - WALL_INSET
+            && (transform.translation.y - fix.point.y).abs() < 1.0
+        {
             let side = ground.lateral.signum();
+            transform.translation +=
+                ground.right * (side * (ground.edge - WALL_INSET) - ground.lateral);
             let outward = car.velocity.dot(ground.right) * side;
             if outward > 0.0 {
-                car.velocity -= ground.right * (outward * (1.0 + BOUNCE) * side);
+                car.velocity -= ground.right * outward * (1.0 + BOUNCE) * side;
             }
-            ground = self.ground_from(transform.translation, car.along);
         }
-        // Read back after the wall has moved the car, and before the height is
-        // applied, so that what the car is put down on and what it is recorded
-        // as being on are the same road.
+        let ground = self.ground_from(transform.translation, car.along);
         car.along = Some(ground.s);
 
         transform.translation.y = ground.height;
@@ -614,6 +649,7 @@ impl Track {
             // it is is not, because it has been put back on the road it was
             // taken off and it is still on that road.
             along: Some(ground.s),
+            recovered: true,
             ..Car::default()
         };
     }
@@ -622,6 +658,7 @@ impl Track {
     /// so this reads the same [`profile`] the mesh was swept from — the car
     /// rides the kerb because the kerb is 5 cm proud in the profile, not because
     /// anything says so twice.
+    #[cfg(test)]
     pub(crate) fn ground(&self, pos: Vec3) -> Ground {
         self.ground_from(pos, None)
     }
@@ -630,18 +667,40 @@ impl Track {
     /// [`Track::fix`]: on a circuit that passes over itself, that is the
     /// difference between the road the car is on and the one under it.
     pub(crate) fn ground_from(&self, pos: Vec3, was: Option<f32>) -> Ground {
-        let fix = self.fix(pos, was);
+        let beneath = |fix: &ribbon::Fix| {
+            profile::deep(&self.ribbon.stations()[fix.at]) > 0.0
+                && pos.y < fix.point.y - A_DECK_APART
+        };
+        let mut fix = self.fix(pos, was);
+        // Grass now extends under the bridge. A car down there cannot join
+        // its deck just because the upper road is nearest in plan.
+        if beneath(&fix) {
+            fix = self.fix(pos, None);
+        }
+        let edge = self.profile.reach(fix.at, fix.t, fix.lateral);
+        let terrain = (fix.lateral.abs() > edge || beneath(&fix))
+            .then(|| self.terrain().sample(Vec2::new(pos.x, pos.z)))
+            .flatten();
         Ground {
             centre: fix.point,
-            height: fix.point.y + self.profile.height(fix.at, fix.t, fix.lateral),
+            height: terrain.map_or_else(
+                || fix.point.y + self.profile.height(fix.at, fix.t, fix.lateral),
+                |(y, _)| y,
+            ),
             tangent: fix.tangent,
             right: fix.right,
             lateral: fix.lateral,
             s: fix.s,
             edge: self.profile.reach(fix.at, fix.t, fix.lateral),
-            slope: fix.slope,
+            slope: terrain.map_or(fix.slope, |(_, gradient)| {
+                gradient.dot(Vec2::new(fix.tangent.x, fix.tangent.z))
+            }),
             curvature: fix.curvature,
-            grip: profile::grip(fix.lateral),
+            grip: if terrain.is_some() {
+                profile::GRASS_GRIP
+            } else {
+                profile::grip(fix.lateral)
+            },
         }
     }
 }
@@ -713,8 +772,9 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let (mut scenery, road, mut grass) = track.profile.surfaces(&track.ribbon);
-    let terrain = terrain::fill(&track.profile, &track.ribbon);
+    let (mut scenery, mut road, mut grass) = track.profile.surfaces(&track.ribbon);
+    rubber::apply(&mut road, &track.ribbon);
+    let terrain = track.terrain().mesh.clone();
     if let Some(details) = bridge::mesh(&track.profile, &track.ribbon, &terrain) {
         scenery
             .merge(&details)
@@ -764,8 +824,9 @@ fn switch(
         return;
     }
     *track = Track::new(next);
-    let (mut scenery, asphalt, mut grass) = track.profile.surfaces(&track.ribbon);
-    let terrain = terrain::fill(&track.profile, &track.ribbon);
+    let (mut scenery, mut asphalt, mut grass) = track.profile.surfaces(&track.ribbon);
+    rubber::apply(&mut asphalt, &track.ribbon);
+    let terrain = track.terrain().mesh.clone();
     if let Some(details) = bridge::mesh(&track.profile, &track.ribbon, &terrain) {
         scenery
             .merge(&details)
@@ -830,6 +891,67 @@ mod tests {
     /// So a circuit passes on either count — it kept most of its relief, or what
     /// it lost is under [`FLATTENED`], which is below the resolution of the
     /// question being asked.
+    #[test]
+    fn a_car_stuck_with_two_wheels_on_kerbs_still_gets_recovered() {
+        let track = track();
+        let mut at = track.start_transform();
+        at.translation += *at.right() * (HALF_WIDTH + 0.05);
+        let mut car = Car::default();
+        assert!(track.legal_contact(&at, car.along));
+        for _ in 0..400 {
+            track.hold(&mut at, &mut car, 1.0 / 240.0);
+        }
+        assert!(car.recovered);
+        assert!(track.ground(at.translation).lateral.abs() < 0.01);
+    }
+
+    #[test]
+    fn grass_under_the_bridge_does_not_lift_the_car_onto_the_deck() {
+        let track = Track::new(all_circuits().iter().find(|c| c.id == "suzuka").unwrap());
+        let (station, y) = track
+            .ribbon
+            .stations()
+            .iter()
+            .find_map(|station| {
+                if profile::deep(station) == 0.0 {
+                    return None;
+                }
+                let (y, _) = track
+                    .terrain()
+                    .sample(Vec2::new(station.pos.x, station.pos.z))?;
+                (station.pos.y - y > 1.0).then_some((station, y))
+            })
+            .expect("grass beneath the span");
+        let mut at = Transform::from_translation(Vec3::new(station.pos.x, y, station.pos.z))
+            .looking_to(station.tangent, Vec3::Y);
+        let mut car = Car {
+            along: Some(station.s),
+            velocity: station.tangent * 3.0,
+            ..default()
+        };
+        track.hold(&mut at, &mut car, 1.0 / 240.0);
+        assert!((at.translation.y - y).abs() < 0.001);
+        assert_eq!(
+            track.ground_from(at.translation, car.along).grip,
+            profile::GRASS_GRIP
+        );
+        assert!(!track.legal_contact(&at, car.along));
+    }
+
+    #[test]
+    fn wheel_contacts_allow_kerbs_and_two_wheels_out_but_not_four() {
+        let track = track();
+        let start = track.start_transform();
+        let mut at = start;
+        at.translation += *start.right() * HALF_WIDTH;
+        assert!(track.legal_contact(&at, Some(track.start_along_lap())));
+        at.translation += *start.right() * (crate::car::HALF_TRACK + crate::car::WHEEL_WIDTH);
+        assert!(!track.legal_contact(&at, Some(track.start_along_lap())));
+        at = start;
+        at.rotate_y(std::f32::consts::FRAC_PI_2);
+        assert!(track.legal_contact(&at, Some(track.start_along_lap())));
+    }
+
     #[test]
     fn hills_roll_instead_of_stepping() {
         for (name, track) in every_track() {
@@ -1017,7 +1139,7 @@ mod tests {
         let track = track();
         let start = track.start_transform();
         let right = *start.right();
-        let wall = track.wall(&track.ground(start.translation));
+        let wall = 12.0;
         for stuck in [wall, -wall, HALF_WIDTH + 1.0, 0.0] {
             let mut transform = Transform::from_translation(start.translation + right * stuck)
                 // Facing backwards, sideways, and scaled like the real car.
@@ -1048,33 +1170,25 @@ mod tests {
     }
 
     #[test]
-    fn a_wall_hit_stays_on_the_ground_and_does_not_add_energy() {
-        for (name, track) in every_track() {
-            for station in track.ribbon.stations().iter().step_by(20) {
-                for side in [-1.0, 1.0] {
-                    let wall = track.wall(&track.ground(station.pos + station.right * side));
-                    let mut transform = Transform::from_translation(
-                        station.pos + station.right * side * (wall + 0.4),
-                    );
-                    let mut car = Car {
-                        velocity: station.right * side * 20.0 + station.tangent * 10.0,
-                        ..default()
-                    };
-                    let speed = car.velocity.length();
-                    track.hold(&mut transform, &mut car, 1.0 / 240.0);
-                    let ground = track.ground(transform.translation);
-                    assert!(
-                        (transform.translation.y - ground.height).abs() < 0.01,
-                        "{name}: wall left the car off the loft: {} vs {}",
-                        transform.translation.y,
-                        ground.height
-                    );
-                    assert!(ground.lateral.abs() <= track.wall(&ground) + 0.01);
-                    assert!(car.velocity.length() <= speed);
-                    assert!(car.velocity.dot(ground.right) * side < 0.0);
-                }
-            }
-        }
+    fn grass_is_driveable_beyond_the_old_verge_and_boundary_recovers() {
+        let track = track();
+        let mut at = track.start_transform();
+        at.translation += *at.right() * 12.0;
+        let before = at.translation;
+        let mut car = Car {
+            velocity: *at.right() * 5.0,
+            ..default()
+        };
+        track.hold(&mut at, &mut car, 1.0 / 240.0);
+        assert!(
+            Vec2::new(at.translation.x - before.x, at.translation.z - before.z).length() < 0.001
+        );
+        assert!(!car.recovered);
+        assert_eq!(at.translation.y, track.ground(at.translation).height);
+        at.translation.x += 1000.0;
+        track.hold(&mut at, &mut car, 1.0 / 240.0);
+        assert!(car.recovered);
+        assert!(track.ground(at.translation).lateral.abs() < 0.01);
     }
 
     #[test]
