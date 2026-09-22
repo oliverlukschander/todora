@@ -74,11 +74,12 @@ The developer's personal team is **Oliver Lukschander — BAADW73W4C**.
 The App ID is `com.lukschander.todora`, with Game Center enabled. The
 [App Store Connect record](https://appstoreconnect.apple.com/apps/6814738694/distribution/macos/version/inflight)
 is named **Todora Demo** (Apple ID `6814738694`, SKU `todora-macos`). Its
-development version and multiplayer compatibility are set to `0.10.0`, matching
-the packaged app. Nothing has been submitted for review or released.
+draft app version is `0.11.0`; Game Center is enabled and the compatibility
+entry starts at `0.10.0`. Todora’s protocol requires matching app versions.
+Nothing has been submitted to App Review or released through the App Store.
 
-The **Todora Mac Development** profile covers Oliver MacBook Pro and the
-previously registered Oliver’s MacBook Air. It expires on 2027-09-22. The local
+The **Todora Mac Development** profile covers Oliver MacBook Pro, the
+previously registered Oliver’s MacBook Air, and Todora Tester MacBook Pro. It expires on 2027-09-22. The local
 download is `~/Downloads/Todora_Mac_Development.provisionprofile`; keep the
 profile and certificates out of Git. Rebuild on this Mac with:
 
@@ -103,23 +104,30 @@ Signing from the agent's background session reported `errSecInternalComponent`
 and a locked login keychain. Running the same packaging command in an
 interactive Terminal, with the login keychain unlocked, succeeded.
 
-## Multiplayer beta preparation on 2026-09-22
+## Multiplayer beta on 2026-09-22
 
-The next test release is `v0.11.0-beta.1`, with app version `0.11.0`.
+The test release is `v0.11.0-beta.1`, with app version `0.11.0`.
 Both players must install this version because the protocol includes the app
 version. Multiplayer uses **M** and music uses **N**; **M** still changes driving
 mode inside the garage.
 
-Before publishing the development-signed DMG, register the other tester’s Mac
-and regenerate **Todora Mac Development** to include it. The current profile
-only covers Oliver’s MacBook Pro and MacBook Air. For Apple Silicon, collect
+The tester’s MacBook Pro has been registered, and **Todora Mac Development**
+was regenerated with all three Macs. The beta DMG was rebuilt and its embedded
+profile checked for the tester’s device. Adding any further tester requires
+registering their Mac and rebuilding with another regenerated profile. For Apple Silicon, collect
 **Provisioning UDID** from **System Information → Hardware**, not Hardware UUID.
 A public download link does not let an unregistered Mac run this build.
 
 [Apple’s registered-Mac distribution instructions](https://help.apple.com/xcode/mac/current/en.lproj/dev295cc0fae.html)
 and [device registration guidance](https://developer.apple.com/help/account/devices/register-a-single-device)
-were checked on 2026-09-22. Use a GitHub prerelease for this test build and retain
-0.10.0 as the stable release. See the [beta release notes](../releases/v0.11.0-beta.1.md).
+were checked on 2026-09-22. The GitHub prerelease is separate from stable 0.10.0. See the [beta release notes](../releases/v0.11.0-beta.1.md).
+
+The published beta is built from commit `9198a925ae2a35566fb41dabb026f522d524b906`.
+[Linux CI passed](https://github.com/oliverlukschander/todora/actions/runs/35701143956),
+including tests, three circuit renders, installation and package startup. Mac
+checks passed for the app and DMG signatures, embedded three-device profile,
+Metal startup and uploaded asset hashes. Live two-Mac Game Center testing
+remains pending.
 
 ## Local verification without Game Center credentials
 

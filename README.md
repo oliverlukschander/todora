@@ -4,9 +4,10 @@ A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy
 
 [Download Todora 0.10.0 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.10.0/Todora.dmg) · [Release notes](docs/releases/v0.10.0.md)
 
-An optional [Game Center multiplayer prototype](docs/testing/multiplayer.md)
-adds shared practice for two Macs. It is under development and is not included
-in the published release.
+The [Game Center multiplayer beta](https://github.com/oliverlukschander/todora/releases/tag/v0.11.0-beta.1)
+adds shared practice for two registered Apple Silicon Macs. It is separate from
+the stable release and requires each tester’s Mac in the development profile.
+[Setup and controls](docs/testing/multiplayer.md).
 
 The default garage choice is **OMARCHY GT #95**, a Blender-built recreation of the car David Heinemeier Hansson and his co-drivers drove to the **2014 Le Mans GTE Am class win**. It has the pale-blue and orange livery, yellow endurance lights, animated race wheels, rear wing and diffuser. Clubman and Express remain handling and colour variants of the shared model. [Model, reference sources and rebuild instructions](docs/models/omarchy-gt-95.md).
 
