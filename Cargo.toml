@@ -1,6 +1,6 @@
 [package]
 name = "todora"
-version = "0.10.0"
+version = "0.11.0"
 edition = "2024"
 description = "A 3rd-person arcade racer around forty scaled real circuits"
 license = "MIT"

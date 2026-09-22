@@ -164,7 +164,7 @@ fn setup(mut commands: Commands) {
                     ));
                     for (action, title) in [
                         (Action::Resume, "Resume"),
-                        (Action::Music, "Music / M"),
+                        (Action::Music, "Music / N"),
                         (Action::Effects, "Sound effects / F8"),
                         (Action::ResetCurrent, "Reset this ghost"),
                         (Action::ResetAll, "Reset all ghosts"),

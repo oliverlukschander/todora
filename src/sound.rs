@@ -125,10 +125,8 @@ fn update(
     if sound.signal.shutting_down.load(Relaxed) {
         return;
     }
-    // Garage already owns `M` for driving mode, so the radio key stays out of
-    // the menus. Pause is the other place the two toggles are offered, and the
-    // keys still work there.
-    if keys.just_pressed(KeyCode::KeyM) && *halt != Halt::Menu {
+    // Audio shortcuts work while driving and paused; garage input stays separate.
+    if keys.just_pressed(KeyCode::KeyN) && *halt != Halt::Menu {
         sound.music = !sound.music;
         if sound.music {
             sound.signal.status.store(0, Relaxed);
@@ -193,7 +191,7 @@ fn draw_toggles(
     for (&which, children) in &buttons {
         let wanted = match which {
             SoundToggle::Music => {
-                format!("Music  /  M    {}", if sound.music { "on" } else { "off" })
+                format!("Music  /  N    {}", if sound.music { "on" } else { "off" })
             }
             SoundToggle::Effects => format!(
                 "Sound effects  /  F8    {}",
@@ -257,7 +255,7 @@ mod tests {
         assert!(!app.world().resource::<Sound>().music);
         assert!(app.world().resource::<Sound>().effects);
         let mut labels = app.world_mut().query::<&Text>();
-        assert_eq!(labels.single(app.world()).unwrap().0, "Music  /  M    off");
+        assert_eq!(labels.single(app.world()).unwrap().0, "Music  /  N    off");
         app.world_mut().write_message(SoundToggle::Effects);
         app.update();
         assert!(!app.world().resource::<Sound>().effects);
@@ -352,6 +350,17 @@ mod tests {
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::KeyM);
         app.update();
+        assert!(
+            volume(&signal.music) > 0.0,
+            "multiplayer must not mute music"
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .reset_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyN);
+        app.update();
         assert_eq!(volume(&signal.music), 0.0);
         assert!(!signal.enabled.load(Relaxed));
         assert!(volume(&signal.squeal) > 0.0);
@@ -360,7 +369,7 @@ mod tests {
             .reset_all();
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::KeyM);
+            .press(KeyCode::KeyN);
         app.update();
         assert!(volume(&signal.music) > 0.0);
         app.world_mut()

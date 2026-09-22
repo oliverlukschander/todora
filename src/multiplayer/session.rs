@@ -149,7 +149,7 @@ impl Session {
             phase: Phase::Finding,
             phase_since: now,
             last_heard: now,
-            status: "Finding another driver…  F9 to cancel".into(),
+            status: "Finding another driver…  M to cancel".into(),
             ..default()
         };
     }
@@ -303,7 +303,7 @@ impl Session {
                 return self.end("The other driver did not confirm the start.");
             }
             self.phase = Phase::Driving;
-            self.status = "Shared practice · no car contact · F9 to leave".into();
+            self.status = "Shared practice · no car contact · M to leave".into();
         }
         vec![]
     }

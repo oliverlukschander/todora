@@ -138,7 +138,7 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
                     BorderColor::all(ui::LINE),
                 ))
                 .with_children(|b| {
-                    b.spawn((ButtonLabel, ui::label("F9   Multiplayer", 16.0, ui::ACCENT)));
+                    b.spawn((ButtonLabel, ui::label("M   Multiplayer", 16.0, ui::ACCENT)));
                 });
         });
 }
@@ -214,7 +214,7 @@ fn network(
     halt: Res<Halt>,
 ) {
     let now = time.elapsed_secs_f64();
-    let pressed = keys.just_pressed(KeyCode::F9)
+    let pressed = (*halt != Halt::Menu && keys.just_pressed(KeyCode::KeyM))
         || pads
             .iter()
             .any(|p| p.just_pressed(GamepadButton::RightThumb))
@@ -411,9 +411,9 @@ fn draw(
     }
     if let Ok(mut label) = button.single_mut() {
         label.0 = if session.active() {
-            "F9 / R3   Leave multiplayer"
+            "M / R3   Leave multiplayer"
         } else {
-            "F9 / R3   Multiplayer"
+            "M / R3   Multiplayer"
         }
         .into();
     }

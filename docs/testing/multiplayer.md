@@ -16,7 +16,7 @@ Without signing variables it uses an ad hoc signature for local launch checks;
 live Game Center needs the Apple setup below. Ordinary builds and releases do
 not include the multiplayer UI or native GameKit bridge.
 
-Choose a circuit, car and driving mode before opening **Multiplayer** with **F9**,
+Choose a circuit, car and driving mode before opening **Multiplayer** with **M**,
 the button, or the controller's **right-stick click (R3)**. Open multiplayer on
 both Macs, sign in with different Game Center accounts, then use Apple's friend
 invitation or matchmaking interface. Both copies must use the same prototype
@@ -33,7 +33,7 @@ shows valid lap counts and each driver's best valid time in this session.
 **R** restarts only your car. Circuit and garage changes are unavailable until
 you leave the session. **Esc** opens the local pause menu and releases the
 controls; the car coasts and the session continues. The interrupted lap is
-invalid. **F9 / R3** leaves and returns to solo driving.
+invalid. **M / R3** leaves and returns to solo driving.
 
 ## Apple account setup
 
@@ -96,12 +96,30 @@ The development-signed `dist/Todora Multiplayer.app` and DMG were rebuilt.
 Strict signature verification, the embedded profile and Game Center/sandbox
 entitlements passed validation. The signed app launched with Metal and bundled
 assets on the MacBook Pro. Game Center sign-in and live matchmaking still need
-an interactive check with F9 and a second Mac using a different Game Center
+an interactive check with M and a second Mac using a different Game Center
 account.
 
 Signing from the agent's background session reported `errSecInternalComponent`
 and a locked login keychain. Running the same packaging command in an
 interactive Terminal, with the login keychain unlocked, succeeded.
+
+## Multiplayer beta preparation on 2026-09-22
+
+The next test release is `v0.11.0-beta.1`, with app version `0.11.0`.
+Both players must install this version because the protocol includes the app
+version. Multiplayer uses **M** and music uses **N**; **M** still changes driving
+mode inside the garage.
+
+Before publishing the development-signed DMG, register the other tester’s Mac
+and regenerate **Todora Mac Development** to include it. The current profile
+only covers Oliver’s MacBook Pro and MacBook Air. For Apple Silicon, collect
+**Provisioning UDID** from **System Information → Hardware**, not Hardware UUID.
+A public download link does not let an unregistered Mac run this build.
+
+[Apple’s registered-Mac distribution instructions](https://help.apple.com/xcode/mac/current/en.lproj/dev295cc0fae.html)
+and [device registration guidance](https://developer.apple.com/help/account/devices/register-a-single-device)
+were checked on 2026-09-22. Use a GitHub prerelease for this test build and retain
+0.10.0 as the stable release. See the [beta release notes](../releases/v0.11.0-beta.1.md).
 
 ## Local verification without Game Center credentials
 
@@ -122,7 +140,7 @@ python3 tools/check_multiplayer.py suzuka monza spa-francorchamps
 The rendered check deliberately starts the client on a different circuit,
 verifies agreement and car movement, and saves reports and screenshots under
 `dist/multiplayer-check/`. For manual loopback play, run these in two terminals,
-then press F9 in each window:
+then press M in each window:
 
 ```sh
 TODORA_LOCAL_PEER=host cargo run --features multiplayer-test
