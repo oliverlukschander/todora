@@ -5,8 +5,8 @@
 An optional two-player shared-practice prototype is implemented for macOS.
 See [setup, controls and verification](docs/testing/multiplayer.md).
 
-- [ ] Finish Apple Developer setup under the developer's team: Todora App ID, Game Center,
-  App Store Connect record, development certificate and two-Mac profile.
+- [x] Finish Apple Developer setup under the developer's team: Todora App ID, Game Center,
+  App Store Connect record, development certificate and two-Mac profile (2026-09-22).
 - [ ] Verify a live Game Center match between two signed Macs with distinct
   accounts, including invitations, Internet latency, pause and disconnects.
 - [ ] Bring the native integration to tvOS after the single-player port works.

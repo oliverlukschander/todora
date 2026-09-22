@@ -68,6 +68,41 @@ Center builds use Foundation's Application Support directory so saved ghosts
 work inside the app sandbox; sandboxed and ordinary builds may have separate
 local records. Do not commit certificates or provisioning profiles.
 
+## Apple setup completed on 2026-09-22
+
+The developer's personal team is **Oliver Lukschander — BAADW73W4C**.
+The App ID is `com.lukschander.todora`, with Game Center enabled. The
+[App Store Connect record](https://appstoreconnect.apple.com/apps/6814738694/distribution/macos/version/inflight)
+is named **Todora Demo** (Apple ID `6814738694`, SKU `todora-macos`). Its
+development version and multiplayer compatibility are set to `0.10.0`, matching
+the packaged app. Nothing has been submitted for review or released.
+
+The **Todora Mac Development** profile covers Oliver MacBook Pro and the
+previously registered Oliver’s MacBook Air. It expires on 2027-09-22. The local
+download is `~/Downloads/Todora_Mac_Development.provisionprofile`; keep the
+profile and certificates out of Git. Rebuild on this Mac with:
+
+```sh
+TODORA_GAME_CENTER_PROFILE="$HOME/Downloads/Todora_Mac_Development.provisionprofile" \
+TODORA_SIGN_IDENTITY="8C013A41B047FBF3DB481F8CFA0FD67041D4A220" \
+bash tools/package_game_center_macos.sh
+```
+
+That fingerprint selects the installed personal-team certificate authorized by
+this profile. Regenerate the profile and update the identity when renewing it
+or adding another test Mac. A live match between two Macs remains to be tested.
+
+The development-signed `dist/Todora Multiplayer.app` and DMG were rebuilt.
+Strict signature verification, the embedded profile and Game Center/sandbox
+entitlements passed validation. The signed app launched with Metal and bundled
+assets on the MacBook Pro. Game Center sign-in and live matchmaking still need
+an interactive check with F9 and a second Mac using a different Game Center
+account.
+
+Signing from the agent's background session reported `errSecInternalComponent`
+and a locked login keychain. Running the same packaging command in an
+interactive Terminal, with the login keychain unlocked, succeeded.
+
 ## Local verification without Game Center credentials
 
 The `multiplayer-test` feature provides a loopback-only TCP transport for two
