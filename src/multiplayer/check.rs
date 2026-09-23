@@ -9,6 +9,8 @@ struct Check {
     placed: bool,
     capture_at: Option<f64>,
     captured: bool,
+    /// The start lights, shot once while the agreed countdown is on.
+    lights: bool,
     origin: Vec3,
 }
 
@@ -28,6 +30,7 @@ pub(super) fn configure(app: &mut App) {
             placed: false,
             capture_at: None,
             captured: false,
+            lights: false,
             origin: Vec3::ZERO,
         })
         .add_systems(Startup, window)
@@ -117,6 +120,15 @@ fn capture(
     player: Query<&Transform, With<Player>>,
 ) {
     let now = time.elapsed_secs_f64();
+    if !check.lights && s.seconds_to_start(now).is_some_and(|left| left < 1.5) {
+        check.lights = true;
+        let path = std::path::Path::new(&check.path);
+        std::fs::create_dir_all(path).expect("capture directory");
+        commands
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(path.join("countdown.png")))
+            .observe(nonblank);
+    }
     if s.driving() && s.remote.latest().is_some() && check.capture_at.is_none() {
         check.capture_at = Some(now + 2.0);
     }

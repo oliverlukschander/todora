@@ -379,11 +379,8 @@ fn draw(
     }
     if let Ok(mut text) = text.single_mut() {
         text.0 = if session.phase == Phase::Countdown {
-            format!(
-                "{} · Starting in {}",
-                session.peer,
-                (session.start_at - now).ceil().max(1.0) as u32
-            )
+            // The start lights count it down.
+            format!("{} · Get ready", session.peer)
         } else if session.driving() {
             let best = |t: Option<f32>| t.map_or("—".into(), |t| format!("{t:.3}s"));
             let remote = session.remote.latest();

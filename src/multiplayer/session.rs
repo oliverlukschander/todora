@@ -140,6 +140,10 @@ impl Session {
     pub fn driving(&self) -> bool {
         self.phase == Phase::Driving
     }
+    /// Seconds until the agreed start, while the countdown is on.
+    pub fn seconds_to_start(&self, now: f64) -> Option<f64> {
+        (self.phase == Phase::Countdown).then(|| (self.start_at - now).max(0.0))
+    }
     pub fn blocks_drive(&self) -> bool {
         self.active() && !self.driving()
     }

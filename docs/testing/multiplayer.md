@@ -25,7 +25,7 @@ version and circuit data.
 The coordinator is chosen consistently from the two Game Center player IDs;
 its selected circuit and driving mode are used by both players. The other Mac
 loads that selection automatically. A three-second countdown follows readiness
-and a clock-offset exchange. Cars start on separate sides of the grid. The lap
+and a clock-offset exchange, shown on the solo start lights. Cars start on separate sides of the grid. The lap
 clock still starts at the start/finish line, as it does in solo driving.
 
 The live driver's car is cyan; the saved ghost stays amber. The practice panel
@@ -146,7 +146,8 @@ python3 tools/check_multiplayer.py suzuka monza spa-francorchamps
 ```
 
 The rendered check deliberately starts the client on a different circuit,
-verifies agreement and car movement, and saves reports and screenshots under
+verifies agreement and car movement, and saves reports, a start-lights
+screenshot and a driving screenshot under
 `dist/multiplayer-check/`. For manual loopback play, run these in two terminals,
 then press M in each window:
 

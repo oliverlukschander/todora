@@ -76,12 +76,44 @@ impl Start {
         }
     }
 
-    /// Nothing to count down: the car is free and there is nothing to show.
-    fn over() -> Self {
+    /// Waiting for something else to start the countdown — the other driver,
+    /// in shared practice. Held, with nothing shown.
+    fn waiting() -> Self {
         Self {
-            elapsed: f32::INFINITY,
-            go_at: 0.0,
-            given: 4,
+            elapsed: f32::NEG_INFINITY,
+            go_at: FULL,
+            given: 0,
+        }
+    }
+
+    /// Whether there is anything to show: the lights once the countdown has
+    /// begun, and the green ones for a moment after GO.
+    fn showing(&self) -> bool {
+        (self.held() && self.elapsed >= 0.0) || self.green()
+    }
+
+    /// Follow a shared-practice session. Its start time is agreed with the
+    /// other driver on the real clock, so the lights are set from it rather
+    /// than counted here: the third light a second before the agreed start,
+    /// and GO when the session says driving has begun.
+    fn follow(&mut self, to_go: Option<f64>, driving: bool) {
+        match to_go {
+            Some(to_go) => {
+                if self.go_at != FULL || !self.held() {
+                    *self = Self::waiting();
+                }
+                self.elapsed = (FULL - to_go as f32).clamp(0.0, FULL - 0.001);
+            }
+            None if driving => {
+                if self.held() {
+                    self.elapsed = self.go_at;
+                }
+            }
+            None => {
+                if self.showing() || !self.held() {
+                    *self = Self::waiting();
+                }
+            }
         }
     }
 
@@ -150,31 +182,34 @@ pub(crate) struct CountdownSet;
 
 /// A reset starts a countdown: the whole one onto a different circuit, mode or
 /// car, a short one for a restart. Shared practice has its own countdown,
-/// agreed with the other driver, so while a session is on this one stands aside.
+/// agreed with the other driver, and the lights show that one instead.
 fn begin(
     mut resets: MessageReader<Reset>,
     track: Res<Track>,
     mode: Res<Mode>,
     spec: Res<Spec>,
+    real: Res<Time<Real>>,
     session: Option<Res<crate::multiplayer::Session>>,
     mut start: ResMut<Start>,
 ) {
     let restarted = resets.read().next().is_some();
-    if session.is_some_and(|session| session.active()) {
-        if start.held() || start.green() {
-            *start = Start::over();
-        }
+    if let Some(session) = session.filter(|session| session.active()) {
+        let now = real.elapsed_secs_f64();
+        start.follow(session.seconds_to_start(now), session.driving());
         return;
     }
     if track.is_changed() || mode.is_changed() || spec.is_changed() {
         *start = Start::of(FULL);
-    } else if restarted {
+    } else if restarted || start.elapsed == f32::NEG_INFINITY {
+        // A session that ended mid-countdown leaves nobody to start it.
         *start = Start::of(SHORT);
     }
 }
 
 fn tick(time: Res<Time>, mut start: ResMut<Start>, mut lights: MessageWriter<StartLight>) {
-    start.elapsed += time.delta_secs();
+    if start.elapsed.is_finite() {
+        start.elapsed += time.delta_secs();
+    }
     let signals = start.signals();
     if signals > start.given {
         start.given = signals;
@@ -271,7 +306,7 @@ fn draw(
     mut lights: Query<(&Light, &mut BackgroundColor)>,
     mut captions: Query<(&mut Text, &mut TextColor), With<Caption>>,
 ) {
-    let showing = start.held() || start.green();
+    let showing = start.showing();
     for mut visibility in &mut pods {
         visibility.set_if_neq(if showing {
             Visibility::Inherited
@@ -326,7 +361,6 @@ mod tests {
 
         let short = Start::of(SHORT);
         assert_eq!(short.red(), 3, "a restart lights all three at once");
-        assert!(!Start::over().held() && !Start::over().green());
     }
 
     /// The car, the clock and the countdown, on the production schedules,
@@ -472,6 +506,31 @@ mod tests {
         frames(&mut app, 20);
         assert!(app.world().resource::<Start>().elapsed > during + 0.1);
         assert!(app.world().resource::<Start>().held());
+    }
+
+    #[test]
+    fn shared_practice_sets_the_lights_from_the_agreed_start() {
+        let mut start = Start::of(FULL);
+        start.follow(None, false);
+        assert!(
+            start.held() && !start.showing(),
+            "lights shown before the countdown"
+        );
+        start.follow(Some(3.2), false);
+        assert_eq!((start.red(), start.caption()), (0, "READY"));
+        start.follow(Some(2.9), false);
+        assert_eq!((start.red(), start.caption()), (1, "3"));
+        start.follow(Some(0.5), false);
+        assert_eq!((start.red(), start.caption()), (3, "1"));
+        start.follow(Some(0.0), false);
+        assert!(start.held(), "released before the session said go");
+        start.follow(None, true);
+        assert!(!start.held() && start.green());
+        start.follow(None, true);
+        assert!(!start.held(), "driving put the car back on hold");
+        // Leaving the session and joining another starts from waiting again.
+        start.follow(None, false);
+        assert!(start.held() && !start.showing());
     }
 
     #[test]
