@@ -26,7 +26,8 @@ use crate::track::{Track, TrackSet};
 pub(crate) use garage::Spec;
 pub(crate) use mode::Mode;
 pub(crate) use physics::{
-    Car, Controls, FRONT_AXLE, HALF_TRACK, Handling, REAR_AXLE, SCALE, Surface, WHEEL_WIDTH,
+    Car, Controls, FRONT_AXLE, HALF_TRACK, Handling, PHYSICS_VERSION, REAR_AXLE, SCALE, Surface,
+    WHEEL_WIDTH,
 };
 pub(crate) use setup::Setup;
 
@@ -35,6 +36,15 @@ pub(crate) const MODEL: &str = "models/omarchy_gt_95.glb";
 /// the same at 30 frames a second as at 144. Bevy carries leftover frame time
 /// into the next frame instead of using a shorter final step.
 const SUBSTEP: f32 = 1.0 / 240.0;
+/// Physics steps a second.
+pub(crate) const STEP_HZ: f64 = 240.0;
+
+/// One physics step's `dt`, to the bit, as `Time<Fixed>` hands it to the
+/// systems: a duration first, then seconds. A replay that used `1.0 / 240.0`
+/// instead could differ in the last bit and time the lap differently.
+pub(crate) fn step_seconds() -> f32 {
+    std::time::Duration::from_secs_f64(1.0 / STEP_HZ).as_secs_f32()
+}
 /// Body roll per lateral g and dive per longitudinal g, in radians, and how
 /// quickly the body settles onto its springs.
 const ROLL_PER_G: f32 = 0.07;
@@ -81,7 +91,7 @@ impl Plugin for CarPlugin {
         app.init_resource::<Setup>()
             .init_resource::<Spec>()
             .init_resource::<Mode>()
-            .insert_resource(Time::<Fixed>::from_hz(240.0))
+            .insert_resource(Time::<Fixed>::from_hz(STEP_HZ))
             .add_systems(Startup, setup)
             // After the input, which is what asks for both; after the menus,
             // which are what choose the car; and after the track, because a
@@ -354,6 +364,14 @@ fn lean_body(
 /// How the body sits under `g`, in the car's frame: x to the right, y forward.
 fn lean(g: Vec2) -> Quat {
     Quat::from_rotation_z(g.x * ROLL_PER_G) * Quat::from_rotation_x(g.y * DIVE_PER_G)
+}
+
+/// The plain AI driver, as a function from the car's situation to what it
+/// asks for.
+#[cfg(test)]
+pub(crate) fn ai_driver() -> impl FnMut(&Track, &Handling, &Transform, &Car) -> Controls {
+    let mut driver = driver::Driver::new(driver::Style::Plain);
+    move |track, handling, at, car| driver.decide(track, handling, at, car)
 }
 
 /// One timed lap by the plain AI driver in the default car, balanced, in

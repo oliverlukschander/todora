@@ -10,6 +10,7 @@ mod menu;
 mod minimap;
 mod multiplayer;
 mod onboarding;
+mod online;
 mod pause;
 mod settings;
 mod skid;
@@ -107,6 +108,7 @@ impl Plugin for GamePlugin {
                 countdown::CountdownPlugin,
                 summary::SummaryPlugin,
                 onboarding::OnboardingPlugin,
+                online::OnlinePlugin,
                 multiplayer::MultiplayerPlugin,
             ))
             .add_systems(Update, quit);

@@ -250,7 +250,6 @@ pub(crate) fn turn(yaw: f32) -> Quat {
 /// Moves whenever anything a lap time depends on moves: a [`Handling`], the
 /// [`step`], how the track holds the car, or the rules that judge a lap. A lap
 /// recorded under one version is not replayed under another.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) const PHYSICS_VERSION: u32 = 1;
 
 /// What the road is offering at the contact patches.

@@ -84,6 +84,10 @@ pub struct LapTimer {
     /// The slowest the car went this lap, and how far round it was then.
     slowest: Option<(f32, f32)>,
     pub sector_notice: Option<SectorNotice>,
+    /// Physics steps since the lap started. The clock is this times the step,
+    /// multiplied once rather than added up step by step, which over a minute
+    /// of f32 additions drifts by milliseconds.
+    ticks: u32,
     sectors: Vec<f32>,
     sector_started: f32,
     previous_time: f32,
@@ -163,6 +167,7 @@ impl LapTimer {
     /// in progress, so they stay, and the clock waits at the line again.
     fn abandon(&mut self) {
         self.current = 0.0;
+        self.ticks = 0;
         self.running = false;
         self.prev_along = None;
         self.prev_progress = None;
@@ -185,6 +190,27 @@ impl LapTimer {
     pub(crate) fn invalidate(&mut self, why: Why) {
         self.invalid = true;
         self.why.get_or_insert(why);
+    }
+
+    /// The timer as it stands the step a lap starts: running from zero, with
+    /// the car `along` past the line and `progress` round the lap. Where a
+    /// replay picks the lap up.
+    pub(crate) fn armed(along: f32, progress: f32) -> Self {
+        Self {
+            running: true,
+            net_progress: progress,
+            prev_along: Some(along),
+            prev_progress: Some(progress),
+            ..Self::default()
+        }
+    }
+
+    /// Count one physics step of the clock, as `tick` does in the game.
+    pub(crate) fn count(&mut self, dt: f32) {
+        if self.running {
+            self.ticks += 1;
+            self.current = self.ticks as f32 * dt;
+        }
     }
 
     /// Show a sector notice for the usual few seconds.
@@ -269,6 +295,7 @@ impl Default for LapTimer {
             report: None,
             top_speed: 0.0,
             slowest: None,
+            ticks: 0,
             sector_notice: None,
             sectors: Vec::new(),
             sector_started: 0.0,
@@ -290,9 +317,7 @@ fn tick(time: Res<Time>, mut timer: ResMut<LapTimer>) {
     if timer.notice_left == 0.0 {
         timer.sector_notice = None;
     }
-    if timer.running {
-        timer.current += time.delta_secs();
-    }
+    timer.count(time.delta_secs());
 }
 
 /// What the judge is told about the car after one physics step. Everything in
@@ -380,6 +405,7 @@ impl LapTimer {
                 // time, spent getting up to speed, and none of it is the lap.
                 self.running = true;
                 self.current = 0.0;
+                self.ticks = 0;
                 self.net_progress = progress;
                 self.invalid = false;
                 self.why = None;
@@ -428,6 +454,7 @@ impl LapTimer {
                 }
                 self.completed += 1;
                 self.current = 0.0;
+                self.ticks = 0;
                 self.net_progress = progress;
                 self.invalid = !legal;
                 self.why = (!legal).then_some(Why::OffTrack { sector: 1 });

@@ -14,8 +14,8 @@
 //! determinism` and bump [`super::physics::PHYSICS_VERSION`] if lap times can
 //! have moved.
 
+use super::PHYSICS_VERSION;
 use super::driver::{Driver, Style};
-use super::physics::PHYSICS_VERSION;
 use super::{Car, Controls, SCALE, Spec, advance};
 use crate::track::{Track, all_circuits};
 use bevy::prelude::*;

@@ -17,6 +17,7 @@ The approved plan, decisions and build order are in the
 - [x] Medals: author times (provisional where not yet driven), menu badges and summary line (2026-09-23).
 - [ ] Drive author laps on all 40 circuits × 3 modes and rerun `write_the_author_times`.
 - [x] First-run onboarding cards and the one-time Beginner hint (2026-09-23).
+- [x] Run format, replay check and outbox for valid new bests (2026-09-24).
 - [ ] Online leaderboards at todora.lukschander.com.
 
 ## Game Center multiplayer
