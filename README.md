@@ -27,6 +27,8 @@ Each circuit sits on a grass rectangle extending 50 metres beyond the outermost 
 
 Fair-weather clouds drift slowly across the sky and melt into the horizon haze. The sky is one opaque, unlit dome that follows the camera, painted once at startup on a worker thread. Each frame costs one draw call, one texture read per pixel of sky and one transform update. There is no transparency, per-pixel noise or texture upload during play; until the painting is ready (a fraction of a second), the previous plain sky shows.
 
+The chase camera keeps its level boom on flat and uphill road. On steep descents, or when a crest or bank rises between camera and car, it lifts just enough to keep the car in sight, including when speed stretches the boom. It reads the same road and terrain heights the wheels use, costing under 10 µs a frame, with no mesh raycasts. Follow smoothing, the cut on reset and scroll zoom are unchanged.
+
 All forty racing directions have been [audited](docs/track-screening/directions.md). Paul Ricard now runs clockwise and Marina Bay anticlockwise; Buenos Aires was already correct. Ghosts from the two reversed layouts are automatically rejected.
 
 Todora 0.10.0 adds a circular mini-map, 4–8 mini-sectors per circuit, driveable surrounding grass with 25% less off-track resistance, persistent lap invalidity when all four wheels leave asphalt and kerbs, and a subtle rubbered racing path. Earlier ghosts are not loaded under the new track-limit rules. [Implementation and local testing notes](docs/testing/free-drive-features.md).
