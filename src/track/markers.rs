@@ -125,11 +125,15 @@ pub(super) fn show(
 }
 
 fn smoothed_curvature(stations: &[Station]) -> Vec<f32> {
-    let n = stations.len();
+    smooth(&stations.iter().map(|s| s.curvature).collect::<Vec<_>>())
+}
+
+fn smooth(curvature: &[f32]) -> Vec<f32> {
+    let n = curvature.len();
     (0..n)
         .map(|i| {
             (0..SMOOTH)
-                .map(|d| stations[(i + n + d - SMOOTH / 2) % n].curvature)
+                .map(|d| curvature[(i + n + d - SMOOTH / 2) % n])
                 .sum::<f32>()
                 / SMOOTH as f32
         })
@@ -235,6 +239,25 @@ fn plaque(track: &Track, at: usize, side: f32) -> Mesh {
     .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
 }
 
+/// The centre of every plaque in either direction, as [`rebuild`] lays them.
+#[cfg(test)]
+pub(super) fn plaque_centres(track: &Track) -> Vec<Vec3> {
+    let stations = track.ribbon.stations();
+    let bends = smoothed_curvature(stations);
+    let mut out = Vec::new();
+    for (at, step) in markers(stations) {
+        if step % 2 != 0 {
+            continue;
+        }
+        for direction in [1, -1] {
+            let mesh = plaque(track, at, outside(&bends, at, direction));
+            let positions = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap();
+            out.push(Vec3::from(positions.as_float3().unwrap()[0]));
+        }
+    }
+    out
+}
+
 /// Which cross-section a point `along` metres up or down the road from station
 /// `at` stands on, as a station and a fraction of the way to the next.
 fn under(at: usize, along: f32, n: usize) -> (usize, f32) {
@@ -285,8 +308,14 @@ fn zone(corner: &[bool]) -> Vec<bool> {
 
 /// Which stations are inside a corner, bends closer than [`MERGE`] joined.
 fn corners(stations: &[Station]) -> Vec<bool> {
-    let n = stations.len();
-    let bend: Vec<bool> = smoothed_curvature(stations)
+    corners_of(&stations.iter().map(|s| s.curvature).collect::<Vec<_>>())
+}
+
+/// The same from the curvature at each station alone. Shared with the braking
+/// boards, which count their distances back from the first station of these.
+pub(super) fn corners_of(curvature: &[f32]) -> Vec<bool> {
+    let n = curvature.len();
+    let bend: Vec<bool> = smooth(curvature)
         .into_iter()
         .map(|curvature| curvature.abs() * CORNER_RADIUS > 1.0)
         .collect();

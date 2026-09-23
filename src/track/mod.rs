@@ -24,6 +24,7 @@
 
 // A trace is thousands of surveyed coordinates, and sooner or later one of them
 // is 3.14 or 6.28 metres from the centroid of its circuit. It is a coordinate.
+mod boards;
 mod bridge;
 #[allow(clippy::approx_constant)]
 mod circuits;
@@ -244,6 +245,7 @@ impl Plugin for TrackPlugin {
                 Update,
                 (
                     markers::rebuild.run_if(resource_changed::<Track>),
+                    boards::rebuild.run_if(resource_changed::<Track>),
                     markers::show,
                     textures::prepare,
                 )
