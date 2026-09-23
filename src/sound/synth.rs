@@ -42,6 +42,58 @@ impl Tyres {
     }
 }
 
+/// The engine: a few harmonics of a firing note, a little filtered noise
+/// under load, and a pitch that climbs through six gears with speed. All of it
+/// made here, sample by sample, from two numbers the game publishes: how far
+/// through the rev range the engine is, and how hard it is being asked to pull.
+#[derive(Default)]
+pub(super) struct Engine {
+    phase: f32,
+    rpm: f32,
+    load: f32,
+    rumble: f32,
+    noise: u32,
+}
+
+impl Engine {
+    /// `rpm` and `load` are 0 to 1; `level` is the volume, 0 when silent.
+    pub fn sample(&mut self, rpm: f32, load: f32, level: f32) -> f32 {
+        // Slewed per sample so a gear change is a quick swoop, not a click.
+        self.rpm += (rpm - self.rpm) * 0.0009;
+        self.load += (load - self.load) * 0.0006;
+        let pitch = 48.0 * (1.0 + 3.2 * self.rpm);
+        self.phase = (self.phase + pitch / RATE * std::f32::consts::TAU) % std::f32::consts::TAU;
+        let p = self.phase;
+        let tone =
+            p.sin() + 0.55 * (2.0 * p).sin() + 0.3 * (3.0 * p + 0.4).sin() + 0.12 * (5.0 * p).sin();
+        // A cheap, fixed noise source, filtered low for the intake roar.
+        self.noise = self
+            .noise
+            .wrapping_mul(1_664_525)
+            .wrapping_add(1_013_904_223);
+        let white = (self.noise >> 9) as f32 / (1u32 << 23) as f32 - 1.0;
+        self.rumble += (white - self.rumble) * 0.05;
+        let voice = tone * (0.35 + 0.65 * self.load) + self.rumble * 1.2 * self.load;
+        voice * level * 0.045
+    }
+}
+
+/// Where the engine is in its rev range at `speed` of `top` metres a second:
+/// six gears, each climbing from a little above idle to the top of the range,
+/// and idle when stopped.
+pub(crate) fn revs(speed: f32, top: f32) -> f32 {
+    const GEARS: f32 = 6.0;
+    let through = (speed.abs() / top.max(1.0)).clamp(0.0, 1.0) * GEARS;
+    if through < 0.02 {
+        return 0.12;
+    }
+    let gear = through.floor().min(GEARS - 1.0);
+    let within = through - gear;
+    // First gear starts from idle; the others drop back as the next is taken.
+    let floor = if gear == 0.0 { 0.12 } else { 0.42 };
+    floor + (0.95 - floor) * within
+}
+
 /// What the game can ask the beeper for.
 #[derive(bevy::prelude::Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Cue {
@@ -132,6 +184,63 @@ impl Beep {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_engine_climbs_through_six_gears_and_idles_when_stopped() {
+        assert_eq!(revs(0.0, 22.0), 0.12);
+        let low = revs(1.0, 22.0);
+        let high_in_first = revs(3.6, 22.0);
+        assert!(high_in_first > low, "revs climb within a gear");
+        let second = revs(3.8, 22.0);
+        assert!(second < high_in_first, "and drop as the next gear is taken");
+        assert!(revs(22.0, 22.0) <= 0.95);
+        let mut engine = Engine::default();
+        let loud: Vec<f32> = (0..44_100).map(|_| engine.sample(0.8, 1.0, 1.0)).collect();
+        assert!(loud.iter().all(|s| s.abs() < 0.2));
+        assert!(loud.iter().any(|s| s.abs() > 0.02));
+        let mut quiet = Engine::default();
+        assert!((0..1000).all(|_| quiet.sample(0.8, 1.0, 0.0) == 0.0));
+    }
+
+    /// Twelve seconds of the engine pulling from a stop to top speed, lifting
+    /// for a corner and pulling again, as `dist/engine.wav`, for a listen:
+    /// `cargo test --locked --lib write_the_engine -- --ignored`.
+    #[test]
+    #[ignore = "writes dist/engine.wav"]
+    fn write_the_engine() {
+        let mut engine = Engine::default();
+        let mut pcm = Vec::new();
+        let (top, mut speed) = (22.0f32, 0.0f32);
+        for i in 0..(12 * 44_100) {
+            let t = i as f32 / 44_100.0;
+            let throttle = if (7.0..8.5).contains(&t) { 0.0 } else { 1.0 };
+            speed = (speed
+                + (throttle * 3.2 * (1.0 - speed / top) - 1.5 * (1.0 - throttle)) / 44_100.0)
+                .clamp(0.0, top);
+            let sample = engine.sample(revs(speed, top), throttle, 1.0) * 4.0;
+            pcm.extend_from_slice(&((sample.clamp(-1.0, 1.0) * 32_000.0) as i16).to_le_bytes());
+        }
+        let mut wav = Vec::new();
+        let chunk = |wav: &mut Vec<u8>, id: &[u8], len: u32| {
+            wav.extend_from_slice(id);
+            wav.extend_from_slice(&len.to_le_bytes());
+        };
+        chunk(&mut wav, b"RIFF", 36 + pcm.len() as u32);
+        wav.extend_from_slice(b"WAVE");
+        chunk(&mut wav, b"fmt ", 16);
+        for v in [1u16, 1] {
+            wav.extend_from_slice(&v.to_le_bytes());
+        }
+        wav.extend_from_slice(&44_100u32.to_le_bytes());
+        wav.extend_from_slice(&(44_100u32 * 2).to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        chunk(&mut wav, b"data", pcm.len() as u32);
+        wav.extend_from_slice(&pcm);
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dist");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("engine.wav"), wav).unwrap();
+    }
 
     #[test]
     fn a_beep_is_bounded_and_ends_in_silence() {

@@ -32,6 +32,7 @@ The approved plan, decisions and build order are in the
   run `server/deploy/deploy.sh root@host` (ARCH=arm64 on CAX), and check
   `/v1/health` over HTTPS.
 - [x] Records view: every circuit's best, medal and world place, with medal totals (2026-09-24).
+- [x] Synthesised engine note with its own volume (2026-09-24). Listen to `dist/engine.wav` and tune.
 - [ ] Online leaderboards at todora.lukschander.com.
 
 ## Game Center multiplayer

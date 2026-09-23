@@ -62,6 +62,8 @@ pub(crate) struct Settings {
     pub music_volume: f32,
     /// 0 to 1: tyres, beeps and everything else the car makes.
     pub effects_volume: f32,
+    /// 0 to 1: the engine, on top of the effects volume.
+    pub engine_volume: f32,
     // Display.
     pub fullscreen: bool,
     pub vsync: bool,
@@ -127,6 +129,7 @@ impl Default for Settings {
             effects: true,
             music_volume: 0.8,
             effects_volume: 1.0,
+            engine_volume: 0.7,
             fullscreen: false,
             vsync: true,
             antialiasing: true,
@@ -194,6 +197,7 @@ impl Settings {
         let d = Self::default();
         self.music_volume = within(self.music_volume, 0.0, 1.0, d.music_volume);
         self.effects_volume = within(self.effects_volume, 0.0, 1.0, d.effects_volume);
+        self.engine_volume = within(self.engine_volume, 0.0, 1.0, d.engine_volume);
         self.ui_scale = within(self.ui_scale, 0.9, 1.5, d.ui_scale);
         self.render_scale = within(self.render_scale, 0.5, 1.0, d.render_scale);
         self.fov = within(self.fov, 35.0, 75.0, d.fov);

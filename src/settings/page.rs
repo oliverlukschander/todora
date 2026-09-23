@@ -44,7 +44,7 @@ impl Tab {
     fn rows(self) -> &'static [Row] {
         use Row::*;
         match self {
-            Self::Audio => &[Music, MusicVolume, Effects, EffectsVolume],
+            Self::Audio => &[Music, MusicVolume, Effects, EffectsVolume, EngineVolume],
             Self::Display => &[
                 Fullscreen,
                 Vsync,
@@ -70,6 +70,7 @@ pub(crate) enum Row {
     MusicVolume,
     Effects,
     EffectsVolume,
+    EngineVolume,
     Fullscreen,
     Vsync,
     Antialiasing,
@@ -130,6 +131,7 @@ impl Row {
             Self::MusicVolume => "Music volume",
             Self::Effects => "Tyre sound and beeps",
             Self::EffectsVolume => "Effects volume",
+            Self::EngineVolume => "Engine volume",
             Self::Fullscreen => "Full screen",
             Self::Vsync => "Vertical sync",
             Self::Antialiasing => "Anti-aliasing",
@@ -160,6 +162,7 @@ impl Row {
             Self::MusicVolume => percent(s.music_volume),
             Self::Effects => on_off(s.effects),
             Self::EffectsVolume => percent(s.effects_volume),
+            Self::EngineVolume => percent(s.engine_volume),
             Self::Fullscreen => on_off(s.fullscreen),
             Self::Vsync => on_off(s.vsync),
             Self::Antialiasing => if s.antialiasing { "4×" } else { "Off" }.into(),
@@ -209,6 +212,7 @@ impl Row {
             Self::MusicVolume => s.music_volume = nudge(s.music_volume, dir, 0.1, 0.0, 1.0),
             Self::Effects => s.effects = !s.effects,
             Self::EffectsVolume => s.effects_volume = nudge(s.effects_volume, dir, 0.1, 0.0, 1.0),
+            Self::EngineVolume => s.engine_volume = nudge(s.engine_volume, dir, 0.1, 0.0, 1.0),
             Self::Fullscreen => s.fullscreen = !s.fullscreen,
             Self::Vsync => s.vsync = !s.vsync,
             Self::Antialiasing => s.antialiasing = !s.antialiasing,

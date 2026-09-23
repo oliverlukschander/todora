@@ -2,7 +2,7 @@
 mod radio;
 mod synth;
 pub(crate) use synth::Cue;
-use synth::Tyres;
+use synth::{Engine, Tyres};
 
 use bevy::{audio::AddAudioSource, prelude::*, window::PrimaryWindow};
 use std::sync::{
@@ -83,6 +83,10 @@ struct Signal {
     effects_cut: AtomicU32,
     /// Beeps asked for: a count, times four, plus the cue's code.
     beep: AtomicU32,
+    /// The engine: revs and load 0 to 1, and its volume.
+    engine_rpm: AtomicU32,
+    engine_load: AtomicU32,
+    engine_level: AtomicU32,
 }
 
 impl Signal {
@@ -121,11 +125,20 @@ fn start(mut commands: Commands, mut assets: ResMut<Assets<radio::Soundtrack>>, 
     ));
 }
 
+#[allow(clippy::type_complexity)]
 fn update(
     keys: Res<ButtonInput<KeyCode>>,
     halt: Res<Halt>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    players: Query<(&Car, &Transform), With<Player>>,
+    players: Query<
+        (
+            &Car,
+            &Transform,
+            Option<&crate::car::Handling>,
+            Option<&crate::car::Controls>,
+        ),
+        With<Player>,
+    >,
     track: Res<Track>,
     settings: Option<Res<crate::settings::Settings>>,
     mut sound: ResMut<Sound>,
@@ -154,8 +167,13 @@ fn update(
     let (rolling, scrub, squeal) = if audible && sound.effects && !halt.stopped() {
         players
             .single()
-            .map(|(car, pose)| {
+            .map(|(car, pose, handling, controls)| {
                 let grip = track.ground_from(pose.translation, car.along).grip;
+                let top = handling.map_or(24.0, |h| h.top_speed);
+                let load = controls.map_or(0.0, |c| c.throttle);
+                let revs = synth::revs(car.velocity.length(), top);
+                sound.signal.engine_rpm.store(revs.to_bits(), Relaxed);
+                sound.signal.engine_load.store(load.to_bits(), Relaxed);
                 let (scrub, squeal) = tyre_levels(car, grip);
                 (rolling_level(car, grip), scrub, squeal)
             })
@@ -175,6 +193,12 @@ fn update(
     sound.signal.music.store(music.to_bits(), Relaxed);
     sound.signal.scrub.store(scrub.to_bits(), Relaxed);
     sound.signal.squeal.store(squeal.to_bits(), Relaxed);
+    let engine = if audible && sound.effects && !halt.stopped() {
+        settings.as_ref().map_or(0.7, |s| s.engine_volume)
+    } else {
+        0.0
+    };
+    sound.signal.engine_level.store(engine.to_bits(), Relaxed);
 }
 
 /// A start light has come on. It is heard with the tyres, so the tyre toggle
