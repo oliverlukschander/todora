@@ -187,6 +187,122 @@ fn tick(time: Res<Time>, mut timer: ResMut<LapTimer>) {
     }
 }
 
+/// What the judge is told about the car after one physics step. Everything in
+/// it is read off the track by [`gate`], so the judge itself is a plain function
+/// of the timer and this: the game, the tests and a server replaying a lap from
+/// its inputs all judge it with the same code.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Step {
+    /// All four wheels on asphalt or kerb.
+    pub legal: bool,
+    /// The car was fetched back to the road this step.
+    pub recovered: bool,
+    /// Signed distance past the start/finish plane, along the circuit.
+    pub along: f32,
+    /// How far round the lap, 0 to 1, on the road the car is on.
+    pub progress: f32,
+    /// Plan length of one lap, in metres.
+    pub length: f32,
+    /// How many sectors the lap is split into.
+    pub sectors: usize,
+}
+
+impl LapTimer {
+    /// Judge one step. `on_gate` says whether the car crossed the line on the
+    /// road rather than out in the runoff or under a bridge; it is only asked
+    /// when the car has just crossed the start plane, because asking costs a
+    /// lookup. Returns the lap that this step finished, if any.
+    pub(crate) fn judge(
+        &mut self,
+        step: Step,
+        on_gate: impl FnOnce() -> bool,
+    ) -> Option<LapFinished> {
+        let Step {
+            legal,
+            recovered,
+            along,
+            progress,
+            length,
+            sectors,
+        } = step;
+        if self.running && (!legal || recovered) {
+            self.invalid = true;
+        }
+        let before = self.net_progress;
+        if let Some(previous) = self.prev_progress {
+            // Unwrap the closed circuit, retaining direction. Reversing across the
+            // line spends progress rather than instantly qualifying most of a lap.
+            let step = (progress - previous + 0.5).rem_euclid(1.0) - 0.5;
+            self.net_progress += step;
+            // After a shortcut the nearest-road progress may have jumped. An
+            // invalid lap can still end after a real forward run-up to the line.
+            // Briefly reversing over the line cannot wash away its invalidity.
+            let metres = step * length;
+            if !legal || recovered || metres < -0.001 || (0.02..0.8).contains(&progress) {
+                self.finish_runup = 0.0;
+            } else if progress > 0.8 && (0.0..2.0).contains(&metres) {
+                self.finish_runup += metres;
+            }
+        }
+        if self.running {
+            let after = self.net_progress;
+            self.sectors_through(before, after, sectors);
+        }
+        self.prev_progress = Some(progress);
+        let Some(prev) = self.prev_along else {
+            self.prev_along = Some(along);
+            return None;
+        };
+        let mut finished = None;
+        if !recovered && prev <= 0.0 && along > 0.0 && on_gate() {
+            if !self.running && legal {
+                // The end of the run-up. Everything before this is the driver's own
+                // time, spent getting up to speed, and none of it is the lap.
+                self.running = true;
+                self.current = 0.0;
+                self.net_progress = progress;
+                self.invalid = false;
+                self.finish_runup = 0.0;
+            } else if self.running
+                && (self.net_progress > 0.95 || (self.invalid && self.finish_runup > 5.0))
+            {
+                let time = self.current;
+                if self.sectors.len() + 1 == sectors {
+                    self.sector(time);
+                } else {
+                    self.sector_notice = None;
+                }
+                let best = !self.invalid
+                    && self.sectors.len() == sectors
+                    && self.best.is_none_or(|best| time < best);
+                finished = Some(LapFinished {
+                    time,
+                    best,
+                    valid: !self.invalid,
+                });
+                if !self.invalid {
+                    self.last = Some(time);
+                }
+                if best {
+                    self.best = Some(time);
+                    self.best_sectors = self.sectors.clone();
+                }
+                self.completed += 1;
+                self.current = 0.0;
+                self.net_progress = progress;
+                self.invalid = !legal;
+                self.finish_runup = 0.0;
+                self.sectors.clear();
+                self.sector_started = 0.0;
+            }
+        }
+        self.prev_along = Some(along);
+        self.previous_time = self.current;
+        finished
+    }
+}
+
+/// Read what the judge needs off the track, and let it judge.
 fn gate(
     track: Res<Track>,
     mut timer: ResMut<LapTimer>,
@@ -196,89 +312,25 @@ fn gate(
     let Ok((at, mut car)) = cars.single_mut() else {
         return;
     };
-    let legal = track.legal_contact(at, car.along);
     let recovered = car.recovered;
-    if timer.running && (!legal || car.recovered) {
-        timer.invalid = true;
-    }
     car.recovered = false;
-    let before = timer.net_progress;
     let pos = at.translation;
-    let along = track.start_along(pos);
     // Where the car says it is round the lap, which on a circuit that passes
     // over itself is the difference between the lap the driver is on and the
     // road underneath it. The clock reads the car's own answer rather than
     // asking the map again, so that a lap is timed on the road it was driven
     // on — see `Track::fix`.
-    let progress = track.progress(pos, car.along);
-    if let Some(previous) = timer.prev_progress {
-        // Unwrap the closed circuit, retaining direction. Reversing across the
-        // line spends progress rather than instantly qualifying most of a lap.
-        let step = (progress - previous + 0.5).rem_euclid(1.0) - 0.5;
-        timer.net_progress += step;
-        // After a shortcut the nearest-road progress may have jumped. An
-        // invalid lap can still end after a real forward run-up to the line.
-        // Briefly reversing over the line cannot wash away its invalidity.
-        let metres = step * track.length();
-        if !legal || recovered || metres < -0.001 || (0.02..0.8).contains(&progress) {
-            timer.finish_runup = 0.0;
-        } else if progress > 0.8 && (0.0..2.0).contains(&metres) {
-            timer.finish_runup += metres;
-        }
-    }
-    if timer.running {
-        let after = timer.net_progress;
-        timer.sectors_through(before, after, track.sector_count());
-    }
-    timer.prev_progress = Some(progress);
-    let Some(prev) = timer.prev_along else {
-        timer.prev_along = Some(along);
-        return;
+    let step = Step {
+        legal: track.legal_contact(at, car.along),
+        recovered,
+        along: track.start_along(pos),
+        progress: track.progress(pos, car.along),
+        length: track.length(),
+        sectors: track.sector_count(),
     };
-    if !recovered && prev <= 0.0 && along > 0.0 && track.on_start_gate(pos, car.along) {
-        if !timer.running && legal {
-            // The end of the run-up. Everything before this is the driver's own
-            // time, spent getting up to speed, and none of it is the lap.
-            timer.running = true;
-            timer.current = 0.0;
-            timer.net_progress = progress;
-            timer.invalid = false;
-            timer.finish_runup = 0.0;
-        } else if timer.running
-            && (timer.net_progress > 0.95 || (timer.invalid && timer.finish_runup > 5.0))
-        {
-            let time = timer.current;
-            if timer.sectors.len() + 1 == track.sector_count() {
-                timer.sector(time);
-            } else {
-                timer.sector_notice = None;
-            }
-            let best = !timer.invalid
-                && timer.sectors.len() == track.sector_count()
-                && timer.best.is_none_or(|best| time < best);
-            finished.write(LapFinished {
-                time,
-                best,
-                valid: !timer.invalid,
-            });
-            if !timer.invalid {
-                timer.last = Some(time);
-            }
-            if best {
-                timer.best = Some(time);
-                timer.best_sectors = timer.sectors.clone();
-            }
-            timer.completed += 1;
-            timer.current = 0.0;
-            timer.net_progress = progress;
-            timer.invalid = !legal;
-            timer.finish_runup = 0.0;
-            timer.sectors.clear();
-            timer.sector_started = 0.0;
-        }
+    if let Some(lap) = timer.judge(step, || track.on_start_gate(pos, car.along)) {
+        finished.write(lap);
     }
-    timer.prev_along = Some(along);
-    timer.previous_time = timer.current;
 }
 
 /// A new circuit or driving mode starts a fresh board; a restart gives
@@ -633,6 +685,34 @@ mod tests {
             heard[0].time,
             heard[1].best
         );
+    }
+
+    /// The judge needs nothing but the timer and what the track says: no app,
+    /// no systems. This is how a lap replayed from its inputs will be judged.
+    #[test]
+    fn the_judge_times_a_lap_without_an_app() {
+        let track = Track::any();
+        let points: Vec<_> = track.map_points().collect();
+        let mut timer = LapTimer::default();
+        let mut laps = Vec::new();
+        for i in (points.len() - 5)..(points.len() * 2 + 3) {
+            let (pos, along) = points[i % points.len()];
+            let at = Transform::from_translation(pos)
+                .looking_to(points[(i + 1) % points.len()].0 - pos, Vec3::Y);
+            timer.current += 0.01;
+            let step = Step {
+                legal: track.legal_contact(&at, Some(along)),
+                recovered: false,
+                along: track.start_along(pos),
+                progress: track.progress(pos, Some(along)),
+                length: track.length(),
+                sectors: track.sector_count(),
+            };
+            laps.extend(timer.judge(step, || track.on_start_gate(pos, Some(along))));
+        }
+        assert_eq!(laps.len(), 1);
+        assert!(laps[0].valid && laps[0].best);
+        assert_eq!(timer.best_sectors.len(), track.sector_count());
     }
 
     #[test]
