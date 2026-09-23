@@ -26,6 +26,13 @@ fn setup(mut commands: Commands) {
             shadow_maps_enabled: false,
             ..default()
         },
-        Transform::from_rotation(Quat::from_euler(EulerRot::ZYX, 0.0, 0.6, -0.9)),
+        Transform::from_rotation(sun()),
     ));
+}
+
+/// Which way the sun faces. Its light travels along the rotated -Z, so the
+/// direction towards the sun is `sun() * Vec3::Z`; the unlit trackside bakes
+/// its shading from the same.
+pub(crate) fn sun() -> Quat {
+    Quat::from_euler(EulerRot::ZYX, 0.0, 0.6, -0.9)
 }

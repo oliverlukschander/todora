@@ -240,7 +240,6 @@ fn plaque(track: &Track, at: usize, side: f32) -> Mesh {
 }
 
 /// The centre of every plaque in either direction, as [`rebuild`] lays them.
-#[cfg(test)]
 pub(super) fn plaque_centres(track: &Track) -> Vec<Vec3> {
     let stations = track.ribbon.stations();
     let bends = smoothed_curvature(stations);

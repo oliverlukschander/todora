@@ -1,19 +1,17 @@
 //! Braking distance boards: "150", "100" and "50" on the outside verge before
 //! every big corner, facing the way the lap runs.
 //!
-//! All of a circuit's boards are one unlit, vertex-coloured mesh built when the
-//! circuit is, so they cost one draw call and nothing per frame. The numbers
+//! The boards are part of the one trackside mesh (see [`super::trackside`]),
+//! so they cost no draw call of their own and nothing per frame. The numbers
 //! are geometry, three glyphs' worth of quads, which stay sharp at any distance
 //! without a texture. They are scenery only: nothing drives into them.
 
 use super::{
     Track, markers,
-    profile::{HALF_WIDTH, deep, paint},
+    profile::{HALF_WIDTH, deep},
+    trackside::{Builder, atlas::Cell},
 };
-use bevy::{
-    asset::RenderAssetUsages, light::NotShadowCaster, prelude::*,
-    render::render_resource::PrimitiveTopology,
-};
+use bevy::prelude::*;
 use std::f32::consts::FRAC_PI_2;
 
 /// Real-world board distances to Todora's. The circuits are drawn at a plan
@@ -37,13 +35,12 @@ const PANEL_HALF_HEIGHT: f32 = 0.15;
 const PANEL_HALF_DEPTH: f32 = 0.015;
 /// Clear air under the panel, on two posts.
 const POST_HEIGHT: f32 = 0.22;
-const POST_HALF: f32 = 0.018;
+const POST_HALF: f32 = 0.024;
 const POST_SPREAD: f32 = 0.17;
 /// How far the posts go into the ground, so a slope never shows a gap.
 const SINK: f32 = 0.08;
-/// Glyph height, and the numbers' offset off the face to stay in front of it.
+/// Glyph height.
 const GLYPH: f32 = 0.19;
-pub(super) const RAISED: f32 = 0.003;
 /// Centre to centre, the least a board may stand from a start/finish post.
 pub(super) const POST_ROOM: f32 = 0.7;
 /// Nothing of a board comes nearer than this to the kerb of any road.
@@ -56,9 +53,6 @@ const EDGE: (f32, f32, f32) = (0.25, 0.28, 0.27);
 const POST: (f32, f32, f32) = (0.42, 0.43, 0.43);
 const POST_SHADE: (f32, f32, f32) = (0.33, 0.34, 0.34);
 
-#[derive(Component)]
-pub(super) struct Boards;
-
 /// One board, before it is known to fit: the station it stands at, which of
 /// [`LABELS`] it carries, the verge it stands on and the corner it counts to.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -69,47 +63,11 @@ pub(super) struct Board {
     pub(super) entry: usize,
 }
 
-pub(super) fn rebuild(
-    mut commands: Commands,
-    track: Res<Track>,
-    old: Query<Entity, With<Boards>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut material: Local<Option<Handle<StandardMaterial>>>,
-) {
-    for entity in &old {
-        commands.entity(entity).despawn();
-    }
-    let material = material
-        .get_or_insert_with(|| {
-            materials.add(StandardMaterial {
-                unlit: true,
-                ..default()
-            })
-        })
-        .clone();
-    commands.spawn((
-        Boards,
-        Mesh3d(meshes.add(mesh(&track))),
-        MeshMaterial3d(material),
-        NotShadowCaster,
-    ));
-}
-
-/// Every board of a circuit that fits, and the start/finish posts, merged.
-fn mesh(track: &Track) -> Mesh {
-    let mut out = Builder::default();
+/// Every board of a circuit that fits, into the trackside mesh.
+pub(super) fn build(track: &Track, out: &mut Builder) {
     for board in placed(track) {
         out.board(track, &board);
     }
-    super::start::posts(track, &mut out);
-    Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::RENDER_WORLD,
-    )
-    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, out.positions)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, out.normals)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, out.colors)
 }
 
 /// The planned boards that stand clear of every road, off any bridge and away
@@ -152,6 +110,38 @@ pub(super) fn placed(track: &Track) -> Vec<Board> {
 /// all three, the farthest go, and the rest keep their distances.
 pub(super) fn plan(curvature: &[f32], step: f32) -> Vec<Board> {
     let n = curvature.len();
+    let mut out = Vec::new();
+    for corner in big_corners(curvature, step) {
+        for (label, metres) in LABELS.into_iter().enumerate() {
+            let back = (metres as f32 * BOARD_SCALE / step).round() as usize;
+            if back >= corner.straight {
+                break;
+            }
+            out.push(Board {
+                at: (corner.entry + n - back) % n,
+                label,
+                side: corner.outside,
+                entry: corner.entry,
+            });
+        }
+    }
+    out
+}
+
+/// A big corner: where it starts, how many stations it runs, which verge is
+/// its outside, and how many stations of straight lead up to it.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct BigCorner {
+    pub(super) entry: usize,
+    pub(super) length: usize,
+    pub(super) outside: f32,
+    pub(super) straight: usize,
+}
+
+/// Every corner (in the chevron plaques' sense) in which the road turns more
+/// than [`BIG_TURN`] one way within [`BIG_WITHIN`].
+pub(super) fn big_corners(curvature: &[f32], step: f32) -> Vec<BigCorner> {
+    let n = curvature.len();
     let corner = markers::corners_of(curvature);
     let window = (BIG_WITHIN / step).round() as usize;
     let mut out = Vec::new();
@@ -173,20 +163,13 @@ pub(super) fn plan(curvature: &[f32], step: f32) -> Vec<Board> {
         else {
             continue;
         };
-        let straight = (1..n).take_while(|&d| !corner[(entry + n - d) % n]).count();
-        for (label, metres) in LABELS.into_iter().enumerate() {
-            let back = (metres as f32 * BOARD_SCALE / step).round() as usize;
-            if back >= straight {
-                break;
-            }
-            out.push(Board {
-                at: (entry + n - back) % n,
-                label,
-                // Positive curvature turns right, so its outside is the left.
-                side: -turn.signum(),
-                entry,
-            });
-        }
+        out.push(BigCorner {
+            entry,
+            length,
+            // Positive curvature turns right, so its outside is the left.
+            outside: -turn.signum(),
+            straight: (1..n).take_while(|&d| !corner[(entry + n - d) % n]).count(),
+        });
     }
     out
 }
@@ -224,89 +207,7 @@ pub(super) fn footprint(track: &Track, board: &Board) -> Vec<Vec3> {
     points
 }
 
-#[derive(Default)]
-pub(super) struct Builder {
-    positions: Vec<[f32; 3]>,
-    normals: Vec<[f32; 3]>,
-    colors: Vec<[f32; 4]>,
-}
-
 impl Builder {
-    /// A flat quad, wound to face `outward`.
-    pub(super) fn quad(&mut self, corners: [Vec3; 4], outward: Vec3, color: (f32, f32, f32)) {
-        let [a, b, c, d] = corners;
-        let normal = (b - a).cross(c - a);
-        let (b, d) = if normal.dot(outward) < 0.0 {
-            (d, b)
-        } else {
-            (b, d)
-        };
-        let color = paint(color.0, color.1, color.2);
-        let normal = outward.normalize().to_array();
-        for corner in [a, b, c, a, c, d] {
-            self.positions.push(corner.to_array());
-            self.normals.push(normal);
-            self.colors.push(color);
-        }
-    }
-
-    /// An upright box from `bottom` to `top`, `x` across and `z` deep, with
-    /// no bottom face and, if `lid` is off, no top.
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn column(
-        &mut self,
-        base: Vec3,
-        bottom: f32,
-        top: f32,
-        x: Vec3,
-        z: Vec3,
-        faces: [(f32, f32, f32); 3],
-        lid: bool,
-    ) {
-        let at = |sx: f32, sz: f32, y: f32| {
-            let mut p = base + x * sx + z * sz;
-            p.y = y;
-            p
-        };
-        let [front, back, sides] = faces;
-        for (sz, colour) in [(1.0, front), (-1.0, back)] {
-            self.quad(
-                [
-                    at(-1.0, sz, bottom),
-                    at(1.0, sz, bottom),
-                    at(1.0, sz, top),
-                    at(-1.0, sz, top),
-                ],
-                z * sz,
-                colour,
-            );
-        }
-        for sx in [-1.0, 1.0] {
-            self.quad(
-                [
-                    at(sx, -1.0, bottom),
-                    at(sx, 1.0, bottom),
-                    at(sx, 1.0, top),
-                    at(sx, -1.0, top),
-                ],
-                x * sx,
-                sides,
-            );
-        }
-        if lid {
-            self.quad(
-                [
-                    at(-1.0, -1.0, top),
-                    at(1.0, -1.0, top),
-                    at(1.0, 1.0, top),
-                    at(-1.0, 1.0, top),
-                ],
-                Vec3::Y,
-                sides,
-            );
-        }
-    }
-
     fn board(&mut self, track: &Track, board: &Board) {
         let station = &track.ribbon.stations()[board.at];
         let (centre, normal, across) = frame(track, board);
@@ -328,36 +229,66 @@ impl Builder {
                 true,
             );
         }
-        self.column(
+        // The face is the number, painted into the atlas: one quad that
+        // stays sharp near and fades evenly far, with nothing laid over it.
+        self.open_column(
             centre,
             bottom,
             top,
             across * PANEL_HALF_WIDTH,
             normal * PANEL_HALF_DEPTH,
-            [FACE, FRAME, EDGE],
+            [None, Some(FRAME)],
+            EDGE,
             true,
         );
-        // The number, centred on the face.
-        let text = LABELS[board.label].to_string();
-        let width: f32 = text.chars().map(advance).sum::<f32>() - GAP;
-        let mut pen = -width * GLYPH / 2.0;
         let face = |x: f32, y: f32| {
-            let mut p = centre + across * x + normal * (PANEL_HALF_DEPTH + RAISED);
-            p.y = bottom + PANEL_HALF_HEIGHT + y;
+            let mut p = centre + across * x + normal * PANEL_HALF_DEPTH;
+            p.y = y;
             p
         };
-        for digit in text.chars() {
-            for &[x0, y0, x1, y1, x2, y2, x3, y3] in glyph(digit) {
-                let at = |x: f32, y: f32| face(pen + x * GLYPH, (y - 0.5) * GLYPH);
-                self.quad(
-                    [at(x0, y0), at(x1, y1), at(x2, y2), at(x3, y3)],
-                    normal,
-                    NUMBER,
-                );
-            }
-            pen += advance(digit) * GLYPH;
-        }
+        self.sign(
+            [
+                face(-PANEL_HALF_WIDTH, bottom),
+                face(PANEL_HALF_WIDTH, bottom),
+                face(PANEL_HALF_WIDTH, top),
+                face(-PANEL_HALF_WIDTH, top),
+            ],
+            normal,
+            Cell::Label(board.label),
+        );
     }
+}
+
+/// The colour at `(u, v)` across the face of the board carrying
+/// `LABELS[label]`, `v` up: its number, black and centred on white.
+pub(super) fn paint_label(label: usize, u: f32, v: f32) -> (f32, f32, f32) {
+    let x = (u - 0.5) * 2.0 * PANEL_HALF_WIDTH;
+    let y = (v - 0.5) * 2.0 * PANEL_HALF_HEIGHT;
+    let text = LABELS[label].to_string();
+    let width: f32 = text.chars().map(advance).sum::<f32>() - GAP;
+    let mut pen = -width * GLYPH / 2.0;
+    for digit in text.chars() {
+        let (gx, gy) = ((x - pen) / GLYPH, y / GLYPH + 0.5);
+        if glyph(digit).iter().any(|quad| inside(quad, gx, gy)) {
+            return NUMBER;
+        }
+        pen += advance(digit) * GLYPH;
+    }
+    FACE
+}
+
+/// Whether a point is inside a convex quad listed corner by corner, either
+/// way round.
+fn inside(&[x0, y0, x1, y1, x2, y2, x3, y3]: &[f32; 8], x: f32, y: f32) -> bool {
+    let corners = [(x0, y0), (x1, y1), (x2, y2), (x3, y3)];
+    let sides: Vec<f32> = (0..4)
+        .map(|i| {
+            let (ax, ay) = corners[i];
+            let (bx, by) = corners[(i + 1) % 4];
+            (bx - ax) * (y - ay) - (by - ay) * (x - ax)
+        })
+        .collect();
+    sides.iter().all(|&s| s >= 0.0) || sides.iter().all(|&s| s <= 0.0)
 }
 
 /// Space between glyphs, in glyph heights.
@@ -508,7 +439,7 @@ mod tests {
                 assert!(normal.dot(stations[board.at].tangent) < -0.9);
                 assert!(normal.dot(stations[board.at].right * board.side) < 0.0);
             }
-            let mesh = mesh(&track);
+            let [mesh, _] = crate::track::trackside::meshes_for(&track);
             let positions = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap();
             let normals = mesh.attribute(Mesh::ATTRIBUTE_NORMAL).unwrap();
             let (positions, normals) =

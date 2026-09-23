@@ -3,14 +3,14 @@
 //!
 //! The band is its own quad with a texture made once at startup and mipmapped
 //! in linear light like the surface textures, so it greys evenly with distance
-//! instead of shimmering. The posts are merged into the braking boards' mesh
-//! and cost no draw call of their own. Neither is anything the car touches.
+//! instead of shimmering. The posts are part of the trackside meshes and cost
+//! no draw call of their own. Neither is anything the car touches.
 
 use super::{
     Track,
-    boards::{self, Builder},
     profile::{HALF_WIDTH, STRIPE, TARMAC_HALF},
     textures,
+    trackside::{Builder, atlas::Cell},
 };
 use bevy::{
     asset::RenderAssetUsages,
@@ -39,12 +39,7 @@ const SINK: f32 = 0.08;
 const PANEL_HALF_WIDTH: f32 = 0.28;
 const PANEL_HALF_HEIGHT: f32 = 0.16;
 const PANEL_HALF_DEPTH: f32 = 0.012;
-/// Chequers on each panel face.
-const PANEL_ACROSS: usize = 4;
-const PANEL_DOWN: usize = 2;
 
-const WHITE: (f32, f32, f32) = (0.93, 0.93, 0.91);
-const BLACK: (f32, f32, f32) = (0.07, 0.07, 0.08);
 const POST: (f32, f32, f32) = (0.42, 0.43, 0.43);
 const POST_SHADE: (f32, f32, f32) = (0.33, 0.34, 0.34);
 const EDGE: (f32, f32, f32) = (0.25, 0.28, 0.27);
@@ -178,57 +173,53 @@ fn frame(track: &Track, side: f32) -> (Vec3, Vec3, Vec3) {
     (base, (-normal).cross(Vec3::Y).normalize(), normal)
 }
 
-/// Both posts and their panels, into the boards' mesh.
+/// Both posts and their panels, into the trackside meshes.
 pub(super) fn posts(track: &Track, out: &mut Builder) {
     for side in [-1.0, 1.0] {
         let (base, across, normal) = frame(track, side);
         let top = base.y + POST_HEIGHT;
+        let bottom = top - 2.0 * PANEL_HALF_HEIGHT;
+        // The post stops under the panel rather than showing through it.
         out.column(
             base,
             base.y - SINK,
-            top - PANEL_HALF_HEIGHT,
+            bottom,
             across * POST_HALF,
             normal * POST_HALF,
             [POST_SHADE, POST_SHADE, POST],
-            false,
+            true,
         );
-        let centre = top - PANEL_HALF_HEIGHT;
-        out.column(
+        out.open_column(
             base,
-            centre - PANEL_HALF_HEIGHT,
+            bottom,
             top,
             across * PANEL_HALF_WIDTH,
             normal * PANEL_HALF_DEPTH,
-            [EDGE, EDGE, EDGE],
+            [None, None],
+            EDGE,
             true,
         );
-        // Chequers on both faces, a hair proud of the panel.
+        // Both faces are chequers from the atlas, standing in for the
+        // panel's own.
         for facing in [1.0, -1.0] {
             let face = normal * facing;
-            for i in 0..PANEL_ACROSS {
-                for k in 0..PANEL_DOWN {
-                    let x0 =
-                        -PANEL_HALF_WIDTH + 2.0 * PANEL_HALF_WIDTH * i as f32 / PANEL_ACROSS as f32;
-                    let x1 = x0 + 2.0 * PANEL_HALF_WIDTH / PANEL_ACROSS as f32;
-                    let y1 = top - 2.0 * PANEL_HALF_HEIGHT * k as f32 / PANEL_DOWN as f32;
-                    let y0 = y1 - 2.0 * PANEL_HALF_HEIGHT / PANEL_DOWN as f32;
-                    let at = |x: f32, y: f32| {
-                        let mut p = base + across * x + face * (PANEL_HALF_DEPTH + boards::RAISED);
-                        p.y = y;
-                        p
-                    };
-                    let colour = if (i + k).is_multiple_of(2) {
-                        WHITE
-                    } else {
-                        BLACK
-                    };
-                    out.quad(
-                        [at(x0, y0), at(x1, y0), at(x1, y1), at(x0, y1)],
-                        face,
-                        colour,
-                    );
-                }
-            }
+            // Left to right as seen from this side.
+            let right = (-face).cross(Vec3::Y).normalize();
+            let at = |x: f32, y: f32| {
+                let mut p = base + right * x + face * PANEL_HALF_DEPTH;
+                p.y = y;
+                p
+            };
+            out.sign(
+                [
+                    at(-PANEL_HALF_WIDTH, bottom),
+                    at(PANEL_HALF_WIDTH, bottom),
+                    at(PANEL_HALF_WIDTH, top),
+                    at(-PANEL_HALF_WIDTH, top),
+                ],
+                face,
+                Cell::Chequer,
+            );
         }
     }
 }
@@ -236,7 +227,7 @@ pub(super) fn posts(track: &Track, out: &mut Builder) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::track::{circuits, markers};
+    use crate::track::{boards, circuits, markers};
 
     fn every_track() -> impl Iterator<Item = (&'static str, Track)> {
         circuits::all()

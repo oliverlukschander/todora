@@ -35,6 +35,7 @@ mod rubber;
 mod start;
 mod terrain;
 mod textures;
+mod trackside;
 
 use bevy::prelude::*;
 
@@ -246,7 +247,7 @@ impl Plugin for TrackPlugin {
                 Update,
                 (
                     markers::rebuild.run_if(resource_changed::<Track>),
-                    boards::rebuild.run_if(resource_changed::<Track>),
+                    trackside::rebuild.run_if(resource_changed::<Track>),
                     start::rebuild.run_if(resource_changed::<Track>),
                     markers::show,
                     textures::prepare,

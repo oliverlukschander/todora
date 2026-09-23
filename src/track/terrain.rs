@@ -310,6 +310,10 @@ impl Surface {
             max,
         }
     }
+    /// The rectangle the terrain fills, in plan.
+    pub fn bounds(&self) -> (Vec2, Vec2) {
+        (self.min, self.max)
+    }
     pub fn contains(&self, p: Vec2) -> bool {
         p.cmpge(self.min + Vec2::splat(0.5)).all() && p.cmple(self.max - Vec2::splat(0.5)).all()
     }
