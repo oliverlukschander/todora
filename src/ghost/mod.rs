@@ -33,6 +33,16 @@ pub(crate) struct Records {
     best: Vec<[Option<f32>; 3]>,
 }
 
+impl Ghost {
+    /// Your best lap on this circuit and mode, and the last lap that counted.
+    pub(crate) fn best_lap(&self) -> Option<&Recording> {
+        self.best.as_ref()
+    }
+    pub(crate) fn last_lap(&self) -> Option<&Recording> {
+        self.last.as_ref()
+    }
+}
+
 impl Records {
     /// Forget every saved lap, as a reset of all ghosts does.
     pub(super) fn clear(&mut self) {
@@ -131,8 +141,8 @@ struct Sample {
 }
 
 /// A lap as it was driven.
-#[derive(Default, Debug)]
-struct Recording {
+#[derive(Default, Debug, Clone)]
+pub(crate) struct Recording {
     samples: Vec<Sample>,
     full: bool,
 }
@@ -159,14 +169,14 @@ impl Recording {
     }
 
     /// How long the lap took.
-    fn duration(&self) -> f32 {
+    pub(crate) fn duration(&self) -> f32 {
         self.samples.last().map_or(0.0, |last| last.time)
     }
 
     /// Where the car was `time` seconds into the lap. Past the end it wraps to
     /// the start — the lap is a loop, and a ghost that has finished keeps
     /// going round, which is what lapping the slower car looks like.
-    fn pose_at(&self, time: f32) -> Option<(Vec3, Quat)> {
+    pub(crate) fn pose_at(&self, time: f32) -> Option<(Vec3, Quat)> {
         let (first, last) = (self.samples.first()?, self.samples.last()?);
         let duration = self.duration();
         if duration <= 0.0 {
@@ -216,6 +226,8 @@ pub(crate) struct Ghost {
     best: Option<Recording>,
     /// The lap being driven now.
     recording: Recording,
+    /// The last lap that counted, for the replay.
+    last: Option<Recording>,
     /// The translucent car.
     car: Entity,
     /// Where this circuit's best lap is kept between sessions. `None` until the
@@ -237,6 +249,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         delta: None,
         best: None,
         recording: Recording::default(),
+        last: None,
         car,
         // Settled on the first frame, along with the circuit's saved lap.
         saved: None,
@@ -308,6 +321,10 @@ fn finish(
         if let Ok(transform) = player.single() {
             recording.push(lap.time, 1.0, transform);
         }
+        // The last lap that counted, kept for the replay: one copy a lap.
+        if lap.valid && recording.samples.len() > 1 && !recording.full {
+            ghost.last = Some(recording.clone());
+        }
         if lap.best && lap.valid {
             ghost.best = (recording.samples.len() > 1 && !recording.full).then_some(recording);
             if let (Some(best), Some(saved)) = (&ghost.best, &ghost.saved) {
@@ -337,6 +354,7 @@ fn reset(
     let restarted = resets.read().next().is_some();
     if track.is_changed() || mode.is_changed() {
         ghost.saved = Saved::of(&track, *mode);
+        ghost.last = None;
         ghost.best = ghost.saved.as_ref().and_then(Saved::read);
         if let Some(best) = &ghost.best {
             timer.remember(best.duration());
@@ -449,6 +467,7 @@ mod tests {
         let best = lap_of(10);
         let expected = best.samples.clone();
         app.insert_resource(Ghost {
+            last: None,
             on: true,
             delta: None,
             best: Some(best),
@@ -478,6 +497,7 @@ mod tests {
         let pose = Transform::from_xyz(20.0, 1.0, 3.0);
         let player = app.world_mut().spawn((Player, pose)).id();
         app.insert_resource(Ghost {
+            last: None,
             on: true,
             delta: None,
             best: None,
@@ -520,6 +540,7 @@ mod tests {
             .add_systems(Update, finish);
         let player = app.world_mut().spawn((Player, Transform::IDENTITY)).id();
         app.insert_resource(Ghost {
+            last: None,
             on: true,
             delta: None,
             best: Some(lap_of(10)),
@@ -617,6 +638,7 @@ mod tests {
             .add_systems(Update, reset);
         let player = app.world_mut().spawn((Player, Transform::IDENTITY)).id();
         app.insert_resource(Ghost {
+            last: None,
             on: true,
             delta: None,
             best: None,

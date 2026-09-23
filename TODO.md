@@ -40,6 +40,7 @@ The approved plan, decisions and build order are in the
 - [x] Controller haptics for road, grip, GO, wall hits and a new best (2026-09-24).
 - [ ] Try rumble with a real pad on macOS; gilrs force feedback there is unverified.
 - [x] Fifty achievements with toasts and an Awards view (2026-09-24).
+- [x] Replay viewer with trackside, chase and bonnet cameras, and photo mode (2026-09-24).
 - [ ] Online leaderboards at todora.lukschander.com.
 
 ## Game Center multiplayer

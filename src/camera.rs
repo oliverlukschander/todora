@@ -117,8 +117,10 @@ fn bonnet(car: &Transform) -> (Vec3, Vec3) {
     (eye, eye + ahead * BONNET_LOOK - Vec3::Y * 0.4)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn follow(
     time: Res<Time>,
+    halt: Option<Res<crate::pause::Halt>>,
     mut resets: MessageReader<Reset>,
     track: Res<Track>,
     settings: Option<Res<crate::settings::Settings>>,
@@ -129,6 +131,10 @@ fn follow(
     // switch, somewhere else entirely. Chasing it there means a second of flying
     // across the circuit, or between two of them.
     let cut = resets.read().next().is_some();
+    // The replay moves the camera itself.
+    if halt.is_some_and(|h| *h == crate::pause::Halt::Replay) {
+        return;
+    }
     let Ok((state, car)) = cars.single() else {
         return;
     };

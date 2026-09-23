@@ -108,6 +108,7 @@ mod tests {
         let mut recording = Recording::default();
         recording.push(4.0, 0.2, &Transform::default());
         app.insert_resource(Ghost {
+            last: None,
             on: true,
             delta: Some(1.0),
             best: Some(Recording::default()),

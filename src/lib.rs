@@ -15,6 +15,7 @@ mod multiplayer;
 mod onboarding;
 mod online;
 mod pause;
+mod replay;
 mod settings;
 mod skid;
 mod sky;
@@ -116,6 +117,7 @@ impl Plugin for GamePlugin {
                 challenge::ChallengePlugin,
                 haptics::HapticsPlugin,
                 achievements::AchievementsPlugin,
+                replay::ReplayPlugin,
                 multiplayer::MultiplayerPlugin,
             ))
             .add_systems(Update, quit);

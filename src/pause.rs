@@ -48,6 +48,8 @@ pub(crate) enum Halt {
     Offer,
     /// The world leaderboard, opened with `L` or from the pause.
     Board,
+    /// Watching a lap again, or taking a picture of it.
+    Replay,
 }
 
 impl Halt {
@@ -113,18 +115,20 @@ enum Action {
     ResetCurrent,
     ResetAll,
     Board,
+    Replay,
     Guide,
     Settings,
     Quit,
 }
 impl Action {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 10] = [
         Self::Resume,
         Self::Music,
         Self::Effects,
         Self::ResetCurrent,
         Self::ResetAll,
         Self::Board,
+        Self::Replay,
         Self::Guide,
         Self::Settings,
         Self::Quit,
@@ -183,6 +187,7 @@ fn setup(mut commands: Commands) {
                         (Action::ResetCurrent, "Reset this ghost"),
                         (Action::ResetAll, "Reset all ghosts"),
                         (Action::Board, "World leaderboard / L"),
+                        (Action::Replay, "Replay and photo"),
                         (Action::Guide, "How to drive"),
                         (Action::Settings, "Settings"),
                         (Action::Quit, "Quit game"),
@@ -326,6 +331,9 @@ fn watch(
             }
             Action::Board => {
                 *halt = Halt::Board;
+            }
+            Action::Replay => {
+                *halt = Halt::Replay;
             }
             Action::Guide => {
                 *halt = Halt::Guide;
@@ -507,6 +515,8 @@ mod tests {
             }
             press(&mut app, KeyCode::ArrowDown, GamepadButton::DPadDown);
             assert_eq!(app.world().resource::<Selection>().action, Action::Board);
+            press(&mut app, KeyCode::ArrowDown, GamepadButton::DPadDown);
+            assert_eq!(app.world().resource::<Selection>().action, Action::Replay);
             press(&mut app, KeyCode::ArrowDown, GamepadButton::DPadDown);
             assert_eq!(app.world().resource::<Selection>().action, Action::Guide);
             press(&mut app, KeyCode::ArrowDown, GamepadButton::DPadDown);
