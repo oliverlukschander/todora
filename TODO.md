@@ -9,7 +9,9 @@ The approved plan, decisions and build order are in the
 - [x] Drive the multiplayer countdown through the same start lights (2026-09-23).
 - [x] Determinism spike: bit-identical replay on macOS arm64, Linux arm64 and
   Linux x86-64 for all 40 circuits (2026-09-23). Physics trig uses `libm`.
-- [ ] Sector colours, settings, lap summary, medals and onboarding.
+- [x] Pure lap judge (`LapTimer::judge`) shared with future replay checks (2026-09-23).
+- [x] Sector colours and sector bar (2026-09-23).
+- [ ] Settings, lap summary, medals and onboarding.
 - [ ] Online leaderboards at todora.lukschander.com.
 
 ## Game Center multiplayer

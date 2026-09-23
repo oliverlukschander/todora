@@ -4,6 +4,8 @@
 //! TODORA_ZOOM=2.4 sets the chase camera's zoom, which is also how far back
 //! speed stretches the boom. TODORA_BEHIND=15 holds the chase camera that many
 //! metres behind the car in plan, as the follow lag does at speed.
+//! TODORA_SPLITS=PGY colours the sector bar (Purple, Green, Yellow, Plain) and
+//! shows the last as the sector notice, 0.18 s off the best lap.
 //! TODORA_COUNTDOWN=ready|3|2|1|go freezes the start lights at that moment and,
 //! unless TODORA_PROGRESS is also given, leaves the car on the grid.
 use crate::{
@@ -96,6 +98,32 @@ fn place(
         timer.invalid = true;
         timer.current = 32.45;
     }
+    if let Ok(splits) = std::env::var("TODORA_SPLITS") {
+        use crate::lap::{SectorNotice, Split};
+        timer.splits = splits
+            .chars()
+            .map(|c| match c {
+                'P' => Split::Purple,
+                'G' => Split::Green,
+                'Y' => Split::Yellow,
+                _ => Split::Plain,
+            })
+            .collect();
+        if let Some(&split) = timer.splits.last() {
+            let delta = match split {
+                Split::Yellow => 0.18,
+                Split::Plain => 0.0,
+                _ => -0.18,
+            };
+            let number = timer.splits.len();
+            timer.announce(SectorNotice {
+                number,
+                time: 11.02,
+                delta: Some(delta),
+                split,
+            });
+        }
+    }
     if !capture.placed {
         return;
     }
@@ -149,8 +177,11 @@ fn capture(
 }
 
 fn freeze_countdown(capture: Res<Capture>, mut start: ResMut<crate::countdown::Start>) {
-    if let Some(at) = capture.countdown {
-        start.elapsed = at;
+    match capture.countdown {
+        Some(at) => start.elapsed = at,
+        // A car put down round the lap is past any countdown.
+        None if capture.placed => start.elapsed = f32::MAX,
+        None => {}
     }
 }
 

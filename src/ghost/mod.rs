@@ -233,8 +233,16 @@ fn finish(
     mut laps: MessageReader<LapFinished>,
     player: Query<&Transform, With<Player>>,
     mut ghost: ResMut<Ghost>,
+    mut timer: ResMut<LapTimer>,
 ) {
     for lap in laps.read() {
+        // Best sectors are saved once a lap, whichever lap they came in.
+        if timer.ever_improved {
+            timer.ever_improved = false;
+            if let Some(saved) = &ghost.saved {
+                saved.write_sectors(&timer.ever_sectors);
+            }
+        }
         let mut recording = std::mem::take(&mut ghost.recording);
         if let Ok(transform) = player.single() {
             recording.push(lap.time, 1.0, transform);
@@ -276,6 +284,12 @@ fn reset(
                 })
                 .collect();
         }
+        let count = track.sector_count();
+        timer.ever_sectors = ghost
+            .saved
+            .as_ref()
+            .and_then(|saved| saved.read_sectors(count))
+            .unwrap_or_else(|| timer.best_sectors.clone());
     } else if !restarted {
         return;
     }

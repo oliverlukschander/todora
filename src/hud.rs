@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::car::{Car, Mode, Setup, Spec};
 use crate::ghost::Ghost;
-use crate::lap::{LapTimer, format_time};
+use crate::lap::{LapTimer, Split, format_time};
 use crate::track::Track;
 
 pub(crate) const AMBER: Color = crate::ui::ACCENT;
@@ -12,6 +12,11 @@ pub(crate) const FRONT: Color = Color::srgba(0.045, 0.06, 0.073, 0.98);
 /// The delta to the ghost: green when this lap is ahead of it, red when behind.
 const AHEAD: Color = Color::srgb(0.38, 0.86, 0.42);
 const BEHIND: Color = Color::srgb(0.96, 0.32, 0.26);
+/// Sector colours: the fastest ever, faster than the best lap, slower.
+const PURPLE: Color = Color::srgb(0.74, 0.42, 1.0);
+const YELLOW: Color = Color::srgb(0.98, 0.83, 0.27);
+/// The most sectors any circuit is split into.
+const MOST_SECTORS: usize = 8;
 
 /// Arcade speedometer calibration for the miniature world.
 /// Shared by all cars and independent of model size; physics stays in m/s.
@@ -40,6 +45,7 @@ impl Plugin for HudPlugin {
                 draw_controls,
                 draw_clock,
                 draw_sector,
+                draw_sector_bar,
                 draw_g_meter,
                 draw_setup,
                 draw_car,
@@ -57,6 +63,9 @@ struct ClockReadout;
 struct SectorReadout;
 #[derive(Component)]
 struct InvalidReadout;
+/// One segment of the sector bar under the clock.
+#[derive(Component)]
+struct SectorSegment(usize);
 
 #[derive(Component)]
 struct Needle;
@@ -234,6 +243,25 @@ fn setup(mut commands: Commands) {
                 ClockReadout,
                 label(clock_text(&LapTimer::default()), 24.0, TEXT),
             ));
+            timing
+                .spawn(Node {
+                    column_gap: px(4),
+                    ..default()
+                })
+                .with_children(|bar| {
+                    for i in 0..MOST_SECTORS {
+                        bar.spawn((
+                            SectorSegment(i),
+                            Node {
+                                flex_grow: 1.0,
+                                height: px(8),
+                                border_radius: BorderRadius::all(px(4)),
+                                ..default()
+                            },
+                            BackgroundColor(crate::ui::LINE),
+                        ));
+                    }
+                });
             timing.spawn((InvalidReadout, label("", 18.0, BEHIND)));
             timing.spawn((SectorReadout, label("", 17.0, AMBER_DIM)));
             timing.spawn((DeltaReadout, label("GHOST  --", 20.0, AMBER_DIM)));
@@ -416,6 +444,43 @@ fn clock_text(timer: &LapTimer) -> String {
     )
 }
 
+/// What colour a sector went, or `None` for one with nothing to go by.
+fn split_colour(split: Split) -> Option<Color> {
+    match split {
+        Split::Purple => Some(PURPLE),
+        Split::Green => Some(AHEAD),
+        Split::Yellow => Some(YELLOW),
+        Split::Plain => None,
+    }
+}
+
+/// One segment per sector of this circuit, coloured as each is driven.
+fn draw_sector_bar(
+    timer: Res<LapTimer>,
+    track: Res<Track>,
+    mut segments: Query<(&SectorSegment, &mut Node, &mut BackgroundColor)>,
+) {
+    if !timer.is_changed() && !track.is_changed() {
+        return;
+    }
+    let count = track.sector_count();
+    for (segment, mut node, mut colour) in &mut segments {
+        let display = if segment.0 < count {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if node.display != display {
+            node.display = display;
+        }
+        let wanted = match timer.splits.get(segment.0) {
+            Some(split) => split_colour(*split).unwrap_or(crate::ui::TEXT),
+            None => crate::ui::LINE,
+        };
+        colour.set_if_neq(BackgroundColor(wanted));
+    }
+}
+
 fn draw_sector(
     timer: Res<LapTimer>,
     mut sectors: Query<(&mut Text, &mut TextColor), With<SectorReadout>>,
@@ -431,9 +496,7 @@ fn draw_sector(
                     Some(d) => format!("SECTOR {}   {d:+.2}", s.number),
                     None => format!("SECTOR {}   {}", s.number, format_time(s.time)),
                 };
-                color.0 = s
-                    .delta
-                    .map_or(AMBER_DIM, |d| if d <= 0.0 { AHEAD } else { BEHIND });
+                color.0 = split_colour(s.split).unwrap_or(AMBER_DIM);
             }
             None => text.0.clear(),
         }

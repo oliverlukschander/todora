@@ -41,6 +41,9 @@ pub(super) struct Saved {
     fingerprint: u64,
 }
 
+/// `TODORA SECTORS`, version 1: the best time ever driven in each sector.
+const SECTOR_MAGIC: [u8; 8] = *b"TODORAS1";
+
 impl Saved {
     /// Where this circuit's lap lives, or `None` on a machine that will not say
     /// where a game may keep things.
@@ -52,7 +55,30 @@ impl Saved {
     }
 
     pub(super) fn remove(&self) -> io::Result<()> {
-        remove_file(&self.path)
+        remove_file(&self.path)?;
+        remove_file(&self.path.with_extension("sectors"))
+    }
+
+    /// The best time ever driven in each of `count` sectors, if they were
+    /// saved for this circuit as it stands.
+    pub(super) fn read_sectors(&self, count: usize) -> Option<Vec<f32>> {
+        let bytes = fs::read(self.path.with_extension("sectors")).ok()?;
+        decode_sectors(&bytes, self.fingerprint, count)
+    }
+
+    /// Keep the best sectors. Tiny, and written the same careful way as a lap.
+    pub(super) fn write_sectors(&self, sectors: &[f32]) {
+        let path = self.path.with_extension("sectors");
+        let beside = path.with_extension("sectors-writing");
+        let written = fs::create_dir_all(path.parent().unwrap_or(&path))
+            .and_then(|()| fs::write(&beside, encode_sectors(sectors, self.fingerprint)))
+            .and_then(|()| fs::rename(&beside, &path));
+        if let Err(trouble) = written {
+            warn!(
+                "cannot save the best sectors to {}: {trouble}",
+                path.display()
+            );
+        }
     }
 
     /// The lap saved here, if there is one and it is still a lap of this circuit.
@@ -113,10 +139,42 @@ fn remove_all_in(folder: &Path) -> io::Result<()> {
     // Only the circuit/mode files owned by the game; leave other files alone.
     for circuit in crate::track::all_circuits() {
         for mode in Mode::ALL {
-            remove_file(&folder.join(filename(circuit.id, mode)))?;
+            let lap = folder.join(filename(circuit.id, mode));
+            remove_file(&lap)?;
+            remove_file(&lap.with_extension("sectors"))?;
         }
     }
     Ok(())
+}
+
+fn encode_sectors(sectors: &[f32], fingerprint: u64) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(20 + sectors.len() * 4);
+    bytes.extend_from_slice(&SECTOR_MAGIC);
+    bytes.extend_from_slice(&fingerprint.to_le_bytes());
+    bytes.extend_from_slice(&(sectors.len() as u32).to_le_bytes());
+    for sector in sectors {
+        bytes.extend_from_slice(&sector.to_le_bytes());
+    }
+    bytes
+}
+
+fn decode_sectors(bytes: &[u8], fingerprint: u64, count: usize) -> Option<Vec<f32>> {
+    if bytes.len() != 20 + count * 4 || bytes[..8] != SECTOR_MAGIC {
+        return None;
+    }
+    if u64::from_le_bytes(bytes[8..16].try_into().ok()?) != fingerprint
+        || u32::from_le_bytes(bytes[16..20].try_into().ok()?) as usize != count
+    {
+        return None;
+    }
+    let sectors: Vec<f32> = bytes[20..]
+        .chunks_exact(4)
+        .map(|four| f32::from_le_bytes(four.try_into().expect("four bytes make an f32")))
+        .collect();
+    sectors
+        .iter()
+        .all(|s| s.is_finite() && *s > 0.0)
+        .then_some(sectors)
 }
 
 /// Where this machine keeps what a game saves.
@@ -238,6 +296,18 @@ mod tests {
             );
         }
         lap
+    }
+
+    #[test]
+    fn best_sectors_round_trip_and_refuse_another_layout_or_count() {
+        let bytes = encode_sectors(&[9.5, 10.25, 11.0], 77);
+        assert_eq!(decode_sectors(&bytes, 77, 3), Some(vec![9.5, 10.25, 11.0]));
+        assert_eq!(decode_sectors(&bytes, 78, 3), None, "another layout");
+        assert_eq!(decode_sectors(&bytes, 77, 4), None, "another sector count");
+        assert_eq!(decode_sectors(&bytes[..19], 77, 3), None, "cut short");
+        let mut broken = bytes.clone();
+        broken[20..24].copy_from_slice(&f32::NAN.to_le_bytes());
+        assert_eq!(decode_sectors(&broken, 77, 3), None, "not a time");
     }
 
     #[test]

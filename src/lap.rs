@@ -69,6 +69,13 @@ pub struct LapTimer {
     pub completed: u32,
     pub invalid: bool,
     pub best_sectors: Vec<f32>,
+    /// The fastest each sector has ever been driven on a lap that was still
+    /// valid at the time, on this circuit and mode, whichever lap it was in.
+    pub ever_sectors: Vec<f32>,
+    /// Set when [`Self::ever_sectors`] improved, until someone saves it.
+    pub ever_improved: bool,
+    /// How each sector of this lap has gone so far.
+    pub splits: Vec<Split>,
     pub sector_notice: Option<SectorNotice>,
     sectors: Vec<f32>,
     sector_started: f32,
@@ -86,6 +93,20 @@ pub struct SectorNotice {
     pub number: usize,
     pub time: f32,
     pub delta: Option<f32>,
+    pub split: Split,
+}
+
+/// How a sector went, in the colours timing screens use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Split {
+    /// Faster than that sector has ever been driven.
+    Purple,
+    /// Faster than the same sector of the best lap.
+    Green,
+    /// Slower than the best lap there.
+    Yellow,
+    /// Nothing to compare with yet, or a lap that is already invalid.
+    Plain,
 }
 
 impl LapTimer {
@@ -115,15 +136,47 @@ impl LapTimer {
         self.previous_time = 0.0;
         self.sector_notice = None;
         self.notice_left = 0.0;
+        self.splits.clear();
+    }
+
+    /// Show a sector notice for the usual few seconds.
+    #[cfg(feature = "visual-check")]
+    pub(crate) fn announce(&mut self, notice: SectorNotice) {
+        self.sector_notice = Some(notice);
+        self.notice_left = 3.5;
     }
 
     fn sector(&mut self, time: f32) {
         let duration = time - self.sector_started;
         let index = self.sectors.len();
+        let best = self.best_sectors.get(index).copied();
+        let ever = self.ever_sectors.get(index).copied().or(best);
+        let split = if self.invalid {
+            Split::Plain
+        } else if ever.is_some_and(|ever| duration < ever) {
+            Split::Purple
+        } else if best.is_some_and(|best| duration <= best) {
+            Split::Green
+        } else if best.is_some() {
+            Split::Yellow
+        } else {
+            Split::Plain
+        };
+        if !self.invalid && ever.is_none_or(|ever| duration < ever) {
+            if index < self.ever_sectors.len() {
+                self.ever_sectors[index] = duration;
+                self.ever_improved = true;
+            } else if index == self.ever_sectors.len() {
+                self.ever_sectors.push(duration);
+                self.ever_improved = true;
+            }
+        }
+        self.splits.push(split);
         self.sector_notice = Some(SectorNotice {
             number: index + 1,
             time: duration,
-            delta: self.best_sectors.get(index).map(|best| duration - best),
+            delta: best.map(|best| duration - best),
+            split,
         });
         self.notice_left = 3.5;
         self.sectors.push(duration);
@@ -161,6 +214,9 @@ impl Default for LapTimer {
             completed: 0,
             invalid: false,
             best_sectors: Vec::new(),
+            ever_sectors: Vec::new(),
+            ever_improved: false,
+            splits: Vec::new(),
             sector_notice: None,
             sectors: Vec::new(),
             sector_started: 0.0,
@@ -293,6 +349,7 @@ impl LapTimer {
                 self.invalid = !legal;
                 self.finish_runup = 0.0;
                 self.sectors.clear();
+                self.splits.clear();
                 self.sector_started = 0.0;
             }
         }
@@ -713,6 +770,59 @@ mod tests {
         assert_eq!(laps.len(), 1);
         assert!(laps[0].valid && laps[0].best);
         assert_eq!(timer.best_sectors.len(), track.sector_count());
+    }
+
+    #[test]
+    fn sectors_are_purple_green_or_yellow_against_the_ever_best_and_the_best_lap() {
+        let mut timer = LapTimer {
+            best_sectors: vec![10.0, 10.0, 10.0],
+            ever_sectors: vec![9.0, 9.5, 9.8],
+            ..default()
+        };
+        for (end, want) in [
+            (8.5, Split::Purple),
+            (18.5, Split::Green),
+            (29.0, Split::Yellow),
+        ] {
+            timer.sector(end);
+            timer.sector_started = end;
+            assert_eq!(timer.sector_notice.unwrap().split, want);
+        }
+        assert_eq!(
+            timer.splits,
+            vec![Split::Purple, Split::Green, Split::Yellow]
+        );
+        assert_eq!(timer.ever_sectors, vec![8.5, 9.5, 9.8]);
+        assert!(timer.ever_improved);
+        timer.abandon();
+        assert!(timer.splits.is_empty());
+        assert_eq!(
+            timer.ever_sectors,
+            vec![8.5, 9.5, 9.8],
+            "a restart forgot the best sectors"
+        );
+    }
+
+    #[test]
+    fn an_invalid_lap_never_sets_a_best_sector() {
+        let mut timer = LapTimer {
+            best_sectors: vec![10.0],
+            ever_sectors: vec![9.0],
+            invalid: true,
+            ..default()
+        };
+        timer.sector(5.0);
+        assert_eq!(timer.sector_notice.unwrap().split, Split::Plain);
+        assert_eq!(timer.ever_sectors, vec![9.0]);
+        assert!(!timer.ever_improved);
+    }
+
+    #[test]
+    fn a_first_lap_has_nothing_to_colour_against_but_starts_the_record() {
+        let mut timer = LapTimer::default();
+        timer.sector(12.0);
+        assert_eq!(timer.sector_notice.unwrap().split, Split::Plain);
+        assert_eq!(timer.ever_sectors, vec![12.0]);
     }
 
     #[test]
