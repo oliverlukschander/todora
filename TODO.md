@@ -23,6 +23,7 @@ The approved plan, decisions and build order are in the
   scope): after `cargo test --locked --all-targets` in `.github/workflows/linux.yml`,
   run `cargo clippy --locked -p todora-server --all-targets -- -D warnings` and
   `cargo test --locked -p todora-server`.
+- [x] Game client: opt-in, signed uploads with backoff, Online settings tab, leaderboard overlay with world/country/rivals (2026-09-24).
 - [ ] Online leaderboards at todora.lukschander.com.
 
 ## Game Center multiplayer

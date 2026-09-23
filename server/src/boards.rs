@@ -6,7 +6,8 @@
 //! | GET | `/v1/runs/{id}` | a lap's run bytes, to race as a ghost |
 //!
 //! `?country=AT` and `?car=clubman` narrow a board; `?season=` reads an
-//! earlier physics version's board. Every read is a few indexed queries.
+//! earlier physics version's board; `?rivals=id,id` adds up to five pinned
+//! players' places. Every read is a few indexed queries.
 
 use axum::{
     Json, Router,
@@ -37,7 +38,11 @@ pub struct Asked {
     country: Option<String>,
     car: Option<String>,
     season: Option<u32>,
+    rivals: Option<String>,
 }
+
+/// The most rivals one board read looks up.
+const RIVALS: usize = 5;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct Standing {
@@ -50,6 +55,9 @@ pub struct Standing {
     /// and is on the board.
     pub around: Vec<Place>,
     pub you: Option<Place>,
+    /// Pinned rivals who are on the board, fastest first.
+    #[serde(default)]
+    pub rivals: Vec<Place>,
 }
 
 async fn board(
@@ -86,6 +94,13 @@ async fn board(
         around = db::places(&db, &board, first, AROUND * 2 + 1).map_err(internal)?;
         you = around.iter().find(|p| p.player == *player).cloned();
     }
+    let mut rivals = Vec::new();
+    for rival in asked.rivals.iter().flat_map(|r| r.split(',')).take(RIVALS) {
+        if let Some(rank) = db::rank_of(&db, &board, rival).map_err(internal)? {
+            rivals.extend(db::places(&db, &board, rank - 1, 1).map_err(internal)?);
+        }
+    }
+    rivals.sort_by_key(|p| p.rank);
     Ok(Json(Standing {
         circuit,
         mode,
@@ -94,6 +109,7 @@ async fn board(
         top,
         around,
         you,
+        rivals,
     }))
 }
 
@@ -181,6 +197,21 @@ mod tests {
         assert_eq!(around[0]["rank"], 16);
         assert_eq!(board["you"]["rank"], 21);
         assert_eq!(board["you"]["player"], players[20]);
+    }
+
+    #[tokio::test]
+    async fn pinned_rivals_come_back_wherever_they_are() {
+        let (app, state) = app();
+        let players = fill(&state, 30);
+        let asked = format!(
+            "/v1/boards/monza/regular?rivals={},{},nobody",
+            players[25], players[3]
+        );
+        let (_, board) = send(&app, get(&asked)).await;
+        let rivals = board["rivals"].as_array().unwrap();
+        assert_eq!(rivals.len(), 2);
+        assert_eq!(rivals[0]["rank"], 4);
+        assert_eq!(rivals[1]["rank"], 26);
     }
 
     #[tokio::test]

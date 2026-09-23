@@ -5661,8 +5661,11 @@ checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 name = "todora"
 version = "0.11.0"
 dependencies = [
+ "base64",
  "bevy",
  "cc",
+ "ed25519-dalek",
+ "getrandom 0.3.4",
  "libm",
  "lyon_tessellation",
  "rodio",
@@ -5940,6 +5943,8 @@ dependencies = [
  "once_cell",
  "rustls",
  "rustls-pki-types",
+ "serde",
+ "serde_json",
  "url",
  "webpki-roots 0.26.11",
 ]

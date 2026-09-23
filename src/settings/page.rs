@@ -19,10 +19,17 @@ pub(crate) enum Tab {
     Display,
     Hud,
     Controls,
+    Online,
 }
 
 impl Tab {
-    const ALL: [Self; 4] = [Self::Audio, Self::Display, Self::Hud, Self::Controls];
+    const ALL: [Self; 5] = [
+        Self::Audio,
+        Self::Display,
+        Self::Hud,
+        Self::Controls,
+        Self::Online,
+    ];
 
     fn name(self) -> &'static str {
         match self {
@@ -30,6 +37,7 @@ impl Tab {
             Self::Display => "Display",
             Self::Hud => "HUD",
             Self::Controls => "Controls",
+            Self::Online => "Online",
         }
     }
 
@@ -50,6 +58,7 @@ impl Tab {
             ],
             Self::Hud => &[Units, Minimap, GMeter, Countdown],
             Self::Controls => &[Steering, Deadzone, Rumble],
+            Self::Online => &[Online, Name, Country, Pending, Forget],
         }
     }
 }
@@ -77,7 +86,18 @@ pub(crate) enum Row {
     Steering,
     Deadzone,
     Rumble,
+    Online,
+    Name,
+    Country,
+    Pending,
+    Forget,
 }
+
+/// Countries offered on the page, as two-letter codes; empty is none.
+pub(crate) const COUNTRIES: [&str; 24] = [
+    "", "AT", "DE", "CH", "GB", "IE", "FR", "IT", "ES", "PT", "NL", "BE", "DK", "SE", "NO", "FI",
+    "PL", "CZ", "HU", "US", "CA", "BR", "JP", "AU",
+];
 
 /// The most rows any tab has; that many row nodes are built once.
 const ROWS: usize = 9;
@@ -126,6 +146,11 @@ impl Row {
             Self::Steering => "Steering sensitivity",
             Self::Deadzone => "Stick dead zone",
             Self::Rumble => "Rumble",
+            Self::Online => "World leaderboards",
+            Self::Name => "Name  (type, or ← → for ideas)",
+            Self::Country => "Country",
+            Self::Pending => "Laps waiting to upload",
+            Self::Forget => "Delete my online data",
         }
     }
 
@@ -163,6 +188,17 @@ impl Row {
             Self::Steering => percent(s.steering),
             Self::Deadzone => percent(s.deadzone),
             Self::Rumble => on_off(s.rumble),
+            Self::Online if s.online && !s.online_note.is_empty() => s.online_note.clone(),
+            Self::Online => on_off(s.online),
+            Self::Name if s.name.is_empty() => "—".into(),
+            Self::Name => s.name.clone(),
+            Self::Country if s.country.is_empty() => "None".into(),
+            Self::Country => s.country.clone(),
+            Self::Pending => s.pending.to_string(),
+            Self::Forget => match s.forget_presses {
+                0 => "Press to delete".into(),
+                _ => "Press again to delete everything".into(),
+            },
         }
     }
 
@@ -195,6 +231,29 @@ impl Row {
             Self::Steering => s.steering = nudge(s.steering, dir, 0.1, 0.5, 1.5),
             Self::Deadzone => s.deadzone = nudge(s.deadzone, dir, 0.02, 0.02, 0.4),
             Self::Rumble => s.rumble = !s.rumble,
+            Self::Online => {
+                s.online = !s.online;
+                s.online_asked = true;
+                if s.name.is_empty() {
+                    s.name = crate::online::suggest_name(0);
+                }
+            }
+            Self::Name => {
+                let at = crate::online::NAMES
+                    .iter()
+                    .position(|n| s.name.starts_with(n))
+                    .unwrap_or(0) as i32;
+                s.name = crate::online::suggest_name(
+                    (at + dir).rem_euclid(crate::online::NAMES.len() as i32) as usize,
+                );
+            }
+            Self::Country => {
+                let code = COUNTRIES.iter().position(|c| *c == s.country).unwrap_or(0) as i32;
+                s.country =
+                    COUNTRIES[(code + dir).rem_euclid(COUNTRIES.len() as i32) as usize].into();
+            }
+            Self::Pending => {}
+            Self::Forget => s.forget_presses = s.forget_presses.saturating_add(1).min(2),
         }
     }
 }
@@ -345,8 +404,10 @@ fn drive(
     mut settings: ResMut<Settings>,
     rows: Query<(&RowLine, Ref<Interaction>)>,
     tabs: Query<(&TabLabel, Ref<Interaction>)>,
+    mut typed: MessageReader<bevy::input::keyboard::KeyboardInput>,
 ) {
     if *halt != Halt::Settings {
+        typed.clear();
         return;
     }
     // The press that opened the page is not also a press on its first row.
@@ -355,12 +416,20 @@ fn drive(
         return;
     }
     let pad = |button| pads.iter().any(|pad| pad.just_pressed(button));
+    // On the name row the keyboard types; Q and E are letters there.
+    let naming = page.row() == Row::Name;
+    for key in typed.read() {
+        if naming && key.state.is_pressed() {
+            type_into(&mut settings.name, &key.logical_key);
+        }
+    }
     if keys.just_pressed(KeyCode::Escape) || pad(GamepadButton::East) || pad(GamepadButton::Start) {
         *halt = Halt::Pause;
         return;
     }
-    let tab_step = i32::from(keys.just_pressed(KeyCode::KeyE) || pad(GamepadButton::RightTrigger))
-        - i32::from(keys.just_pressed(KeyCode::KeyQ) || pad(GamepadButton::LeftTrigger));
+    let key = |code| !naming && keys.just_pressed(code);
+    let tab_step = i32::from(key(KeyCode::KeyE) || pad(GamepadButton::RightTrigger))
+        - i32::from(key(KeyCode::KeyQ) || pad(GamepadButton::LeftTrigger));
     let mut clicked_tab = None;
     for (tab, interaction) in &tabs {
         if interaction.is_changed() && *interaction == Interaction::Pressed {
@@ -392,6 +461,27 @@ fn drive(
     if dir != 0 {
         let row = page.row();
         row.change(&mut settings, dir);
+    }
+}
+
+/// A key pressed on the name row: a letter, digit or allowed mark joins the
+/// name (up to 16), Backspace takes one off.
+fn type_into(name: &mut String, key: &bevy::input::keyboard::Key) {
+    use bevy::input::keyboard::Key;
+    match key {
+        Key::Backspace => {
+            name.pop();
+        }
+        Key::Character(text) => {
+            for c in text.chars() {
+                let allowed = c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.');
+                if allowed && name.chars().count() < 16 {
+                    name.push(c);
+                }
+            }
+        }
+        Key::Space if name.chars().count() < 16 => name.push(' '),
+        _ => {}
     }
 }
 
@@ -476,6 +566,9 @@ mod tests {
             );
             for row in tab.rows() {
                 let mut settings = Settings::default();
+                if *row == Row::Pending {
+                    continue;
+                }
                 let before = row.value(&settings);
                 let mut up = settings.clone();
                 row.change(&mut up, 1);
@@ -491,6 +584,10 @@ mod tests {
                     row.change(&mut settings, -1);
                 }
                 let text = settings.text();
+                // What the page shows but the file never keeps.
+                settings.forget_presses = 0;
+                settings.pending = 0;
+                settings.online_note.clear();
                 assert_eq!(Settings::parse(&text), settings, "{row:?} left the range");
             }
         }
@@ -514,6 +611,7 @@ mod tests {
             .init_resource::<Settings>()
             .insert_resource(Halt::Pause)
             .init_resource::<Page>()
+            .add_message::<bevy::input::keyboard::KeyboardInput>()
             .add_systems(Update, drive);
         app.update();
         app
@@ -555,6 +653,22 @@ mod tests {
         tap(&mut app, KeyCode::ArrowRight);
         tap(&mut app, KeyCode::Escape);
         assert_eq!(*app.world().resource::<Halt>(), Halt::Pause);
+    }
+
+    #[test]
+    fn a_name_is_typed_with_the_rules_the_boards_keep() {
+        use bevy::input::keyboard::Key;
+        let mut name = String::new();
+        for text in ["A", "m", "b", "<", "3", "r"] {
+            type_into(&mut name, &Key::Character(text.into()));
+        }
+        type_into(&mut name, &Key::Space);
+        type_into(&mut name, &Key::Backspace);
+        assert_eq!(name, "Amb3r");
+        for _ in 0..30 {
+            type_into(&mut name, &Key::Character("x".into()));
+        }
+        assert_eq!(name.chars().count(), 16);
     }
 
     #[test]

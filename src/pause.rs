@@ -44,6 +44,10 @@ pub(crate) enum Halt {
     Settings,
     /// The how-to-drive cards, opened from the pause; they go back to it.
     Guide,
+    /// The one-time offer to go online, shown while the car waits on the grid.
+    Offer,
+    /// The world leaderboard, opened with `L` or from the pause.
+    Board,
 }
 
 impl Halt {
@@ -108,17 +112,19 @@ enum Action {
     Effects,
     ResetCurrent,
     ResetAll,
+    Board,
     Guide,
     Settings,
     Quit,
 }
 impl Action {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::Resume,
         Self::Music,
         Self::Effects,
         Self::ResetCurrent,
         Self::ResetAll,
+        Self::Board,
         Self::Guide,
         Self::Settings,
         Self::Quit,
@@ -157,7 +163,7 @@ fn setup(mut commands: Commands) {
                         border: UiRect::all(px(1)),
                         border_radius: BorderRadius::all(px(16)),
                         flex_direction: FlexDirection::Column,
-                        row_gap: px(16),
+                        row_gap: px(11),
                         ..default()
                     },
                     BackgroundColor(FRONT),
@@ -176,6 +182,7 @@ fn setup(mut commands: Commands) {
                         (Action::Effects, "Sound effects / F8"),
                         (Action::ResetCurrent, "Reset this ghost"),
                         (Action::ResetAll, "Reset all ghosts"),
+                        (Action::Board, "World leaderboard / L"),
                         (Action::Guide, "How to drive"),
                         (Action::Settings, "Settings"),
                         (Action::Quit, "Quit game"),
@@ -184,7 +191,7 @@ fn setup(mut commands: Commands) {
                             Button,
                             action,
                             Node {
-                                padding: UiRect::all(px(12)),
+                                padding: UiRect::axes(px(12), px(9)),
                                 border: UiRect::all(px(2)),
                                 border_radius: BorderRadius::all(px(8)),
                                 justify_content: JustifyContent::Center,
@@ -316,6 +323,9 @@ fn watch(
             }
             Action::ResetAll => {
                 resets.write(ResetRequest(Some(ResetGhosts::All)));
+            }
+            Action::Board => {
+                *halt = Halt::Board;
             }
             Action::Guide => {
                 *halt = Halt::Guide;
@@ -496,6 +506,8 @@ mod tests {
                 }
             }
             press(&mut app, KeyCode::ArrowDown, GamepadButton::DPadDown);
+            assert_eq!(app.world().resource::<Selection>().action, Action::Board);
+            press(&mut app, KeyCode::ArrowDown, GamepadButton::DPadDown);
             assert_eq!(app.world().resource::<Selection>().action, Action::Guide);
             press(&mut app, KeyCode::ArrowDown, GamepadButton::DPadDown);
             assert_eq!(app.world().resource::<Selection>().action, Action::Settings);
@@ -512,7 +524,7 @@ mod tests {
         tap(&mut app, KeyCode::Escape);
         tap(&mut app, KeyCode::ArrowUp);
         assert_eq!(app.world().resource::<Selection>().action, Action::Resume);
-        for _ in 0..10 {
+        for _ in 0..12 {
             tap(&mut app, KeyCode::ArrowDown);
         }
         assert_eq!(app.world().resource::<Selection>().action, Action::Quit);

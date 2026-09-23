@@ -147,6 +147,7 @@ pub(crate) struct Run {
 }
 
 impl Run {
+    #[cfg(test)]
     pub(crate) fn seconds(&self) -> f32 {
         self.steps as f32 / 240.0
     }

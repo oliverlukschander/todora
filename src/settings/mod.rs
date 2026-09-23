@@ -93,6 +93,26 @@ pub(crate) struct Settings {
     pub onboarding_done: bool,
     /// The one-time hint that Beginner mode exists has been shown.
     pub beginner_hint_shown: bool,
+    // Online.
+    /// Laps go to the world boards.
+    pub online: bool,
+    /// The player has been asked whether to go online, whatever they said.
+    pub online_asked: bool,
+    /// The name on the boards.
+    pub name: String,
+    /// Two letters, or empty for none.
+    pub country: String,
+    /// Up to five pinned rivals' player ids.
+    pub rivals: Vec<String>,
+    /// Laps waiting to be sent; shown on the page, not saved.
+    #[serde(skip)]
+    pub pending: usize,
+    /// What the server last said about this player, for the page; not saved.
+    #[serde(skip)]
+    pub online_note: String,
+    /// Presses on "Delete my online data": the second one deletes.
+    #[serde(skip)]
+    pub forget_presses: u8,
     pub circuit: String,
     pub car: String,
     pub setup: String,
@@ -126,6 +146,14 @@ impl Default for Settings {
             ghost: true,
             onboarding_done: false,
             beginner_hint_shown: false,
+            online: false,
+            online_asked: false,
+            name: String::new(),
+            country: String::new(),
+            rivals: Vec::new(),
+            pending: 0,
+            online_note: String::new(),
+            forget_presses: 0,
             circuit: String::new(),
             car: String::new(),
             setup: String::new(),

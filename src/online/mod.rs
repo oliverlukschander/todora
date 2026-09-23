@@ -8,12 +8,11 @@
 //! they have; see `client`. Recording is a push of four numbers per physics
 //! step into a list reserved once per lap.
 
-// Decoding and replaying are for the server and for downloaded ghosts; until
-// the client lands, only the tests call them.
-#[cfg_attr(not(test), allow(dead_code))]
+mod board;
+pub(crate) mod client;
 pub(crate) mod replay;
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) mod run;
+mod ui;
 
 use bevy::prelude::*;
 
@@ -27,8 +26,52 @@ pub struct OnlinePlugin;
 impl Plugin for OnlinePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Recorder>()
+            .add_systems(Startup, start_client)
             .add_systems(FixedUpdate, record.after(LapSet));
+        ui::plugin(app);
+        board::plugin(app);
     }
+}
+
+/// Start the worker that talks to the server, unless this is a visual check,
+/// which must not touch the network or the player's outbox.
+fn start_client(mut commands: Commands, read_only: Option<Res<crate::settings::ReadOnly>>) {
+    if read_only.is_some() {
+        return;
+    }
+    let server = std::env::var("TODORA_BOARD_URL").unwrap_or_else(|_| client::SERVER.into());
+    commands.insert_resource(client::Client::start(server, crate::settings::data_dir()));
+}
+
+/// Adjectives and birds, for a name that is nobody's until someone picks it.
+pub(crate) const NAMES: [&str; 16] = [
+    "Amber Falcon",
+    "Swift Heron",
+    "Quiet Kestrel",
+    "Late Magpie",
+    "Blue Osprey",
+    "Red Merlin",
+    "Grey Wren",
+    "Brave Swallow",
+    "Calm Harrier",
+    "Keen Plover",
+    "Bold Curlew",
+    "Warm Lapwing",
+    "Neat Sparrow",
+    "Wild Dunlin",
+    "Deep Tern",
+    "Bright Avocet",
+];
+
+/// A name to suggest: one of [`NAMES`] and two digits.
+pub(crate) fn suggest_name(at: usize) -> String {
+    format!("{} {:02}", NAMES[at % NAMES.len()], random_index() % 100)
+}
+
+pub(crate) fn random_index() -> usize {
+    let mut bytes = [0u8; 8];
+    let _ = getrandom::fill(&mut bytes);
+    usize::from_le_bytes(bytes)
 }
 
 /// The lap being recorded.
@@ -101,6 +144,7 @@ fn record(
     setup: Res<Setup>,
     session: Option<Res<crate::multiplayer::Session>>,
     read_only: Option<Res<crate::settings::ReadOnly>>,
+    client: Option<Res<client::Client>>,
     players: Query<(&Transform, &Car, &Controls), With<Player>>,
     mut recorder: ResMut<Recorder>,
 ) {
@@ -138,7 +182,16 @@ fn record(
         entry: finished.entry,
         inputs: finished.inputs,
     };
-    outbox::keep(run);
+    match client {
+        Some(client) => {
+            let bytes = run.encode();
+            client.ask(client::Ask::Keep {
+                name: outbox::name(&run, &bytes),
+                bytes,
+            });
+        }
+        None => outbox::keep(run),
+    }
 }
 
 /// The plain AI drives from the grid through the run-up and `count` laps,
