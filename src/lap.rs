@@ -76,6 +76,13 @@ pub struct LapTimer {
     pub ever_improved: bool,
     /// How each sector of this lap has gone so far.
     pub splits: Vec<Split>,
+    /// Why this lap stopped counting, the first time it did.
+    pub why: Option<Why>,
+    /// The last lap finished, for the summary card.
+    pub report: Option<LapReport>,
+    top_speed: f32,
+    /// The slowest the car went this lap, and how far round it was then.
+    slowest: Option<(f32, f32)>,
     pub sector_notice: Option<SectorNotice>,
     sectors: Vec<f32>,
     sector_started: f32,
@@ -94,6 +101,37 @@ pub struct SectorNotice {
     pub time: f32,
     pub delta: Option<f32>,
     pub split: Split,
+}
+
+/// What made a lap stop counting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Why {
+    /// All four wheels left the asphalt and kerbs, in this sector.
+    OffTrack { sector: usize },
+    /// The car was fetched back to the road, in this sector.
+    Rescued { sector: usize },
+    /// The game was paused during a shared-practice session.
+    Paused,
+}
+
+/// Everything about one finished lap the summary card shows.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LapReport {
+    /// Laps finished this session, this one included.
+    pub number: u32,
+    pub time: f32,
+    pub valid: bool,
+    /// A new best lap.
+    pub best: bool,
+    /// The best lap before this one, if there was one.
+    pub previous_best: Option<f32>,
+    pub sectors: Vec<f32>,
+    pub splits: Vec<Split>,
+    pub why: Option<Why>,
+    /// Metres a second.
+    pub top_speed: f32,
+    /// The slowest point of the lap: speed in metres a second, and the sector.
+    pub slowest: Option<(f32, usize)>,
 }
 
 /// How a sector went, in the colours timing screens use.
@@ -137,6 +175,16 @@ impl LapTimer {
         self.sector_notice = None;
         self.notice_left = 0.0;
         self.splits.clear();
+        self.why = None;
+        self.top_speed = 0.0;
+        self.slowest = None;
+    }
+
+    /// The lap in progress no longer counts, and this is why. The first reason
+    /// is the one kept: it is where the lap was lost.
+    pub(crate) fn invalidate(&mut self, why: Why) {
+        self.invalid = true;
+        self.why.get_or_insert(why);
     }
 
     /// Show a sector notice for the usual few seconds.
@@ -217,6 +265,10 @@ impl Default for LapTimer {
             ever_sectors: Vec::new(),
             ever_improved: false,
             splits: Vec::new(),
+            why: None,
+            report: None,
+            top_speed: 0.0,
+            slowest: None,
             sector_notice: None,
             sectors: Vec::new(),
             sector_started: 0.0,
@@ -261,6 +313,8 @@ pub(crate) struct Step {
     pub length: f32,
     /// How many sectors the lap is split into.
     pub sectors: usize,
+    /// Metres a second, for the summary's top speed and slowest corner.
+    pub speed: f32,
 }
 
 impl LapTimer {
@@ -280,9 +334,19 @@ impl LapTimer {
             progress,
             length,
             sectors,
+            speed,
         } = step;
-        if self.running && (!legal || recovered) {
-            self.invalid = true;
+        if self.running {
+            let sector = self.sectors.len() + 1;
+            if recovered {
+                self.invalidate(Why::Rescued { sector });
+            } else if !legal {
+                self.invalidate(Why::OffTrack { sector });
+            }
+            self.top_speed = self.top_speed.max(speed);
+            if self.slowest.is_none_or(|(slowest, _)| speed < slowest) {
+                self.slowest = Some((speed, self.net_progress));
+            }
         }
         let before = self.net_progress;
         if let Some(previous) = self.prev_progress {
@@ -318,6 +382,9 @@ impl LapTimer {
                 self.current = 0.0;
                 self.net_progress = progress;
                 self.invalid = false;
+                self.why = None;
+                self.top_speed = speed;
+                self.slowest = None;
                 self.finish_runup = 0.0;
             } else if self.running
                 && (self.net_progress > 0.95 || (self.invalid && self.finish_runup > 5.0))
@@ -336,6 +403,22 @@ impl LapTimer {
                     best,
                     valid: !self.invalid,
                 });
+                let start = self.net_progress - 1.0;
+                self.report = Some(LapReport {
+                    number: self.completed + 1,
+                    time,
+                    valid: !self.invalid,
+                    best,
+                    previous_best: self.best,
+                    sectors: self.sectors.clone(),
+                    splits: self.splits.clone(),
+                    why: self.why,
+                    top_speed: self.top_speed,
+                    slowest: self.slowest.map(|(speed, at)| {
+                        let into = (at - start).clamp(0.0, 0.999);
+                        (speed, (into * sectors as f32) as usize + 1)
+                    }),
+                });
                 if !self.invalid {
                     self.last = Some(time);
                 }
@@ -347,6 +430,9 @@ impl LapTimer {
                 self.current = 0.0;
                 self.net_progress = progress;
                 self.invalid = !legal;
+                self.why = (!legal).then_some(Why::OffTrack { sector: 1 });
+                self.top_speed = speed;
+                self.slowest = None;
                 self.finish_runup = 0.0;
                 self.sectors.clear();
                 self.splits.clear();
@@ -384,6 +470,7 @@ fn gate(
         progress: track.progress(pos, car.along),
         length: track.length(),
         sectors: track.sector_count(),
+        speed: car.velocity.length(),
     };
     if let Some(lap) = timer.judge(step, || track.on_start_gate(pos, car.along)) {
         finished.write(lap);
@@ -764,12 +851,20 @@ mod tests {
                 progress: track.progress(pos, Some(along)),
                 length: track.length(),
                 sectors: track.sector_count(),
+                speed: 20.0 - 10.0 * (i % 50) as f32 / 50.0,
             };
             laps.extend(timer.judge(step, || track.on_start_gate(pos, Some(along))));
         }
         assert_eq!(laps.len(), 1);
         assert!(laps[0].valid && laps[0].best);
         assert_eq!(timer.best_sectors.len(), track.sector_count());
+        let report = timer.report.as_ref().expect("a report of the lap");
+        assert_eq!(report.number, 1);
+        assert!(report.valid && report.best && report.why.is_none());
+        assert_eq!(report.sectors.len(), track.sector_count());
+        assert_eq!(report.top_speed, 20.0);
+        let (slowest, sector) = report.slowest.unwrap();
+        assert!(slowest < 10.3 && (1..=track.sector_count()).contains(&sector));
     }
 
     #[test]
@@ -823,6 +918,30 @@ mod tests {
         timer.sector(12.0);
         assert_eq!(timer.sector_notice.unwrap().split, Split::Plain);
         assert_eq!(timer.ever_sectors, vec![12.0]);
+    }
+
+    #[test]
+    fn an_invalid_lap_keeps_the_first_reason_it_stopped_counting() {
+        let mut timer = LapTimer {
+            running: true,
+            sectors: vec![10.0, 10.0],
+            ..default()
+        };
+        let step = |legal, recovered| Step {
+            legal,
+            recovered,
+            along: -3.0,
+            progress: 0.5,
+            length: 800.0,
+            sectors: 5,
+            speed: 12.0,
+        };
+        timer.judge(step(false, false), || false);
+        timer.judge(step(false, true), || false);
+        assert!(timer.invalid);
+        assert_eq!(timer.why, Some(Why::OffTrack { sector: 3 }));
+        timer.abandon();
+        assert_eq!(timer.why, None);
     }
 
     #[test]

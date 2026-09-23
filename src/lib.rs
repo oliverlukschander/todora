@@ -13,6 +13,7 @@ mod settings;
 mod skid;
 mod sky;
 mod sound;
+mod summary;
 mod track;
 mod ui;
 #[cfg(feature = "visual-check")]
@@ -100,7 +101,11 @@ impl Plugin for GamePlugin {
                 hud::HudPlugin,
                 minimap::MinimapPlugin,
             ))
-            .add_plugins((countdown::CountdownPlugin, multiplayer::MultiplayerPlugin))
+            .add_plugins((
+                countdown::CountdownPlugin,
+                summary::SummaryPlugin,
+                multiplayer::MultiplayerPlugin,
+            ))
             .add_systems(Update, quit);
     }
 }

@@ -283,7 +283,7 @@ fn loaded(
     // Online menus release the pedals, but cannot pause the other driver's
     // clock. A lap interrupted by the local pause cannot become a record.
     if session.driving() && halt.stopped() && timer.running() {
-        timer.invalid = true;
+        timer.invalidate(crate::lap::Why::Paused);
     }
 }
 

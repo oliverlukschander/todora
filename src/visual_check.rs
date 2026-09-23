@@ -7,6 +7,7 @@
 //! TODORA_SPLITS=PGY colours the sector bar (Purple, Green, Yellow, Plain) and
 //! shows the last as the sector notice, 0.18 s off the best lap.
 //! TODORA_SETTINGS='{"tv_margin":true}' starts from those settings.
+//! TODORA_SUMMARY=best|valid|invalid holds the lap summary card up.
 //! TODORA_SCREEN=settings opens the settings page, on TODORA_TAB=0..3 and
 //! TODORA_ROW=n.
 //! TODORA_COUNTDOWN=ready|3|2|1|go freezes the start lights at that moment and,
@@ -97,6 +98,7 @@ pub fn configure(app: &mut App) {
             freeze_countdown.after(crate::countdown::CountdownSet),
         )
         .add_systems(PreUpdate, open_screen.after(crate::settings::PageSet))
+        .add_systems(Update, hold_summary)
         .add_systems(
             PostUpdate,
             capture.before(bevy::transform::TransformSystems::Propagate),
@@ -197,6 +199,12 @@ fn freeze_countdown(capture: Res<Capture>, mut start: ResMut<crate::countdown::S
         // A car put down round the lap is past any countdown.
         None if capture.placed => start.elapsed = f32::MAX,
         None => {}
+    }
+}
+
+fn hold_summary(mut card: ResMut<crate::summary::Card>, mut timer: ResMut<crate::lap::LapTimer>) {
+    if let Ok(kind) = std::env::var("TODORA_SUMMARY") {
+        card.hold(&mut timer, crate::summary::Card::example(&kind));
     }
 }
 
