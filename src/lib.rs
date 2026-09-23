@@ -1,5 +1,6 @@
 mod camera;
 mod car;
+mod countdown;
 mod ghost;
 mod hud;
 mod input;
@@ -96,7 +97,7 @@ impl Plugin for GamePlugin {
                 hud::HudPlugin,
                 minimap::MinimapPlugin,
             ))
-            .add_plugins(multiplayer::MultiplayerPlugin)
+            .add_plugins((countdown::CountdownPlugin, multiplayer::MultiplayerPlugin))
             .add_systems(Update, quit);
     }
 }

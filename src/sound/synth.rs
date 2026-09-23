@@ -42,9 +42,58 @@ impl Tyres {
     }
 }
 
+/// The start lights' beep: a short sine with a soft attack and release, low
+/// for a red light and an octave up for GO. Rendered sample by sample on the
+/// audio thread, so nothing is allocated for it.
+#[derive(Default)]
+pub(super) struct Beep {
+    phase: f32,
+    step: f32,
+    left: u32,
+    length: u32,
+}
+
+/// Samples a second, per channel, as the mixer runs.
+const RATE: f32 = 44_100.0;
+
+impl Beep {
+    pub fn start(&mut self, go: bool) {
+        let (pitch, seconds) = if go { (1_320.0, 0.42) } else { (660.0, 0.2) };
+        self.phase = 0.0;
+        self.step = pitch / RATE * std::f32::consts::TAU;
+        self.length = (seconds * RATE) as u32;
+        self.left = self.length;
+    }
+
+    pub fn sample(&mut self) -> f32 {
+        if self.left == 0 {
+            return 0.0;
+        }
+        let done = (self.length - self.left) as f32 / RATE;
+        let remaining = self.left as f32 / RATE;
+        let envelope = (done / 0.008).min(1.0) * (remaining / 0.06).min(1.0);
+        self.left -= 1;
+        self.phase = (self.phase + self.step) % std::f32::consts::TAU;
+        self.phase.sin() * envelope * 0.16
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_beep_is_bounded_and_ends_in_silence() {
+        for go in [false, true] {
+            let mut beep = Beep::default();
+            assert_eq!(beep.sample(), 0.0);
+            beep.start(go);
+            let samples: Vec<f32> = (0..30_000).map(|_| beep.sample()).collect();
+            assert!(samples.iter().all(|s| s.abs() <= 0.16));
+            assert!(samples.iter().any(|s| s.abs() > 0.1));
+            assert!(samples[25_000..].iter().all(|s| *s == 0.0));
+        }
+    }
 
     #[test]
     fn tyre_asset_is_a_bounded_loop_with_a_clean_join() {

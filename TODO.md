@@ -1,5 +1,16 @@
 # TODO
 
+## Polish plan
+
+The approved plan, decisions and build order are in the
+[Todora polish plan](https://claude.ai/code/artifact/fe56e4ae-9ea5-4bcf-ab4d-6a3111b5c44a).
+
+- [x] 3-2-1-GO start lights with the car held on the grid (2026-09-23).
+- [ ] Drive the multiplayer countdown through the same start lights.
+- [ ] Determinism spike for server-side lap replay.
+- [ ] Sector colours, settings, lap summary, medals and onboarding.
+- [ ] Online leaderboards at todora.lukschander.com.
+
 ## Game Center multiplayer
 
 An optional two-player shared-practice prototype is implemented for macOS.

@@ -4,6 +4,8 @@
 //! TODORA_ZOOM=2.4 sets the chase camera's zoom, which is also how far back
 //! speed stretches the boom. TODORA_BEHIND=15 holds the chase camera that many
 //! metres behind the car in plan, as the follow lag does at speed.
+//! TODORA_COUNTDOWN=ready|3|2|1|go freezes the start lights at that moment and,
+//! unless TODORA_PROGRESS is also given, leaves the car on the grid.
 use crate::{
     car::{Car, Player},
     track::{Track, all_circuits},
@@ -21,6 +23,10 @@ struct Capture {
     behind: Option<f32>,
     frame: u32,
     preview: bool,
+    /// Seconds into the full countdown to hold the lights at.
+    countdown: Option<f32>,
+    /// Whether the car is put somewhere round the lap, or left on the grid.
+    placed: bool,
 }
 pub fn configure(app: &mut App) {
     let Ok(path) = std::env::var("TODORA_CAPTURE") else {
@@ -49,6 +55,18 @@ pub fn configure(app: &mut App) {
                 .and_then(|s| s.parse().ok()),
             frame: 0,
             preview: std::env::var_os("TODORA_PREVIEW").is_some(),
+            countdown: std::env::var("TODORA_COUNTDOWN")
+                .ok()
+                .map(|moment| match moment.as_str() {
+                    "ready" => 0.4,
+                    "3" => 1.3,
+                    "2" => 2.3,
+                    "1" => 3.3,
+                    "go" => 4.0,
+                    other => panic!("TODORA_COUNTDOWN={other}: ready, 3, 2, 1 or go"),
+                }),
+            placed: std::env::var_os("TODORA_COUNTDOWN").is_none()
+                || std::env::var_os("TODORA_PROGRESS").is_some(),
         })
         .add_systems(Startup, window_size)
         .add_systems(
@@ -57,6 +75,10 @@ pub fn configure(app: &mut App) {
                 .after(crate::track::TrackSet)
                 .after(crate::input::InputSet)
                 .after(crate::lap::ClockSet),
+        )
+        .add_systems(
+            PreUpdate,
+            freeze_countdown.after(crate::countdown::CountdownSet),
         )
         .add_systems(
             PostUpdate,
@@ -73,6 +95,9 @@ fn place(
     if capture.preview {
         timer.invalid = true;
         timer.current = 32.45;
+    }
+    if !capture.placed {
+        return;
     }
     let points: Vec<_> = track.map_points().collect();
     let index = ((points.len() as f32 * capture.progress) as usize).min(points.len() - 1);
@@ -120,6 +145,12 @@ fn capture(
     }
     if capture.frame > 140 {
         exit.write(AppExit::Success);
+    }
+}
+
+fn freeze_countdown(capture: Res<Capture>, mut start: ResMut<crate::countdown::Start>) {
+    if let Some(at) = capture.countdown {
+        start.elapsed = at;
     }
 }
 

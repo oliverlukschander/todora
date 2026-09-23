@@ -209,7 +209,10 @@ pub(crate) fn advance(
 fn drive(
     time: Res<Time>,
     track: Res<Track>,
-    mut cars: Query<(&mut Transform, &mut Car, &Handling, &Controls)>,
+    mut cars: Query<
+        (&mut Transform, &mut Car, &Handling, &Controls),
+        Without<crate::countdown::Held>,
+    >,
 ) {
     for (mut transform, mut car, handling, controls) in &mut cars {
         advance(

@@ -23,7 +23,7 @@ impl Plugin for SoundPlugin {
             .add_message::<SoundToggle>()
             .add_audio_source::<radio::Soundtrack>()
             .add_systems(Startup, start)
-            .add_systems(Update, (apply_toggles, update, draw_toggles).chain())
+            .add_systems(Update, (apply_toggles, update, draw_toggles, beep).chain())
             .add_systems(Last, shutdown_on_exit);
     }
 }
@@ -76,6 +76,8 @@ struct Signal {
     scrub: AtomicU32,
     squeal: AtomicU32,
     rolling: AtomicU32,
+    /// Start-light beeps asked for: a count, doubled, plus one for GO.
+    beep: AtomicU32,
 }
 
 impl Signal {
@@ -159,6 +161,22 @@ fn update(
     sound.signal.music.store(music.to_bits(), Relaxed);
     sound.signal.scrub.store(scrub.to_bits(), Relaxed);
     sound.signal.squeal.store(squeal.to_bits(), Relaxed);
+}
+
+/// A start light has come on. It is heard with the tyres, so the tyre toggle
+/// silences it too, and not at all while the window is in the background.
+fn beep(
+    mut lights: MessageReader<crate::countdown::StartLight>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    sound: Res<Sound>,
+) {
+    for light in lights.read() {
+        if sound.effects && windows.iter().all(|window| window.focused) {
+            let asked = sound.signal.beep.load(Relaxed);
+            let next = ((asked >> 1).wrapping_add(1) << 1) | u32::from(light.go);
+            sound.signal.beep.store(next, Relaxed);
+        }
+    }
 }
 
 fn apply_toggles(

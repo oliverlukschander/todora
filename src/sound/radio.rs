@@ -1,4 +1,4 @@
-use super::{Signal, Tyres};
+use super::{Signal, Tyres, synth::Beep};
 use bevy::{
     audio::{ChannelCount, SampleRate, Source},
     prelude::*,
@@ -47,6 +47,8 @@ impl Decodable for Soundtrack {
             receive,
             chunk: Vec::new().into_iter(),
             tyres: Tyres::default(),
+            beep: Beep::default(),
+            beeps: self.0.beep.load(Relaxed),
             vehicle_sample: 0.0,
             right: false,
             music: 0.0,
@@ -60,6 +62,9 @@ pub(super) struct Mixer {
     receive: Receiver<Vec<f32>>,
     chunk: std::vec::IntoIter<f32>,
     tyres: Tyres,
+    beep: Beep,
+    /// The last beep the game asked for, so each is started once.
+    beeps: u32,
     vehicle_sample: f32,
     right: bool,
     music: f32,
@@ -83,6 +88,12 @@ impl Iterator for Mixer {
                 f32::from_bits(self.signal.scrub.load(Relaxed)),
                 f32::from_bits(self.signal.squeal.load(Relaxed)),
             );
+            let beeps = self.signal.beep.load(Relaxed);
+            if beeps != self.beeps {
+                self.beeps = beeps;
+                self.beep.start(beeps & 1 == 1);
+            }
+            self.vehicle_sample += self.beep.sample();
             self.music += (f32::from_bits(self.signal.music.load(Relaxed)) - self.music) * 0.001;
         }
         self.right = !self.right;
@@ -209,6 +220,8 @@ mod tests {
             receive,
             chunk: Vec::new().into_iter(),
             tyres: Tyres::default(),
+            beep: Beep::default(),
+            beeps: 0,
             vehicle_sample: 0.0,
             right: false,
             music: 0.0,
