@@ -159,6 +159,68 @@ pub fn ai_run(circuit: &str, mode: &str) -> Option<Vec<u8>> {
         })
 }
 
+/// The ISO week `unix` seconds fall in, as (year, week).
+pub fn iso_week(unix: i64) -> (i32, u32) {
+    let days = unix.div_euclid(86_400);
+    // 1970-01-01 was a Thursday; ISO weeks belong to the year of their Thursday.
+    let weekday = (days + 3).rem_euclid(7); // Monday = 0
+    let thursday = days - weekday + 3;
+    let (year, ordinal) = year_and_day(thursday);
+    (year, (ordinal / 7 + 1) as u32)
+}
+
+/// Unix seconds at the start (Monday 00:00 UTC) and end of an ISO week.
+pub fn week_bounds(year: i32, week: u32) -> (i64, i64) {
+    // The week holding 4 January is week 1.
+    let jan4 = days_from_civil(year, 1, 4);
+    let monday = jan4 - (jan4 + 3).rem_euclid(7) + 7 * (i64::from(week) - 1);
+    (monday * 86_400, (monday + 7) * 86_400)
+}
+
+/// Which circuit a week's challenge is on, as an index into [`circuits`]:
+/// a fixed shuffle of all of them, walked one a week, so no circuit comes back
+/// within as many weeks as there are circuits and every copy of the game agrees.
+pub fn challenge_circuit(year: i32, week: u32) -> usize {
+    let n = all_circuits().len();
+    let mut order: Vec<usize> = (0..n).collect();
+    let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+    for i in (1..n).rev() {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        order.swap(i, (seed % (i as u64 + 1)) as usize);
+    }
+    let (start, _) = week_bounds(year, week);
+    let weeks = start.div_euclid(7 * 86_400);
+    order[weeks.rem_euclid(n as i64) as usize]
+}
+
+fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
+    let y = i64::from(year) - i64::from(month <= 2);
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let m = i64::from(month);
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + i64::from(day) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+fn year_and_day(days: i64) -> (i32, i64) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let mut year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    if month <= 2 {
+        year += 1;
+    }
+    let jan1 = days_from_civil(year as i32, 1, 1);
+    (year as i32, days - jan1)
+}
+
 /// Whether `name` may appear on a board: 3 to 16 characters of letters,
 /// digits, spaces, `-`, `_` and `.`, not starting or ending with a space, and
 /// nothing from the blocklist. Returns it trimmed.
@@ -285,6 +347,30 @@ mod tests {
         assert_eq!(valid_name("Jürgen-95"), Ok("Jürgen-95".into()));
         assert_eq!(valid_country(" at "), Some("AT".into()));
         assert_eq!(valid_country("AUT"), None);
+    }
+
+    #[test]
+    fn weeks_are_iso_weeks_and_every_copy_picks_the_same_circuit() {
+        // Thursday 24 September 2026 is in week 39; 1 January 2021 in 2020's week 53.
+        assert_eq!(iso_week(1_790_208_000), (2026, 39));
+        assert_eq!(iso_week(1_609_459_200), (2020, 53));
+        let (start, end) = week_bounds(2026, 39);
+        assert_eq!(iso_week(start), (2026, 39));
+        assert_eq!(iso_week(end - 1), (2026, 39));
+        assert_eq!(iso_week(end), (2026, 40));
+        assert_eq!(end - start, 7 * 86_400);
+        // Forty consecutive weeks visit forty different circuits.
+        let mut seen = std::collections::HashSet::new();
+        let mut at = start;
+        for _ in 0..circuits().len() {
+            let (y, w) = iso_week(at);
+            assert!(
+                seen.insert(challenge_circuit(y, w)),
+                "a circuit came back early"
+            );
+            at += 7 * 86_400;
+        }
+        assert_eq!(challenge_circuit(2026, 39), challenge_circuit(2026, 39));
     }
 
     #[test]

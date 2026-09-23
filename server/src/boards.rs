@@ -39,6 +39,15 @@ pub struct Asked {
     car: Option<String>,
     season: Option<u32>,
     rivals: Option<String>,
+    /// `2026-W39`: that week's board, from laps set during it.
+    week: Option<String>,
+}
+
+/// `2026-W39` as (2026, 39).
+fn parse_week(text: &str) -> Option<(i32, u32)> {
+    let (year, week) = text.split_once("-W")?;
+    let (year, week) = (year.parse().ok()?, week.parse().ok()?);
+    (1..=53).contains(&week).then_some((year, week))
 }
 
 /// The most rivals one board read looks up.
@@ -84,6 +93,35 @@ async fn board(
         car: asked.car.as_deref(),
     };
     let db = state.db.lock().expect("the database");
+    if let Some(week) = &asked.week {
+        let (year, number) = parse_week(week).ok_or_else(|| bad("a week is written 2026-W39"))?;
+        let all = db::week(
+            &db,
+            &circuit,
+            &mode,
+            season,
+            verify::week_bounds(year, number),
+        )
+        .map_err(internal)?;
+        let at = asked
+            .player
+            .as_ref()
+            .and_then(|p| all.iter().position(|place| place.player == *p));
+        let around = at.map_or(Vec::new(), |at| {
+            all[at.saturating_sub(AROUND as usize)..(at + AROUND as usize + 1).min(all.len())]
+                .to_vec()
+        });
+        return Ok(Json(Standing {
+            circuit,
+            mode,
+            season,
+            total: all.len() as u64,
+            top: all.iter().take(TOP as usize).cloned().collect(),
+            you: at.map(|at| all[at].clone()),
+            around,
+            rivals: Vec::new(),
+        }));
+    }
     let total = db::count(&db, &board).map_err(internal)?;
     let top = db::places(&db, &board, 0, TOP).map_err(internal)?;
     let (mut around, mut you) = (Vec::new(), None);
@@ -212,6 +250,35 @@ mod tests {
         assert_eq!(rivals.len(), 2);
         assert_eq!(rivals[0]["rank"], 4);
         assert_eq!(rivals[1]["rank"], 26);
+    }
+
+    #[tokio::test]
+    async fn a_weeks_board_holds_only_that_weeks_laps() {
+        let (app, state) = app();
+        fill(&state, 6);
+        let now = db::now();
+        let (year, week) = verify::iso_week(now);
+        {
+            let db = state.db.lock().unwrap();
+            // Two of the laps were set long ago; one player also improved this week.
+            db.execute(
+                "UPDATE runs SET created_at = 0 WHERE player IN ('p0000', 'p0001')",
+                [],
+            )
+            .unwrap();
+        }
+        let path = format!("/v1/boards/monza/regular?week={year}-W{week:02}&player=p0003");
+        let (status, board) = send(&app, get(&path)).await;
+        assert_eq!(status, StatusCode::OK, "{board}");
+        assert_eq!(board["total"], 4);
+        assert_eq!(board["top"][0]["name"], "Driver 2");
+        assert_eq!(board["you"]["rank"], 2);
+        assert_eq!(
+            send(&app, get("/v1/boards/monza/regular?week=soon"))
+                .await
+                .0,
+            StatusCode::BAD_REQUEST
+        );
     }
 
     #[tokio::test]

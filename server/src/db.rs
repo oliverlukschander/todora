@@ -303,6 +303,36 @@ pub fn run_known(db: &Connection, id: &str) -> rusqlite::Result<bool> {
         .map(|found| found.is_some())
 }
 
+/// A week's board: each player's quickest lap set between `since` and
+/// `until`, fastest first. Weekly boards are small, so they are ranked here
+/// rather than kept in a table of their own.
+pub fn week(
+    db: &Connection,
+    circuit: &str,
+    mode: &str,
+    physics: u32,
+    (since, until): (i64, i64),
+) -> rusqlite::Result<Vec<Place>> {
+    let mut statement = db.prepare(
+        "SELECT p.id, p.name, p.country, w.steps, w.car, w.setup, w.multiplayer, w.id
+         FROM (SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.player ORDER BY r.steps, r.created_at) AS nth
+               FROM runs r
+               WHERE r.circuit = ?1 AND r.mode = ?2 AND r.physics = ?3 AND r.hidden = 0
+                 AND r.created_at >= ?4 AND r.created_at < ?5) w
+         JOIN players p ON p.id = w.player
+         WHERE w.nth = 1
+         ORDER BY w.steps, w.created_at, w.player",
+    )?;
+    let rows = statement.query_map(params![circuit, mode, physics, since, until], |row| {
+        row_owned(row)
+    })?;
+    let mut out = Vec::new();
+    for (i, row) in rows.enumerate() {
+        out.push(row?.into_place(i as u64 + 1));
+    }
+    Ok(out)
+}
+
 /// Keep a verified run, and make it the player's best if it is.
 pub fn keep_run(
     db: &Connection,

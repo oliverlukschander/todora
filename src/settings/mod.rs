@@ -117,6 +117,10 @@ pub(crate) struct Settings {
     pub country: String,
     /// Up to five pinned rivals' player ids.
     pub rivals: Vec<String>,
+    /// The weekly challenge this best belongs to, as `2026-W39`.
+    pub challenge_week: String,
+    /// Your best lap in this week's challenge.
+    pub challenge_best: Option<f32>,
     /// Laps waiting to be sent; shown on the page, not saved.
     #[serde(skip)]
     pub pending: usize,
@@ -170,6 +174,8 @@ impl Default for Settings {
             name: String::new(),
             country: String::new(),
             rivals: Vec::new(),
+            challenge_week: String::new(),
+            challenge_best: None,
             pending: 0,
             online_note: String::new(),
             forget_presses: 0,

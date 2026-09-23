@@ -155,7 +155,7 @@ fn listen(client: Option<Res<Client>>, mut online: ResMut<Online>, mut settings:
                         .ranks
                         .insert(standing.circuit.clone(), (you.rank, standing.total));
                 }
-                online.board = Some(standing);
+                online.board = Some(*standing);
             }
             Heard::Ranks(ranks) => {
                 online.ranks = ranks.into_iter().map(|(c, r, t)| (c, (r, t))).collect();

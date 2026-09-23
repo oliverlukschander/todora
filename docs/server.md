@@ -38,7 +38,7 @@ drove, on the circuit as this build lays it out, under these physics.
 | DELETE | `/v1/players/{id}` | delete the player, their laps, places and reports |
 | POST | `/v1/runs` | submit a run (the bytes of a `TODORUN1` file) |
 | GET | `/v1/runs/{id}` | a lap's bytes, to race as a ghost |
-| GET | `/v1/boards/{circuit}/{mode}` | top ten; `?player=` adds that player ±5; `?country=AT`, `?car=clubman`, `?season=` |
+| GET | `/v1/boards/{circuit}/{mode}` | top ten; `?player=` adds that player ±5; `?country=AT`, `?car=clubman`, `?season=`, `?rivals=id,id`, `?week=2026-W39` (laps set that week) |
 | POST | `/v1/reports` | `{"run", "reason"}` |
 | GET | `/admin/reports` | reported laps (`x-admin-token`) |
 | POST | `/admin/runs/{id}/hide` | take a lap off the boards (`x-admin-token`) |

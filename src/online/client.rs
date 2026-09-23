@@ -43,6 +43,8 @@ pub(crate) enum Ask {
         mode: String,
         country: Option<String>,
         rivals: Vec<String>,
+        /// A week's board, as `2026-W39`, instead of the all-time one.
+        week: Option<String>,
     },
     Ghost(String),
     /// Your place on every circuit's board last seen, from the cache.
@@ -73,7 +75,7 @@ pub(crate) enum Heard {
     },
     /// Laps still waiting.
     Waiting(usize),
-    Board(Standing),
+    Board(Box<Standing>),
     Ghost {
         run: String,
         bytes: Vec<u8>,
@@ -126,6 +128,9 @@ pub(crate) struct Standing {
     /// Unix seconds when this was fetched; set by the worker, kept in the cache.
     #[serde(default)]
     pub fetched_at: i64,
+    /// The week this board is, for a weekly one; set by the worker.
+    #[serde(default)]
+    pub week: Option<String>,
 }
 
 pub(crate) fn unix_now() -> i64 {
@@ -300,7 +305,14 @@ impl Worker {
                 mode,
                 country,
                 rivals,
-            } => self.board(&circuit, &mode, country.as_deref(), &rivals),
+                week,
+            } => self.board(
+                &circuit,
+                &mode,
+                country.as_deref(),
+                &rivals,
+                week.as_deref(),
+            ),
             Ask::Ghost(run) => self.ghost(&run),
             Ask::Ranks { mode } => {
                 let ranks = self.cached_ranks(&mode);
@@ -473,7 +485,14 @@ impl Worker {
         }
     }
 
-    fn board(&mut self, circuit: &str, mode: &str, country: Option<&str>, rivals: &[String]) {
+    fn board(
+        &mut self,
+        circuit: &str,
+        mode: &str,
+        country: Option<&str>,
+        rivals: &[String],
+        week: Option<&str>,
+    ) {
         let mut url = self.url(&format!("/v1/boards/{circuit}/{mode}"));
         let mut query = Vec::new();
         if let Some(player) = &self.player {
@@ -485,17 +504,22 @@ impl Worker {
         if !rivals.is_empty() {
             query.push(format!("rivals={}", rivals.join(",")));
         }
+        if let Some(week) = week {
+            query.push(format!("week={week}"));
+        }
         if !query.is_empty() {
             url = format!("{url}?{}", query.join("&"));
         }
-        let cache = self
-            .folder
-            .as_ref()
-            .map(|f| f.join("boards").join(format!("{circuit}-{mode}.json")));
+        let name = match week {
+            Some(week) => format!("{circuit}-{mode}-{week}.json"),
+            None => format!("{circuit}-{mode}.json"),
+        };
+        let cache = self.folder.as_ref().map(|f| f.join("boards").join(name));
         match Self::agent().get(&url).call() {
             Ok(response) => match response.into_json::<Standing>() {
                 Ok(mut standing) => {
                     standing.fetched_at = unix_now();
+                    standing.week = week.map(str::to_string);
                     if let Some(cache) = &cache {
                         let _ = std::fs::create_dir_all(cache.parent().unwrap_or(cache));
                         let _ = std::fs::write(
@@ -503,7 +527,7 @@ impl Worker {
                             serde_json::to_vec(&standing).unwrap_or_default(),
                         );
                     }
-                    let _ = self.tell.send(Heard::Board(standing));
+                    let _ = self.tell.send(Heard::Board(Box::new(standing)));
                 }
                 Err(trouble) => {
                     let _ = self
@@ -520,7 +544,7 @@ impl Worker {
                     .and_then(|c| std::fs::read(c).ok())
                     .and_then(|b| serde_json::from_slice::<Standing>(&b).ok());
                 if let Some(standing) = cached {
-                    let _ = self.tell.send(Heard::Board(standing));
+                    let _ = self.tell.send(Heard::Board(Box::new(standing)));
                 }
             }
         }
@@ -684,6 +708,7 @@ mod tests {
             mode: "regular".into(),
             country: Some("AT".into()),
             rivals: Vec::new(),
+            week: None,
         });
         let heard = wait(&client, 20, |h| matches!(h, Heard::Board(_)));
         let Some(Heard::Board(board)) = heard.last() else {

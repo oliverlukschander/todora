@@ -31,7 +31,10 @@ impl Plugin for OnlinePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Recorder>()
             .add_systems(Startup, start_client)
-            .add_systems(FixedUpdate, record.after(LapSet));
+            .add_systems(
+                FixedUpdate,
+                record.after(LapSet).after(crate::challenge::ChallengeSet),
+            );
         ui::plugin(app);
         board::plugin(app);
     }
@@ -149,6 +152,7 @@ fn record(
     session: Option<Res<crate::multiplayer::Session>>,
     read_only: Option<Res<crate::settings::ReadOnly>>,
     client: Option<Res<client::Client>>,
+    challenge: Option<Res<crate::challenge::Challenge>>,
     players: Query<(&Transform, &Car, &Controls), With<Player>>,
     mut recorder: ResMut<Recorder>,
 ) {
@@ -167,7 +171,9 @@ fn record(
     };
     // An assisted lap counts at home and never on the world boards.
     let assisted = timer.report.as_ref().is_some_and(|r| r.assisted);
-    if !(lap.valid && lap.best) || assisted || read_only.is_some() {
+    // A weekly best goes up too, even when it is not your best ever there.
+    let weekly = challenge.is_some_and(|c| c.improved);
+    if !(lap.valid && (lap.best || weekly)) || assisted || read_only.is_some() {
         return;
     }
     let run = Run {

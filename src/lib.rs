@@ -1,5 +1,6 @@
 mod camera;
 mod car;
+mod challenge;
 mod countdown;
 mod ghost;
 mod hud;
@@ -110,6 +111,7 @@ impl Plugin for GamePlugin {
                 summary::SummaryPlugin,
                 onboarding::OnboardingPlugin,
                 online::OnlinePlugin,
+                challenge::ChallengePlugin,
                 multiplayer::MultiplayerPlugin,
             ))
             .add_systems(Update, quit);

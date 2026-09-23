@@ -35,15 +35,24 @@ pub(crate) enum View {
     Rivals,
     /// Every circuit: your best, its medal and your place.
     Records,
+    /// The weekly challenge's board.
+    Week,
 }
 
 impl View {
-    const ALL: [Self; 4] = [Self::World, Self::Country, Self::Rivals, Self::Records];
+    const ALL: [Self; 5] = [
+        Self::World,
+        Self::Country,
+        Self::Rivals,
+        Self::Week,
+        Self::Records,
+    ];
     fn name(self) -> &'static str {
         match self {
             Self::World => "World",
             Self::Country => "Country",
             Self::Rivals => "Rivals",
+            Self::Week => "This week",
             Self::Records => "Records",
         }
     }
@@ -94,7 +103,7 @@ pub(crate) struct Browse {
 }
 
 impl Browse {
-    /// Open on a view, for a visual check: 0 world … 3 records.
+    /// Open on a view, for a visual check: 0 world … 3 this week, 4 records.
     #[cfg(feature = "visual-check")]
     pub(crate) fn show(&mut self, view: usize) {
         let view = View::ALL[view.min(View::ALL.len() - 1)];
@@ -127,7 +136,7 @@ pub(crate) fn lines(standing: &Standing, view: View) -> Vec<Line> {
             places.sort_by_key(|p| p.rank);
             out.extend(places.into_iter().map(Line::Place));
         }
-        View::World | View::Country => {
+        View::World | View::Country | View::Week => {
             out.extend(standing.top.iter().cloned().map(Line::Place));
             let last_top = standing.top.last().map_or(0, |p| p.rank);
             let rest: Vec<_> = standing
@@ -316,6 +325,9 @@ fn drive(
     mut halt: ResMut<Halt>,
     mut browse: ResMut<Browse>,
     mut settings: ResMut<Settings>,
+    challenge: Res<crate::challenge::Challenge>,
+    mut go: MessageWriter<crate::track::GoTo>,
+    mut mode: ResMut<Mode>,
 ) {
     if *halt != Halt::Board || halt.is_changed() {
         return;
@@ -342,6 +354,16 @@ fn drive(
     let step = browse
         .navigation
         .read(&keys, &pads, time.elapsed_secs_f64());
+    if browse.view == View::Week {
+        browse.circuit = challenge.at;
+        // D, or the pad's north button: drive this week's circuit, in Regular.
+        if keys.just_pressed(KeyCode::KeyD) || pad(GamepadButton::North) {
+            go.write(crate::track::GoTo(challenge.circuit()));
+            mode.set_if_neq(Mode::Regular);
+            *halt = Halt::Nothing;
+            return;
+        }
+    }
     if browse.view == View::Records {
         let n = all_circuits().len() as i32;
         browse.row = (browse.row as i32 + step.y).clamp(0, n - 1) as usize;
@@ -354,15 +376,16 @@ fn drive(
         }
         return;
     }
-    if step.x != 0 {
+    if step.x != 0 && browse.view != View::Week {
         let n = all_circuits().len() as i32;
         browse.circuit = (browse.circuit as i32 + step.x).rem_euclid(n) as usize;
         browse.row = 0;
     }
+    let week = (browse.view == View::Week).then(|| challenge.label());
     let shown = online
         .board
         .as_ref()
-        .filter(|b| b.circuit == all_circuits()[browse.circuit].id)
+        .filter(|b| b.circuit == all_circuits()[browse.circuit].id && b.week == week)
         .map(|b| lines(b, browse.view))
         .unwrap_or_default();
     if step.y != 0 && !shown.is_empty() {
@@ -395,6 +418,7 @@ fn ask(
     mode: Res<Mode>,
     settings: Res<Settings>,
     client: Option<Res<Client>>,
+    challenge: Res<crate::challenge::Challenge>,
     mut browse: ResMut<Browse>,
 ) {
     if *halt != Halt::Board {
@@ -422,11 +446,17 @@ fn ask(
     browse.asked = Some(wanted);
     let country = (browse.view == View::Country && !settings.country.is_empty())
         .then(|| settings.country.clone());
+    let weekly = browse.view == View::Week;
     client.ask(Ask::Board {
         circuit: all_circuits()[browse.circuit].id.into(),
-        mode: mode.name().to_lowercase(),
+        mode: if weekly {
+            "regular".into()
+        } else {
+            mode.name().to_lowercase()
+        },
         country,
         rivals: settings.rivals.clone(),
+        week: weekly.then(|| challenge.label()),
     });
 }
 
@@ -437,6 +467,7 @@ fn draw(
     browse: Res<Browse>,
     online: Res<Online>,
     settings: Res<Settings>,
+    challenge: Res<crate::challenge::Challenge>,
     records: Option<Res<crate::ghost::Records>>,
     mut panels: Query<&mut Visibility, With<Panel>>,
     mut titles: Query<
@@ -538,12 +569,24 @@ fn draw(
     }
     let circuit = &all_circuits()[browse.circuit];
     if let Ok(mut text) = titles.single_mut() {
-        let wanted = format!("{}   ·   {}", circuit.name, mode.name());
+        let wanted = if browse.view == View::Week {
+            format!(
+                "This week   ·   {}   ·   Regular   ·   {} left",
+                circuit.name,
+                challenge.left(super::client::unix_now())
+            )
+        } else {
+            format!("{}   ·   {}", circuit.name, mode.name())
+        };
         if text.0 != wanted {
             text.0 = wanted;
         }
     }
-    let standing = online.board.as_ref().filter(|b| b.circuit == circuit.id);
+    let week = (browse.view == View::Week).then(|| challenge.label());
+    let standing = online
+        .board
+        .as_ref()
+        .filter(|b| b.circuit == circuit.id && b.week == week);
     let shown = standing.map(|b| lines(b, browse.view)).unwrap_or_default();
     let you = standing
         .and_then(|b| b.you.as_ref())
@@ -579,7 +622,18 @@ fn draw(
         }
         colour.set_if_neq(TextColor(tint));
     }
-    let note = if !settings.online {
+    let weekly_best = (settings.challenge_week == challenge.label())
+        .then_some(settings.challenge_best)
+        .flatten();
+    let note = if browse.view == View::Week && (!settings.online || standing.is_none()) {
+        match weekly_best {
+            Some(best) => format!(
+                "Your best this week: {}    ·    D / Y  Drive it",
+                format_time(best)
+            ),
+            None => "No lap this week yet.    ·    D / Y  Drive it".into(),
+        }
+    } else if !settings.online {
         "Go online in Settings → Online to see the world boards.".to_string()
     } else if browse.view == View::Country && settings.country.is_empty() {
         "Pick your country in Settings → Online.".into()
@@ -648,6 +702,7 @@ mod tests {
             you: Some(place(you, &format!("p{you}"))),
             rivals: vec![place(40, "p40"), place(3, "p3")],
             fetched_at: 0,
+            week: None,
         }
     }
 
