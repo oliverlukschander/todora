@@ -21,6 +21,7 @@ mod skid;
 mod sky;
 mod sound;
 mod summary;
+mod text;
 mod title;
 mod track;
 mod ui;
@@ -120,6 +121,7 @@ impl Plugin for GamePlugin {
                 achievements::AchievementsPlugin,
                 replay::ReplayPlugin,
                 title::TitlePlugin,
+                text::TextPlugin,
                 multiplayer::MultiplayerPlugin,
             ))
             .add_systems(Update, quit);

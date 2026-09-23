@@ -176,23 +176,23 @@ fn setup(mut commands: Commands) {
                     BorderColor::all(LINE),
                 ))
                 .with_children(|panel| {
-                    panel.spawn(label("TODORA  /  SESSION PAUSED", 12.0, AMBER));
-                    panel.spawn(label("Take a breather.", 36.0, TEXT));
+                    panel.spawn(crate::text::label("pause.label", 12.0, AMBER));
+                    panel.spawn(crate::text::label("pause.title", 36.0, TEXT));
                     panel.spawn((
                         PauseNote,
-                        label("Your lap will be right here.", 17.0, AMBER_DIM),
+                        label(crate::text::t("pause.note"), 17.0, AMBER_DIM),
                     ));
                     for (action, title) in [
-                        (Action::Resume, "Resume"),
-                        (Action::Music, "Music / N"),
-                        (Action::Effects, "Sound effects / F8"),
-                        (Action::ResetCurrent, "Reset this ghost"),
-                        (Action::ResetAll, "Reset all ghosts"),
-                        (Action::Board, "World leaderboard / L"),
-                        (Action::Replay, "Replay and photo"),
-                        (Action::Guide, "How to drive"),
-                        (Action::Settings, "Settings"),
-                        (Action::Quit, "Quit game"),
+                        (Action::Resume, "pause.resume"),
+                        (Action::Music, "pause.resume"),
+                        (Action::Effects, "pause.resume"),
+                        (Action::ResetCurrent, "pause.reset_one"),
+                        (Action::ResetAll, "pause.reset_all"),
+                        (Action::Board, "pause.board"),
+                        (Action::Replay, "pause.replay"),
+                        (Action::Guide, "pause.guide"),
+                        (Action::Settings, "pause.settings"),
+                        (Action::Quit, "pause.quit"),
                     ] {
                         let mut button = panel.spawn((
                             Button,
@@ -216,23 +216,21 @@ fn setup(mut commands: Commands) {
                             }
                             _ => {}
                         }
+                        // The sound buttons are written by the sound, with their state.
+                        let sound = matches!(action, Action::Music | Action::Effects);
                         button.with_children(|button| {
-                            button.spawn(label(title, 17.0, TEXT));
+                            if sound {
+                                button.spawn(label("", 17.0, TEXT));
+                            } else {
+                                button.spawn(crate::text::label(title, 17.0, TEXT));
+                            }
                         });
                     }
                     panel.spawn((
                         crate::ghost::clear::Notice,
-                        label(
-                            "Reset removes saved best times and restarts the lap.",
-                            14.0,
-                            AMBER_DIM,
-                        ),
+                        label(crate::text::t("pause.reset_note"), 14.0, AMBER_DIM),
                     ));
-                    panel.spawn(label(
-                        "↑ ↓ / D-pad / Stick  Select\nEnter / A  Confirm · Esc / B / Start  Resume",
-                        13.0,
-                        AMBER_DIM,
-                    ));
+                    panel.spawn(crate::text::label("pause.hint", 13.0, AMBER_DIM));
                 });
         });
 }
@@ -409,11 +407,11 @@ fn show(
         return;
     }
     for mut text in &mut note {
-        text.0 = if session.as_ref().is_some_and(|s| s.driving()) {
-            "The session continues. This lap is invalid."
+        text.0 = crate::text::t(if session.as_ref().is_some_and(|s| s.driving()) {
+            "pause.session"
         } else {
-            "Your lap will be right here."
-        }
+            "pause.note"
+        })
         .into();
     }
     if let Ok(mut visibility) = banner.single_mut() {

@@ -36,17 +36,17 @@ impl Act {
     ];
 
     pub(crate) fn name(self) -> &'static str {
-        match self {
-            Self::Throttle => "Throttle",
-            Self::Brake => "Brake / reverse",
-            Self::Left => "Steer left",
-            Self::Right => "Steer right",
-            Self::Handbrake => "Handbrake",
-            Self::Restart => "Restart lap",
-            Self::Ghost => "Ghost",
-            Self::Camera => "Camera",
-            Self::Board => "Leaderboard",
-        }
+        crate::text::t(match self {
+            Self::Throttle => "act.throttle",
+            Self::Brake => "act.brake",
+            Self::Left => "act.left",
+            Self::Right => "act.right",
+            Self::Handbrake => "act.handbrake",
+            Self::Restart => "act.restart",
+            Self::Ghost => "act.ghost",
+            Self::Camera => "act.camera",
+            Self::Board => "act.board",
+        })
     }
 }
 

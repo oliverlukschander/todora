@@ -57,11 +57,11 @@ impl CameraView {
     pub(crate) const ALL: [Self; 3] = [Self::Far, Self::Near, Self::Bonnet];
 
     pub(crate) fn name(self) -> &'static str {
-        match self {
-            Self::Far => "Chase",
-            Self::Near => "Chase, close",
-            Self::Bonnet => "Bonnet",
-        }
+        crate::text::t(match self {
+            Self::Far => "camera.chase",
+            Self::Near => "camera.near",
+            Self::Bonnet => "camera.bonnet",
+        })
     }
 
     pub(crate) fn next(self) -> Self {
@@ -117,6 +117,8 @@ pub(crate) struct Settings {
     pub minimap: bool,
     pub g_meter: bool,
     pub countdown: Countdown,
+    /// `auto` for the system's, or a language's two-letter code.
+    pub language: String,
     // Accessibility.
     /// Blue and orange for ahead and behind, and words beside sector colours.
     pub colour_blind: bool,
@@ -194,6 +196,7 @@ impl Default for Settings {
             minimap: true,
             g_meter: true,
             countdown: Countdown::Short,
+            language: "auto".into(),
             colour_blind: false,
             high_contrast: false,
             reduced_motion: false,

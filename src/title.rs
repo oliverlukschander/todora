@@ -41,14 +41,14 @@ impl Choice {
         Self::Quit,
     ];
 
-    fn name(self) -> &'static str {
+    fn key(self) -> &'static str {
         match self {
-            Self::Drive => "Drive",
-            Self::Circuits => "Circuits",
-            Self::Board => "World leaderboard",
-            Self::Weekly => "This week's challenge",
-            Self::Settings => "Settings",
-            Self::Quit => "Quit",
+            Self::Drive => "title.drive",
+            Self::Circuits => "title.circuits",
+            Self::Board => "title.board",
+            Self::Weekly => "title.weekly",
+            Self::Settings => "pause.settings",
+            Self::Quit => "title.quit",
         }
     }
 }
@@ -138,7 +138,7 @@ fn setup(mut commands: Commands) {
         .with_children(|panel| {
             panel.spawn(label("TODORA", 72.0, TEXT));
             panel.spawn((
-                label("Forty circuits. One lap at a time.", 20.0, AMBER_DIM),
+                crate::text::label("title.subtitle", 20.0, AMBER_DIM),
                 Node {
                     margin: UiRect::bottom(px(24)),
                     ..default()
@@ -159,11 +159,11 @@ fn setup(mut commands: Commands) {
                         BorderColor::all(LINE),
                     ))
                     .with_children(|button| {
-                        button.spawn(label(choice.name(), 22.0, TEXT));
+                        button.spawn(crate::text::label(choice.key(), 22.0, TEXT));
                     });
             }
             panel.spawn((
-                label("↑ ↓  Choose     Enter / A  Go", 13.0, AMBER_DIM),
+                crate::text::label("title.hint", 13.0, AMBER_DIM),
                 Node {
                     margin: UiRect::top(px(16)),
                     ..default()

@@ -120,24 +120,33 @@ struct SectorSpan(usize);
 
 /// The first line: which lap, its time, and what it meant.
 pub(crate) fn headline(report: &LapReport) -> String {
+    use crate::text::{t, tf};
     let time = format_time(report.time);
     let meaning = if !report.valid {
-        "INVALID".to_string()
+        t("card.invalid").to_string()
     } else if report.best {
         match report.previous_best {
-            Some(before) => format!("NEW BEST  {}", signed(report.time - before)),
-            None => "FIRST TIME SET".into(),
+            Some(before) => format!("{}  {}", t("card.new_best"), signed(report.time - before)),
+            None => t("card.first").into(),
         }
     } else {
         match report.previous_best {
-            Some(best) => format!("{} to best", signed(report.time - best)),
+            Some(best) => tf("card.to_best", &[&signed(report.time - best)]),
             None => String::new(),
         }
     };
-    let assisted = if report.assisted { "    ASSISTED" } else { "" };
-    format!("LAP {}    {time}    {meaning}{assisted}", report.number)
-        .trim_end()
-        .to_string()
+    let assisted = if report.assisted {
+        format!("    {}", t("card.assisted"))
+    } else {
+        String::new()
+    };
+    format!(
+        "{} {}    {time}    {meaning}{assisted}",
+        t("card.lap"),
+        report.number
+    )
+    .trim_end()
+    .to_string()
 }
 
 /// Seconds with their sign, the way a delta reads: −0.42, +1.08.
@@ -151,13 +160,12 @@ fn signed(seconds: f32) -> String {
 
 /// Why a lap did not count, in words.
 pub(crate) fn reason(why: Option<Why>) -> String {
+    use crate::text::{t, tf};
     match why {
-        Some(Why::OffTrack { sector }) => {
-            format!("All four wheels off the track in sector {sector}")
-        }
-        Some(Why::Rescued { sector }) => format!("Fetched back to the road in sector {sector}"),
-        Some(Why::Paused) => "Paused during shared practice".into(),
-        None => "Did not count".into(),
+        Some(Why::OffTrack { sector }) => tf("card.off_track", &[&sector]),
+        Some(Why::Rescued { sector }) => tf("card.rescued", &[&sector]),
+        Some(Why::Paused) => t("card.paused").into(),
+        None => t("card.not_counted").into(),
     }
 }
 
@@ -167,13 +175,11 @@ pub(crate) fn speeds(report: &LapReport, units: Units) -> String {
         Units::Kmh => "km/h",
         Units::Mph => "mph",
     };
-    let shown = |speed| crate::hud::displayed_speed(speed, units);
-    let top = format!("Top speed {:.0} {unit}", shown(report.top_speed));
+    use crate::text::tf;
+    let shown = |speed| format!("{:.0}", crate::hud::displayed_speed(speed, units));
+    let top = tf("card.top", &[&shown(report.top_speed), &unit]);
     match report.slowest {
-        Some((speed, sector)) => format!(
-            "{top}    ·    slowest {:.0} {unit} in sector {sector}",
-            shown(speed)
-        ),
+        Some((speed, sector)) => tf("card.slowest", &[&top, &shown(speed), &unit, &sector]),
         None => top,
     }
 }
@@ -321,7 +327,7 @@ fn setup_banner(mut commands: Commands) {
                     BorderColor::all(AMBER),
                 ))
                 .with_children(|panel| {
-                    panel.spawn(label("NEW BEST", 44.0, AMBER));
+                    panel.spawn(crate::text::label("card.banner", 44.0, AMBER));
                     panel.spawn((BannerTime, label("", 26.0, TEXT)));
                 });
         });

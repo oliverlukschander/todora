@@ -250,14 +250,11 @@ fn draw_toggles(
     mut texts: Query<&mut Text>,
 ) {
     for (&which, children) in &buttons {
+        use crate::text::{t, tf};
+        let state = |on: bool| t(if on { "word.on" } else { "word.off" }).to_lowercase();
         let wanted = match which {
-            SoundToggle::Music => {
-                format!("Music  /  N    {}", if sound.music { "on" } else { "off" })
-            }
-            SoundToggle::Effects => format!(
-                "Sound effects  /  F8    {}",
-                if sound.effects { "on" } else { "off" }
-            ),
+            SoundToggle::Music => tf("sound.music", &[&state(sound.music)]),
+            SoundToggle::Effects => tf("sound.effects", &[&state(sound.effects)]),
         };
         for child in children {
             if let Ok(mut text) = texts.get_mut(*child)

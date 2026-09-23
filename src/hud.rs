@@ -137,7 +137,7 @@ fn setup(mut commands: Commands) {
             BackgroundColor(PANEL),
         ))
         .with_children(|session| {
-            session.spawn(label("TODORA  /  FREE DRIVE", 12.0, AMBER));
+            session.spawn(crate::text::label("hud.free_drive", 12.0, AMBER));
             session.spawn((CircuitName, label("", 23.0, TEXT)));
         });
     commands
@@ -261,7 +261,7 @@ fn setup(mut commands: Commands) {
             BackgroundColor(PANEL),
         ))
         .with_children(|timing| {
-            timing.spawn(label("SESSION TIMING", 11.0, AMBER_DIM));
+            timing.spawn(crate::text::label("hud.timing", 11.0, AMBER_DIM));
             timing.spawn((
                 ClockReadout,
                 label(clock_text(&LapTimer::default()), 24.0, TEXT),
@@ -301,16 +301,14 @@ fn draw_controls(
     sound: Res<crate::sound::Sound>,
     mut text: Query<&mut Text, With<ControlHints>>,
 ) {
-    let hint = if pads.is_empty() {
-        "WASD / Arrows  Drive    Space  Handbrake    R  Restart\nG  Ghost    V  Camera    L  Board    Scroll  Zoom    Esc  Pause"
+    use crate::text::{t, tf};
+    let keys = t(if pads.is_empty() {
+        "hud.keys"
     } else {
-        "Left stick  Steer    A  Gas    X  Brake    B  Handbrake    RB  Reset\nStart  Pause    LB  Garage    View  Circuits    Y  Ghost    D-pad up  Camera"
-    };
-    let hint = format!(
-        "{hint}\nM  Music: {}    F8  Effects: {}",
-        sound.station(),
-        if sound.effects { "on" } else { "off" }
-    );
+        "hud.pad"
+    });
+    let effects = t(if sound.effects { "word.on" } else { "word.off" }).to_lowercase();
+    let hint = format!("{keys}\n{}", tf("hud.sound", &[&sound.station(), &effects]));
     if let Ok(mut text) = text.single_mut()
         && text.0 != hint
     {
@@ -425,11 +423,17 @@ fn draw_delta(
                 ),
                 None,
             ),
-            None => (("GHOST  --".to_string(), AMBER_DIM), None),
+            None => (
+                (format!("{}  --", crate::text::t("hud.ghost")), AMBER_DIM),
+                None,
+            ),
         },
         (true, Some((who, delta))) => (gap("PB", ghost.delta), Some(gap(who, *delta))),
         (false, Some((who, delta))) => (gap(who, *delta), None),
-        (false, None) => (("GHOST OFF".to_string(), AMBER_DIM), None),
+        (false, None) => (
+            (crate::text::t("hud.ghost_off").to_string(), AMBER_DIM),
+            None,
+        ),
     };
     if let Ok((mut text, mut color)) = readout.single_mut() {
         if text.0 != first.0 {
@@ -617,12 +621,9 @@ fn clock_text(timer: &LapTimer) -> String {
         .best
         .map(format_time)
         .unwrap_or_else(|| "--:--.--".into());
-    format!(
-        "LAP  {}\n{}\nLAST {}\nBEST {}",
-        timer.completed,
-        format_time(timer.current),
-        last,
-        best
+    crate::text::tf(
+        "hud.clock",
+        &[&timer.completed, &format_time(timer.current), &last, &best],
     )
 }
 
@@ -640,9 +641,9 @@ pub(crate) fn split_colour(split: Split, palette: crate::ui::Palette) -> Option<
 /// the only thing that says it.
 pub(crate) fn split_word(split: Split) -> &'static str {
     match split {
-        Split::Purple => "  FASTEST",
-        Split::Green => "  FASTER",
-        Split::Yellow => "  SLOWER",
+        Split::Purple => crate::text::t("hud.fastest"),
+        Split::Green => crate::text::t("hud.faster"),
+        Split::Yellow => crate::text::t("hud.slower"),
         Split::Plain => "",
     }
 }
@@ -684,7 +685,14 @@ fn draw_sector(
     mut invalid: Query<&mut Text, (With<InvalidReadout>, Without<SectorReadout>)>,
 ) {
     if let Ok(mut text) = invalid.single_mut() {
-        text.0 = if timer.invalid { "LAP INVALID" } else { "" }.into();
+        let wanted = if timer.invalid {
+            crate::text::t("hud.invalid")
+        } else {
+            ""
+        };
+        if text.0 != wanted {
+            text.0 = wanted.into();
+        }
     }
     if let Ok((mut text, mut color)) = sectors.single_mut() {
         let palette = crate::ui::Palette::of(settings.as_deref());
@@ -693,8 +701,10 @@ fn draw_sector(
             Some(s) => {
                 let word = if words { split_word(s.split) } else { "" };
                 text.0 = match s.delta {
-                    Some(d) => format!("SECTOR {}   {d:+.2}{word}", s.number),
-                    None => format!("SECTOR {}   {}", s.number, format_time(s.time)),
+                    Some(d) => {
+                        crate::text::tf("hud.sector", &[&s.number, &format!("{d:+.2}"), &word])
+                    }
+                    None => crate::text::tf("hud.sector", &[&s.number, &format_time(s.time), &""]),
                 };
                 color.0 = split_colour(s.split, palette).unwrap_or(AMBER_DIM);
             }

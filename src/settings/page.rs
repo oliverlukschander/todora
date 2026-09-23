@@ -24,6 +24,17 @@ pub(crate) enum Tab {
 }
 
 impl Tab {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Audio => "tab.audio",
+            Self::Display => "tab.display",
+            Self::Hud => "tab.hud",
+            Self::Controls => "tab.controls",
+            Self::Keys => "tab.keys",
+            Self::Online => "tab.online",
+        }
+    }
+
     const ALL: [Self; 6] = [
         Self::Audio,
         Self::Display,
@@ -32,17 +43,6 @@ impl Tab {
         Self::Keys,
         Self::Online,
     ];
-
-    fn name(self) -> &'static str {
-        match self {
-            Self::Audio => "Audio",
-            Self::Display => "Display",
-            Self::Hud => "HUD",
-            Self::Controls => "Controls",
-            Self::Keys => "Keys",
-            Self::Online => "Online",
-        }
-    }
 
     fn rows(self) -> &'static [Row] {
         use Row::*;
@@ -68,6 +68,7 @@ impl Tab {
                 ColourBlind,
                 HighContrast,
                 ReducedMotion,
+                Language,
             ],
             Self::Controls => &[Steering, Deadzone, Rumble, StickyPedals, Assists],
             Self::Keys => &[
@@ -112,6 +113,7 @@ pub(crate) enum Row {
     ColourBlind,
     HighContrast,
     ReducedMotion,
+    Language,
     StickyPedals,
     Assists,
     Steering,
@@ -138,7 +140,7 @@ const ROWS: usize = 10;
 const FPS_CAPS: [u32; 5] = [0, 30, 60, 120, 144];
 
 fn on_off(on: bool) -> String {
-    if on { "On" } else { "Off" }.into()
+    crate::text::t(if on { "word.on" } else { "word.off" }).into()
 }
 
 fn percent(value: f32) -> String {
@@ -160,40 +162,41 @@ fn cycle<T: PartialEq + Copy>(options: &[T], now: T, dir: i32) -> T {
 impl Row {
     fn name(self) -> &'static str {
         match self {
-            Self::Music => "Radio",
-            Self::MusicVolume => "Music volume",
-            Self::Effects => "Tyre sound and beeps",
-            Self::EffectsVolume => "Effects volume",
-            Self::EngineVolume => "Engine volume",
-            Self::Fullscreen => "Full screen",
-            Self::Vsync => "Vertical sync",
-            Self::Antialiasing => "Anti-aliasing",
-            Self::FpsCap => "Frame limit",
-            Self::RenderScale => "Render scale",
-            Self::UiScale => "Text and HUD size",
-            Self::TvMargin => "TV-safe margin",
-            Self::Fov => "Field of view",
-            Self::Camera => "Camera  (V / D-pad up while driving)",
-            Self::ShowFps => "Show frame rate",
-            Self::Units => "Speed units",
-            Self::Minimap => "Mini-map",
-            Self::GMeter => "G-meter",
-            Self::Countdown => "Start countdown",
-            Self::ColourBlind => "Colour-blind colours",
-            Self::HighContrast => "High-contrast HUD",
-            Self::ReducedMotion => "Reduced motion",
-            Self::StickyPedals => "Tap to hold pedals",
-            Self::Assists => "Beginner driving assists",
-            Self::Steering => "Steering sensitivity",
-            Self::Deadzone => "Stick dead zone",
-            Self::Rumble => "Rumble",
-            Self::Online => "World leaderboards",
-            Self::Name => "Name  (type, or ← → for ideas)",
-            Self::Country => "Country",
-            Self::Pending => "Laps waiting to upload",
-            Self::Forget => "Delete my online data",
+            Self::Music => crate::text::t("row.music"),
+            Self::MusicVolume => crate::text::t("row.music_volume"),
+            Self::Effects => crate::text::t("row.effects"),
+            Self::EffectsVolume => crate::text::t("row.effects_volume"),
+            Self::EngineVolume => crate::text::t("row.engine_volume"),
+            Self::Fullscreen => crate::text::t("row.fullscreen"),
+            Self::Vsync => crate::text::t("row.vsync"),
+            Self::Antialiasing => crate::text::t("row.antialiasing"),
+            Self::FpsCap => crate::text::t("row.fps_cap"),
+            Self::RenderScale => crate::text::t("row.render_scale"),
+            Self::UiScale => crate::text::t("row.ui_scale"),
+            Self::TvMargin => crate::text::t("row.tv_margin"),
+            Self::Fov => crate::text::t("row.fov"),
+            Self::Camera => crate::text::t("row.camera"),
+            Self::ShowFps => crate::text::t("row.show_fps"),
+            Self::Units => crate::text::t("row.units"),
+            Self::Minimap => crate::text::t("row.minimap"),
+            Self::GMeter => crate::text::t("row.g_meter"),
+            Self::Countdown => crate::text::t("row.countdown"),
+            Self::ColourBlind => crate::text::t("row.colour_blind"),
+            Self::HighContrast => crate::text::t("row.high_contrast"),
+            Self::ReducedMotion => crate::text::t("row.reduced_motion"),
+            Self::StickyPedals => crate::text::t("row.sticky"),
+            Self::Assists => crate::text::t("row.assists"),
+            Self::Steering => crate::text::t("row.steering"),
+            Self::Deadzone => crate::text::t("row.deadzone"),
+            Self::Rumble => crate::text::t("row.rumble"),
+            Self::Online => crate::text::t("row.online"),
+            Self::Name => crate::text::t("row.name"),
+            Self::Country => crate::text::t("row.country"),
+            Self::Pending => crate::text::t("row.pending"),
+            Self::Forget => crate::text::t("row.forget"),
             Self::Bind(at) => super::bindings::Act::ALL[at as usize].name(),
-            Self::Defaults => "Put every key back",
+            Self::Language => crate::text::t("row.language"),
+            Self::Defaults => crate::text::t("row.defaults"),
         }
     }
 
@@ -206,9 +209,14 @@ impl Row {
             Self::EngineVolume => percent(s.engine_volume),
             Self::Fullscreen => on_off(s.fullscreen),
             Self::Vsync => on_off(s.vsync),
-            Self::Antialiasing => if s.antialiasing { "4×" } else { "Off" }.into(),
+            Self::Antialiasing => if s.antialiasing {
+                "4×"
+            } else {
+                crate::text::t("word.off")
+            }
+            .into(),
             Self::FpsCap => match s.fps_cap {
-                0 => "Off".into(),
+                0 => crate::text::t("word.off").into(),
                 cap => format!("{cap} fps"),
             },
             Self::RenderScale => percent(s.render_scale),
@@ -225,14 +233,20 @@ impl Row {
             Self::Minimap => on_off(s.minimap),
             Self::GMeter => on_off(s.g_meter),
             Self::Countdown => match s.countdown {
-                Countdown::Full => "Always full",
-                Countdown::Short => "Short on restart",
-                Countdown::Off => "Off",
+                Countdown::Full => crate::text::t("value.always_full"),
+                Countdown::Short => crate::text::t("value.short"),
+                Countdown::Off => crate::text::t("word.off"),
             }
             .into(),
             Self::ColourBlind => on_off(s.colour_blind),
             Self::HighContrast => on_off(s.high_contrast),
             Self::ReducedMotion => on_off(s.reduced_motion),
+            Self::Language => crate::text::Language::from_code(&s.language)
+                .map_or(
+                    crate::text::t("value.automatic"),
+                    crate::text::Language::name,
+                )
+                .into(),
             Self::StickyPedals => on_off(s.sticky_pedals),
             Self::Assists => on_off(s.assists),
             Self::Steering => percent(s.steering),
@@ -242,14 +256,14 @@ impl Row {
             Self::Online => on_off(s.online),
             Self::Name if s.name.is_empty() => "—".into(),
             Self::Name => s.name.clone(),
-            Self::Country if s.country.is_empty() => "None".into(),
+            Self::Country if s.country.is_empty() => crate::text::t("word.none").into(),
             Self::Country => s.country.clone(),
             Self::Pending => s.pending.to_string(),
             Self::Bind(at) => s.bindings.shown(super::bindings::Act::ALL[at as usize]),
             Self::Defaults => "Enter".into(),
             Self::Forget => match s.forget_presses {
-                0 => "Press to delete".into(),
-                _ => "Press again to delete everything".into(),
+                0 => crate::text::t("value.press").into(),
+                _ => crate::text::t("value.press_again").into(),
             },
         }
     }
@@ -285,6 +299,11 @@ impl Row {
             Self::ColourBlind => s.colour_blind = !s.colour_blind,
             Self::HighContrast => s.high_contrast = !s.high_contrast,
             Self::ReducedMotion => s.reduced_motion = !s.reduced_motion,
+            Self::Language => {
+                let codes = ["auto", "en", "de", "fr", "es", "it"];
+                let at = codes.iter().position(|c| *c == s.language).unwrap_or(0) as i32;
+                s.language = codes[(at + dir).rem_euclid(codes.len() as i32) as usize].into();
+            }
             Self::StickyPedals => s.sticky_pedals = !s.sticky_pedals,
             Self::Assists => s.assists = !s.assists,
             Self::Steering => s.steering = nudge(s.steering, dir, 0.1, 0.5, 1.5),
@@ -403,7 +422,7 @@ fn setup(mut commands: Commands) {
                     BorderColor::all(LINE),
                 ))
                 .with_children(|panel| {
-                    panel.spawn(label("TODORA  /  SETTINGS", 12.0, AMBER));
+                    panel.spawn(crate::text::label("settings.label", 12.0, AMBER));
                     panel
                         .spawn(Node {
                             column_gap: px(8),
@@ -423,7 +442,7 @@ fn setup(mut commands: Commands) {
                                     BackgroundColor(SURFACE),
                                 ))
                                 .with_children(|tab_node| {
-                                    tab_node.spawn(label(tab.name(), 17.0, TEXT));
+                                    tab_node.spawn(crate::text::label(tab.key(), 17.0, TEXT));
                                 });
                             }
                         });
@@ -447,11 +466,7 @@ fn setup(mut commands: Commands) {
                                 row.spawn((RowValue(i), label("", 17.0, TEXT)));
                             });
                     }
-                    panel.spawn(label(
-                        "↑ ↓  Choose    ← →  Change    LB / RB  or  Q / E  Tab\nEsc / B  Back to the pause",
-                        13.0,
-                        AMBER_DIM,
-                    ));
+                    panel.spawn(crate::text::label("settings.hint", 13.0, AMBER_DIM));
                 });
         });
 }
@@ -642,7 +657,7 @@ fn draw(
     for (value, mut text, mut colour) in &mut values {
         if let Some(row) = rows.get(value.0) {
             let wanted = if page.capturing.is_some_and(|(at, _)| at == value.0) {
-                "Press a key or button…  (Esc cancels)".to_string()
+                crate::text::t("value.waiting").to_string()
             } else {
                 row.value(&settings)
             };

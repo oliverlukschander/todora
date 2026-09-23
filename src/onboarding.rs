@@ -49,45 +49,43 @@ impl Guide {
 
 /// The title and body of a card, for the device in hand.
 pub(crate) fn card(at: usize, device: LastDevice) -> (&'static str, &'static str) {
+    use crate::text::t;
     let pad = device == LastDevice::Pad;
     match at {
-        0 if pad => (
-            "DRIVE",
-            "RT or A  accelerate      LT or X  brake, reverse from a stop\n\
-             Left stick  steer      B  handbrake      RB  restart the lap",
-        ),
         0 => (
-            "DRIVE",
-            "W  accelerate      S  brake, reverse from a stop\n\
-             A / D  steer      Space  handbrake      R  restart the lap",
+            t("guide.drive"),
+            t(if pad {
+                "guide.drive_pad"
+            } else {
+                "guide.drive_keys"
+            }),
         ),
-        1 => (
-            "THE LAP",
-            "The clock starts at the chequered line, after the run-up.\n\
-             All four wheels off the asphalt and kerbs, and the lap does not count.",
-        ),
-        _ if pad => (
-            "THE GHOST",
-            "Your best lap drives again beside you in amber.\n\
-             Beat it, and it becomes the new one.  Y  shows or hides it.",
-        ),
+        1 => (t("guide.lap"), t("guide.lap_body")),
         _ => (
-            "THE GHOST",
-            "Your best lap drives again beside you in amber.\n\
-             Beat it, and it becomes the new one.  G  shows or hides it.",
+            t("guide.ghost"),
+            t(if pad {
+                "guide.ghost_pad"
+            } else {
+                "guide.ghost_keys"
+            }),
         ),
     }
 }
 
 fn footer(at: usize, device: LastDevice) -> String {
+    use crate::text::{t, tf};
     let (next, skip) = match device {
         LastDevice::Pad => ("A", "B"),
         LastDevice::Keyboard => ("Enter", "Esc"),
     };
-    let next_word = if at + 1 == CARDS { "drive" } else { "next" };
-    format!(
-        "{} / {CARDS}        {next}  {next_word}      {skip}  skip",
-        at + 1
+    let next_word = t(if at + 1 == CARDS {
+        "guide.go"
+    } else {
+        "guide.next"
+    });
+    tf(
+        "guide.footer",
+        &[&(at + 1), &CARDS, &next, &next_word, &skip],
     )
 }
 
@@ -162,11 +160,7 @@ fn setup(mut commands: Commands) {
         });
     commands.spawn((
         Hint,
-        label(
-            "Laps not counting?  Beginner mode is 20% slower — C / LB  →  Garage & setup  →  mode.",
-            16.0,
-            TEXT,
-        ),
+        crate::text::label("guide.beginner", 16.0, TEXT),
         Node {
             position_type: PositionType::Absolute,
             top: px(96),

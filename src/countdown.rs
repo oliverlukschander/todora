@@ -154,8 +154,8 @@ impl Start {
     /// The word under the lights.
     fn caption(&self) -> &'static str {
         match (self.held(), self.red()) {
-            (false, _) => "GO",
-            (true, 0) => "READY",
+            (false, _) => crate::text::t("countdown.go"),
+            (true, 0) => crate::text::t("countdown.ready"),
             _ => match (self.go_at - self.elapsed).ceil() as u8 {
                 3.. => "3",
                 2 => "2",
