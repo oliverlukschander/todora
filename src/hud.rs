@@ -61,7 +61,7 @@ impl Plugin for HudPlugin {
 }
 
 #[derive(Component)]
-struct ClockReadout;
+pub(crate) struct ClockReadout;
 #[derive(Component)]
 struct SectorReadout;
 #[derive(Component)]

@@ -29,9 +29,10 @@ pub struct SummaryPlugin;
 impl Plugin for SummaryPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Card>()
-            .add_systems(Startup, setup)
+            .init_resource::<Celebration>()
+            .add_systems(Startup, (setup, setup_banner))
             .add_systems(FixedUpdate, hear.after(LapSet))
-            .add_systems(Update, draw);
+            .add_systems(Update, (draw, celebrate).chain());
     }
 }
 
@@ -232,11 +233,141 @@ fn setup(mut commands: Commands) {
         });
 }
 
-/// A lap has ended: put the card up.
-fn hear(mut laps: MessageReader<LapFinished>, mut card: ResMut<Card>) {
+/// A lap has ended: put the card up, and celebrate it if it beat the best.
+fn hear(
+    mut laps: MessageReader<LapFinished>,
+    timer: Res<LapTimer>,
+    mut card: ResMut<Card>,
+    mut party: ResMut<Celebration>,
+    mut cues: MessageWriter<crate::sound::Cue>,
+) {
     if laps.read().last().is_some() {
         card.left = SHOWN_FOR;
         card.fresh = true;
+        if timer.report.as_ref().is_some_and(celebrates) {
+            party.left = CELEBRATE_FOR;
+            party.fresh = true;
+            cues.write(crate::sound::Cue::Best);
+        }
+    }
+}
+
+/// How long the banner stays and the clock flashes.
+const CELEBRATE_FOR: f32 = 2.4;
+/// The clock flashes gold this many times, at this pace.
+const FLASHES: f32 = 3.0;
+const FLASH_FOR: f32 = 1.2;
+
+/// A lap is celebrated when it beat a best that already stood. The first lap
+/// on a circuit is a best too, but beating nothing is not worth a fanfare.
+pub(crate) fn celebrates(report: &LapReport) -> bool {
+    report.valid && report.best && report.previous_best.is_some()
+}
+
+/// Whether the clock is lit gold, `left` seconds before the celebration ends.
+fn flash_on(left: f32) -> bool {
+    let into = CELEBRATE_FOR - left;
+    into < FLASH_FOR && (into / FLASH_FOR * FLASHES).fract() < 0.5
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct Celebration {
+    left: f32,
+    fresh: bool,
+}
+
+impl Celebration {
+    /// Hold the banner up, the clock lit, for a visual check.
+    #[cfg(feature = "visual-check")]
+    pub(crate) fn hold(&mut self) {
+        if self.left == 0.0 {
+            self.fresh = true;
+        }
+        self.left = CELEBRATE_FOR - 0.05;
+    }
+}
+
+#[derive(Component)]
+struct Banner;
+#[derive(Component)]
+struct BannerTime;
+
+fn setup_banner(mut commands: Commands) {
+    commands
+        .spawn((
+            Banner,
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(110),
+                left: px(0),
+                right: px(0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            Visibility::Hidden,
+        ))
+        .with_children(|banner| {
+            banner
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        padding: UiRect::axes(px(34), px(14)),
+                        border: UiRect::all(px(2)),
+                        border_radius: BorderRadius::all(px(18)),
+                        ..default()
+                    },
+                    BackgroundColor(FRONT),
+                    BorderColor::all(AMBER),
+                ))
+                .with_children(|panel| {
+                    panel.spawn(label("NEW BEST", 44.0, AMBER));
+                    panel.spawn((BannerTime, label("", 26.0, TEXT)));
+                });
+        });
+}
+
+/// The banner, the flashing clock, and nothing at all once it is over.
+#[allow(clippy::type_complexity)]
+fn celebrate(
+    time: Res<Time>,
+    halt: Res<Halt>,
+    timer: Res<LapTimer>,
+    mut party: ResMut<Celebration>,
+    mut banners: Query<&mut Visibility, With<Banner>>,
+    mut times: Query<&mut Text, With<BannerTime>>,
+    mut clocks: Query<&mut TextColor, With<crate::hud::ClockReadout>>,
+) {
+    let was = party.left;
+    party.left = (party.left - time.delta_secs()).max(0.0);
+    if was == 0.0 && !party.fresh {
+        return;
+    }
+    let showing = party.left > 0.0 && !halt.stopped();
+    for mut visibility in &mut banners {
+        visibility.set_if_neq(if showing {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
+    }
+    if party.fresh {
+        party.fresh = false;
+        if let (Ok(mut text), Some(report)) = (times.single_mut(), &timer.report) {
+            text.0 = match report.previous_best {
+                Some(before) => format!(
+                    "{}   {}",
+                    format_time(report.time),
+                    signed(report.time - before)
+                ),
+                None => format_time(report.time),
+            };
+        }
+    }
+    let lit = showing && flash_on(party.left);
+    for mut colour in &mut clocks {
+        colour.set_if_neq(TextColor(if lit { AMBER } else { TEXT }));
     }
 }
 
@@ -344,6 +475,33 @@ mod tests {
             ..report()
         };
         assert_eq!(headline(&invalid), "LAP 7    1:13.60    INVALID");
+    }
+
+    #[test]
+    fn only_beating_a_best_that_stood_is_celebrated() {
+        assert!(celebrates(&report()));
+        assert!(!celebrates(&LapReport {
+            previous_best: None,
+            ..report()
+        }));
+        assert!(!celebrates(&LapReport {
+            best: false,
+            ..report()
+        }));
+        assert!(!celebrates(&LapReport {
+            valid: false,
+            ..report()
+        }));
+    }
+
+    #[test]
+    fn the_clock_flashes_three_times_then_stays_plain() {
+        let lit: Vec<bool> = (0..=24)
+            .map(|tenth| flash_on(CELEBRATE_FOR - tenth as f32 * 0.1))
+            .collect();
+        let flashes = lit.windows(2).filter(|w| !w[0] && w[1]).count() + usize::from(lit[0]);
+        assert_eq!(flashes, 3);
+        assert!(lit[13..].iter().all(|on| !on));
     }
 
     #[test]

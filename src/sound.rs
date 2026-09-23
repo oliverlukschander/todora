@@ -1,6 +1,7 @@
 //! Quiet radio and recorded wheel sounds driven by speed and grip.
 mod radio;
 mod synth;
+pub(crate) use synth::Cue;
 use synth::Tyres;
 
 use bevy::{audio::AddAudioSource, prelude::*, window::PrimaryWindow};
@@ -21,6 +22,7 @@ impl Plugin for SoundPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Sound>()
             .add_message::<SoundToggle>()
+            .add_message::<Cue>()
             .add_audio_source::<radio::Soundtrack>()
             .add_systems(Startup, start)
             .add_systems(Update, (apply_toggles, update, draw_toggles, beep).chain())
@@ -79,7 +81,7 @@ struct Signal {
     /// How far everything the car makes is turned down, 0 (full volume) to 1.
     /// Stored as the cut rather than the volume so a fresh signal is audible.
     effects_cut: AtomicU32,
-    /// Start-light beeps asked for: a count, doubled, plus one for GO.
+    /// Beeps asked for: a count, times four, plus the cue's code.
     beep: AtomicU32,
 }
 
@@ -179,13 +181,18 @@ fn update(
 /// silences it too, and not at all while the window is in the background.
 fn beep(
     mut lights: MessageReader<crate::countdown::StartLight>,
+    mut cues: MessageReader<Cue>,
     windows: Query<&Window, With<PrimaryWindow>>,
     sound: Res<Sound>,
 ) {
-    for light in lights.read() {
+    let heard = lights
+        .read()
+        .map(|light| if light.go { Cue::Go } else { Cue::Red })
+        .chain(cues.read().copied());
+    for cue in heard {
         if sound.effects && windows.iter().all(|window| window.focused) {
             let asked = sound.signal.beep.load(Relaxed);
-            let next = ((asked >> 1).wrapping_add(1) << 1) | u32::from(light.go);
+            let next = ((asked >> 2).wrapping_add(1) << 2) | cue.code();
             sound.signal.beep.store(next, Relaxed);
         }
     }

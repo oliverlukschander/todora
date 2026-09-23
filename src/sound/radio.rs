@@ -91,7 +91,7 @@ impl Iterator for Mixer {
             let beeps = self.signal.beep.load(Relaxed);
             if beeps != self.beeps {
                 self.beeps = beeps;
-                self.beep.start(beeps & 1 == 1);
+                self.beep.start(super::synth::Cue::from_code(beeps & 3));
             }
             self.vehicle_sample += self.beep.sample();
             self.vehicle_sample *= 1.0 - f32::from_bits(self.signal.effects_cut.load(Relaxed));

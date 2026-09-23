@@ -42,23 +42,71 @@ impl Tyres {
     }
 }
 
-/// The start lights' beep: a short sine with a soft attack and release, low
-/// for a red light and an octave up for GO. Rendered sample by sample on the
-/// audio thread, so nothing is allocated for it.
+/// What the game can ask the beeper for.
+#[derive(bevy::prelude::Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Cue {
+    /// A red start light.
+    Red,
+    /// The green one.
+    Go,
+    /// A new best lap: three rising notes.
+    Best,
+}
+
+impl Cue {
+    pub(super) fn code(self) -> u32 {
+        match self {
+            Self::Red => 0,
+            Self::Go => 1,
+            Self::Best => 2,
+        }
+    }
+
+    pub(super) fn from_code(code: u32) -> Self {
+        match code {
+            1 => Self::Go,
+            2 => Self::Best,
+            _ => Self::Red,
+        }
+    }
+
+    /// The notes, as pitch and length.
+    fn notes(self) -> &'static [(f32, f32)] {
+        match self {
+            Self::Red => &[(660.0, 0.2)],
+            Self::Go => &[(1_320.0, 0.42)],
+            Self::Best => &[(880.0, 0.13), (1_174.7, 0.13), (1_760.0, 0.38)],
+        }
+    }
+}
+
+/// The start lights' beep and the best-lap chime: short sines with a soft
+/// attack and release, one note after another. Rendered sample by sample on
+/// the audio thread, so nothing is allocated for them.
 #[derive(Default)]
 pub(super) struct Beep {
     phase: f32,
     step: f32,
     left: u32,
     length: u32,
+    /// Notes still to come after this one.
+    queue: &'static [(f32, f32)],
 }
 
 /// Samples a second, per channel, as the mixer runs.
 const RATE: f32 = 44_100.0;
 
 impl Beep {
-    pub fn start(&mut self, go: bool) {
-        let (pitch, seconds) = if go { (1_320.0, 0.42) } else { (660.0, 0.2) };
+    pub fn start(&mut self, cue: Cue) {
+        self.queue = cue.notes();
+        self.next();
+    }
+
+    fn next(&mut self) {
+        let Some((&(pitch, seconds), rest)) = self.queue.split_first() else {
+            return;
+        };
+        self.queue = rest;
         self.phase = 0.0;
         self.step = pitch / RATE * std::f32::consts::TAU;
         self.length = (seconds * RATE) as u32;
@@ -67,7 +115,10 @@ impl Beep {
 
     pub fn sample(&mut self) -> f32 {
         if self.left == 0 {
-            return 0.0;
+            self.next();
+            if self.left == 0 {
+                return 0.0;
+            }
         }
         let done = (self.length - self.left) as f32 / RATE;
         let remaining = self.left as f32 / RATE;
@@ -84,14 +135,18 @@ mod tests {
 
     #[test]
     fn a_beep_is_bounded_and_ends_in_silence() {
-        for go in [false, true] {
+        for cue in [Cue::Red, Cue::Go, Cue::Best] {
             let mut beep = Beep::default();
             assert_eq!(beep.sample(), 0.0);
-            beep.start(go);
-            let samples: Vec<f32> = (0..30_000).map(|_| beep.sample()).collect();
+            beep.start(cue);
+            let samples: Vec<f32> = (0..40_000).map(|_| beep.sample()).collect();
             assert!(samples.iter().all(|s| s.abs() <= 0.16));
             assert!(samples.iter().any(|s| s.abs() > 0.1));
-            assert!(samples[25_000..].iter().all(|s| *s == 0.0));
+            assert!(
+                samples[35_000..].iter().all(|s| *s == 0.0),
+                "{cue:?} rang on"
+            );
+            assert_eq!(Cue::from_code(cue.code()), cue);
         }
     }
 
