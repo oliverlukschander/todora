@@ -1,0 +1,9 @@
+# Add to the host's Caddyfile. Caddy fetches the certificate itself and sets
+# X-Forwarded-For, which the server uses for rate limits (in memory only).
+todora.lukschander.com {
+	encode gzip
+	request_body {
+		max_size 300KB
+	}
+	reverse_proxy 127.0.0.1:8787
+}

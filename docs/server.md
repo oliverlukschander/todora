@@ -80,3 +80,27 @@ curl http://127.0.0.1:8787/v1/health
 Configuration is `TODORA_DB`, `TODORA_LISTEN` (default `127.0.0.1:8787`; the
 image listens on `0.0.0.0:8787`) and `TODORA_ADMIN_TOKEN` (24 characters or
 more; moderation is off without it).
+
+## Deploying
+
+```sh
+server/deploy/deploy.sh root@your-hetzner-host          # ARCH=arm64 for CAX machines
+server/deploy/deploy.sh local                           # try the same thing on this machine
+```
+
+The script builds the image for the target, copies it over SSH, and runs one
+container on `127.0.0.1:8787` with its data in the `todora-data` volume,
+`--restart unless-stopped`, 512 MB of memory and 1.5 CPUs. It makes an admin
+token once, in `/etc/todora/admin-token` on the target, and passes it to the
+container. It does not touch anything else on the host.
+
+Put the host's reverse proxy in front of it for TLS and the name
+`todora.lukschander.com`: `server/deploy/Caddyfile.example` or
+`server/deploy/nginx.example`. The proxy must set `X-Forwarded-For` and should
+keep no access log for this site.
+
+Back up the `todora-data` volume (`docker run --rm -v todora-data:/data -v
+$PWD:/out debian tar czf /out/todora-data.tgz /data`). The database is SQLite in
+WAL mode; copy it while the container is stopped, or with `sqlite3 .backup`.
+
+Before going live, fill in the contact address in [privacy.md](privacy.md).

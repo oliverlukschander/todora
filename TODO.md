@@ -25,6 +25,12 @@ The approved plan, decisions and build order are in the
   `cargo test --locked -p todora-server`.
 - [x] Game client: opt-in, signed uploads with backoff, Online settings tab, leaderboard overlay with world/country/rivals (2026-09-24).
 - [x] Race a downloaded ghost beside your own, with its delta and world-record purple (2026-09-24).
+- [x] Deploy script (tested against local Docker, amd64 and arm64), reverse-proxy
+  examples and a privacy note (2026-09-24).
+- [ ] Before going live: fill in the contact address in `docs/privacy.md`, point
+  DNS for todora.lukschander.com at the Hetzner host, add the Caddy or nginx site,
+  run `server/deploy/deploy.sh root@host` (ARCH=arm64 on CAX), and check
+  `/v1/health` over HTTPS.
 - [ ] Online leaderboards at todora.lukschander.com.
 
 ## Game Center multiplayer
