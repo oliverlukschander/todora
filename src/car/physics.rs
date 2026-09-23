@@ -191,7 +191,7 @@ impl Handling {
     /// speed, and that is the whole reason a fast corner is a wide corner.
     pub fn lock(&self, speed: f32) -> f32 {
         let asks = self.lock_margin * self.grip_at(speed) * self.wheelbase / speed.max(1.0).powi(2);
-        asks.atan().min(self.max_steer)
+        libm::atanf(asks).min(self.max_steer)
     }
 }
 
@@ -207,6 +207,51 @@ pub(crate) struct Controls {
     pub steer: f32,
     pub handbrake: bool,
 }
+
+impl Controls {
+    /// What the engine is actually given: each pedal to one of 256 steps and
+    /// the wheel to one of 255, which is what a recorded lap keeps of them.
+    /// A lap replayed from its record has to be the lap that was driven, to
+    /// the bit, and it can only be if the car drove on the recorded values in
+    /// the first place. A 256th of pedal travel is not something a driver can
+    /// feel. Anything that is not a number is let go of.
+    pub fn quantised(self) -> Self {
+        let within = |value: f32, low: f32| {
+            if value.is_nan() {
+                0.0
+            } else {
+                value.clamp(low, 1.0)
+            }
+        };
+        let pedal = |value: f32| (within(value, 0.0) * 255.0).round() / 255.0;
+        Self {
+            throttle: pedal(self.throttle),
+            brake: pedal(self.brake),
+            steer: (within(self.steer, -1.0) * 127.0).round() / 127.0,
+            handbrake: self.handbrake,
+        }
+    }
+}
+
+/// A turn of `yaw` radians about +Y, as [`Quat::from_rotation_y`] makes one
+/// but with the sine and cosine from `libm`.
+///
+/// Every function the engine calls has to give the same bits on every machine,
+/// or a lap replayed from its inputs on a server drifts away from the lap that
+/// was driven. Arithmetic and square roots are exact under IEEE 754 and are the
+/// same everywhere; sines, cosines and arctangents come from each platform's
+/// maths library and are not. So the engine takes them from `libm`, which is
+/// Rust and the same wherever it is compiled. `determinism` holds it to that.
+pub(crate) fn turn(yaw: f32) -> Quat {
+    let (sin, cos) = libm::sincosf(yaw * 0.5);
+    Quat::from_xyzw(0.0, sin, 0.0, cos)
+}
+
+/// Moves whenever anything a lap time depends on moves: a [`Handling`], the
+/// [`step`], how the track holds the car, or the rules that judge a lap. A lap
+/// recorded under one version is not replayed under another.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) const PHYSICS_VERSION: u32 = 1;
 
 /// What the road is offering at the contact patches.
 #[derive(Clone, Copy, Debug)]
@@ -287,7 +332,7 @@ pub(crate) fn step(
     let lateral = car.velocity.dot(right);
     let was = car.velocity;
     // Positive when travelling to the right of the nose.
-    let slip = lateral.atan2(forward.abs());
+    let slip = libm::atan2f(lateral, forward.abs());
 
     // Steering. The wheels follow the driver with a lag, to a lock that shrinks
     // with speed.
@@ -342,7 +387,7 @@ pub(crate) fn step(
     // over, and the car straightens — which is how a drift is held and how it is
     // caught. The car turns toward the sum, with the lag that gives it weight.
     let bite = (speed / 2.0).min(1.0);
-    let kinematic = forward * car.steer_angle.tan() / h.wheelbase;
+    let kinematic = forward * libm::tanf(car.steer_angle) / h.wheelbase;
     // When backing up it is the tail, not the nose, that follows travel.
     let direction = if forward < 0.0 { -1.0 } else { 1.0 };
     let align = -slip * direction * h.align * hold * bite;
@@ -357,7 +402,7 @@ pub(crate) fn step(
     // a sliding tyre turns speed into heat, which is why a slide slows the car,
     // and why it must: an earlier version handed part of it back as forward
     // speed, and a sliding car accelerated.
-    let turned = Quat::from_rotation_y(yaw);
+    let turned = turn(yaw);
     let heading = turned * heading;
     let right = turned * right;
     let sideways = car.velocity.dot(right);

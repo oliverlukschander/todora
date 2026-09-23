@@ -5200,6 +5200,7 @@ version = "0.11.0"
 dependencies = [
  "bevy",
  "cc",
+ "libm",
  "lyon_tessellation",
  "rodio",
  "serde",

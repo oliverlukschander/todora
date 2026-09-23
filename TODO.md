@@ -7,7 +7,8 @@ The approved plan, decisions and build order are in the
 
 - [x] 3-2-1-GO start lights with the car held on the grid (2026-09-23).
 - [x] Drive the multiplayer countdown through the same start lights (2026-09-23).
-- [ ] Determinism spike for server-side lap replay.
+- [x] Determinism spike: bit-identical replay on macOS arm64, Linux arm64 and
+  Linux x86-64 for all 40 circuits (2026-09-23). Physics trig uses `libm`.
 - [ ] Sector colours, settings, lap summary, medals and onboarding.
 - [ ] Online leaderboards at todora.lukschander.com.
 

@@ -9,6 +9,8 @@
 //! nothing here decides what the driver wants — that is [`crate::input`], or a
 //! [`driver::Driver`].
 
+#[cfg(test)]
+mod determinism;
 mod driver;
 mod garage;
 mod mode;
@@ -174,6 +176,7 @@ pub(crate) fn advance(
     car: &mut Car,
     dt: f32,
 ) {
+    let controls = controls.quantised();
     let mut left = dt;
     while left > 1e-6 {
         let h = left.min(SUBSTEP);
@@ -199,7 +202,7 @@ pub(crate) fn advance(
             surface,
             h,
         );
-        transform.rotate_y(yaw);
+        transform.rotation = physics::turn(yaw) * transform.rotation;
         transform.translation += car.velocity * h;
         track.hold(transform, car, h);
         left -= h;
