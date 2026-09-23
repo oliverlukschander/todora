@@ -31,6 +31,7 @@ The approved plan, decisions and build order are in the
   DNS for todora.lukschander.com at the Hetzner host, add the Caddy or nginx site,
   run `server/deploy/deploy.sh root@host` (ARCH=arm64 on CAX), and check
   `/v1/health` over HTTPS.
+- [x] Records view: every circuit's best, medal and world place, with medal totals (2026-09-24).
 - [ ] Online leaderboards at todora.lukschander.com.
 
 ## Game Center multiplayer

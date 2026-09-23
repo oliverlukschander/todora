@@ -45,6 +45,10 @@ pub(crate) enum Ask {
         rivals: Vec<String>,
     },
     Ghost(String),
+    /// Your place on every circuit's board last seen, from the cache.
+    Ranks {
+        mode: String,
+    },
     Rename {
         name: String,
         country: Option<String>,
@@ -74,6 +78,8 @@ pub(crate) enum Heard {
         run: String,
         bytes: Vec<u8>,
     },
+    /// Circuit, your place and how many are on the board, as last seen.
+    Ranks(Vec<(String, u64, u64)>),
     /// The server could not be reached, or answered with trouble.
     Trouble(String),
     Forgotten,
@@ -296,6 +302,10 @@ impl Worker {
                 rivals,
             } => self.board(&circuit, &mode, country.as_deref(), &rivals),
             Ask::Ghost(run) => self.ghost(&run),
+            Ask::Ranks { mode } => {
+                let ranks = self.cached_ranks(&mode);
+                let _ = self.tell.send(Heard::Ranks(ranks));
+            }
             Ask::Rename { name, country } => self.rename(&name, country.as_deref()),
             Ask::Forget => self.forget(),
         }
@@ -514,6 +524,21 @@ impl Worker {
                 }
             }
         }
+    }
+
+    fn cached_ranks(&self, mode: &str) -> Vec<(String, u64, u64)> {
+        let Some(folder) = self.folder.as_ref().map(|f| f.join("boards")) else {
+            return Vec::new();
+        };
+        crate::track::all_circuits()
+            .iter()
+            .filter_map(|circuit| {
+                let bytes =
+                    std::fs::read(folder.join(format!("{}-{mode}.json", circuit.id))).ok()?;
+                let standing: Standing = serde_json::from_slice(&bytes).ok()?;
+                Some((circuit.id.to_string(), standing.you?.rank, standing.total))
+            })
+            .collect()
     }
 
     fn ghost(&mut self, run: &str) {

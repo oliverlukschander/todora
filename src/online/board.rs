@@ -33,17 +33,51 @@ pub(crate) enum View {
     World,
     Country,
     Rivals,
+    /// Every circuit: your best, its medal and your place.
+    Records,
 }
 
 impl View {
-    const ALL: [Self; 3] = [Self::World, Self::Country, Self::Rivals];
+    const ALL: [Self; 4] = [Self::World, Self::Country, Self::Rivals, Self::Records];
     fn name(self) -> &'static str {
         match self {
             Self::World => "World",
             Self::Country => "Country",
             Self::Rivals => "Rivals",
+            Self::Records => "Records",
         }
     }
+}
+
+/// One circuit's row of the records: name, your best, its medal, your place.
+pub(crate) fn record_line(
+    name: &str,
+    best: Option<f32>,
+    medal: Option<crate::medals::Medal>,
+    rank: Option<(u64, u64)>,
+) -> String {
+    format!(
+        "{:<24} {:>9}   {:<7} {}",
+        name,
+        best.map_or("—".into(), format_time),
+        medal.map_or("", |m| m.name()).to_uppercase(),
+        rank.map_or(String::new(), |(r, t)| format!("#{r} of {t}")),
+    )
+}
+
+/// The medal count for the records' footer.
+pub(crate) fn medal_totals(medals: &[Option<crate::medals::Medal>]) -> String {
+    use crate::medals::Medal;
+    let count = |m| medals.iter().filter(|x| **x == Some(m)).count();
+    let none = medals.iter().filter(|x| x.is_none()).count();
+    format!(
+        "{} author  ·  {} gold  ·  {} silver  ·  {} bronze  ·  {} to go",
+        count(Medal::Author),
+        count(Medal::Gold),
+        count(Medal::Silver),
+        count(Medal::Bronze),
+        none
+    )
 }
 
 /// Which board is up, and where the cursor is.
@@ -59,6 +93,17 @@ pub(crate) struct Browse {
     asked: Option<(usize, View)>,
 }
 
+impl Browse {
+    /// Open on a view, for a visual check: 0 world … 3 records.
+    #[cfg(feature = "visual-check")]
+    pub(crate) fn show(&mut self, view: usize) {
+        let view = View::ALL[view.min(View::ALL.len() - 1)];
+        if self.view != view {
+            self.view = view;
+        }
+    }
+}
+
 /// One line of the board: a place, or a gap between the top and you.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Line {
@@ -71,6 +116,7 @@ pub(crate) enum Line {
 pub(crate) fn lines(standing: &Standing, view: View) -> Vec<Line> {
     let mut out: Vec<Line> = Vec::new();
     match view {
+        View::Records => {}
         View::Rivals => {
             let mut places = standing.rivals.clone();
             if let Some(you) = &standing.you
@@ -296,6 +342,18 @@ fn drive(
     let step = browse
         .navigation
         .read(&keys, &pads, time.elapsed_secs_f64());
+    if browse.view == View::Records {
+        let n = all_circuits().len() as i32;
+        browse.row = (browse.row as i32 + step.y).clamp(0, n - 1) as usize;
+        // A circuit's row opens its board.
+        if keys.just_pressed(KeyCode::Enter) || pad(GamepadButton::South) {
+            browse.circuit = browse.row;
+            browse.view = View::World;
+            browse.row = 0;
+            browse.asked = None;
+        }
+        return;
+    }
     if step.x != 0 {
         let n = all_circuits().len() as i32;
         browse.circuit = (browse.circuit as i32 + step.x).rem_euclid(n) as usize;
@@ -339,13 +397,25 @@ fn ask(
     client: Option<Res<Client>>,
     mut browse: ResMut<Browse>,
 ) {
-    if *halt != Halt::Board || !settings.online {
+    if *halt != Halt::Board {
         return;
     }
     let Some(client) = client else {
         return;
     };
     let wanted = (browse.circuit, browse.view);
+    if browse.view == View::Records {
+        if browse.asked != Some(wanted) {
+            browse.asked = Some(wanted);
+            client.ask(Ask::Ranks {
+                mode: mode.name().to_lowercase(),
+            });
+        }
+        return;
+    }
+    if !settings.online {
+        return;
+    }
     if browse.asked == Some(wanted) {
         return;
     }
@@ -367,6 +437,7 @@ fn draw(
     browse: Res<Browse>,
     online: Res<Online>,
     settings: Res<Settings>,
+    records: Option<Res<crate::ghost::Records>>,
     mut panels: Query<&mut Visibility, With<Panel>>,
     mut titles: Query<
         &mut Text,
@@ -413,16 +484,64 @@ fn draw(
     if !open {
         return;
     }
+    for (tab, mut colour) in &mut tabs {
+        let active = View::ALL[tab.0] == browse.view;
+        colour.set_if_neq(BackgroundColor(if active { AMBER } else { SURFACE }));
+    }
+    if browse.view == View::Records {
+        let medal = |at: usize| {
+            let best = records.as_ref().and_then(|r| r.best(at, *mode));
+            let targets = crate::medals::targets_for(all_circuits()[at].id, *mode);
+            (
+                best,
+                targets.and_then(|(t, _)| best.and_then(|b| t.medal(b))),
+            )
+        };
+        let first = browse
+            .row
+            .saturating_sub(ROWS / 2)
+            .min(all_circuits().len() - ROWS);
+        if let Ok(mut text) = titles.single_mut() {
+            let wanted = format!("Records   ·   {}", mode.name());
+            if text.0 != wanted {
+                text.0 = wanted;
+            }
+        }
+        for (line, mut colour) in &mut lines_q {
+            let active = first + line.0 == browse.row;
+            colour.set_if_neq(BackgroundColor(if active { SURFACE } else { Color::NONE }));
+        }
+        for (row, mut text, mut colour) in &mut texts {
+            let at = first + row.0;
+            let circuit = &all_circuits()[at];
+            let (best, earned) = medal(at);
+            let rank = online.ranks.get(circuit.id).copied();
+            let wanted = record_line(circuit.name, best, earned, rank);
+            if text.0 != wanted {
+                text.0 = wanted;
+            }
+            colour.set_if_neq(TextColor(earned.map_or(TEXT, crate::medals::Medal::colour)));
+        }
+        let all: Vec<_> = (0..all_circuits().len()).map(|at| medal(at).1).collect();
+        if let Ok(mut text) = footers.single_mut() {
+            let wanted = medal_totals(&all);
+            if text.0 != wanted {
+                text.0 = wanted;
+            }
+        }
+        if let Ok(mut text) = notes.single_mut()
+            && !text.0.is_empty()
+        {
+            text.0.clear();
+        }
+        return;
+    }
     let circuit = &all_circuits()[browse.circuit];
     if let Ok(mut text) = titles.single_mut() {
         let wanted = format!("{}   ·   {}", circuit.name, mode.name());
         if text.0 != wanted {
             text.0 = wanted;
         }
-    }
-    for (tab, mut colour) in &mut tabs {
-        let active = View::ALL[tab.0] == browse.view;
-        colour.set_if_neq(BackgroundColor(if active { AMBER } else { SURFACE }));
     }
     let standing = online.board.as_ref().filter(|b| b.circuit == circuit.id);
     let shown = standing.map(|b| lines(b, browse.view)).unwrap_or_default();
@@ -557,6 +676,24 @@ mod tests {
             })
             .collect();
         assert_eq!(ranks, vec![3, 21, 40]);
+    }
+
+    #[test]
+    fn records_list_a_circuit_its_best_its_medal_and_your_place() {
+        use crate::medals::Medal;
+        assert_eq!(
+            record_line("Monza", Some(62.88), Some(Medal::Silver), Some((96, 1390))),
+            "Monza                      1:02.88   SILVER  #96 of 1390"
+        );
+        assert_eq!(
+            medal_totals(&[
+                Some(Medal::Gold),
+                Some(Medal::Gold),
+                None,
+                Some(Medal::Author)
+            ]),
+            "1 author  ·  2 gold  ·  0 silver  ·  0 bronze  ·  1 to go"
+        );
     }
 
     #[test]

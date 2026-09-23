@@ -9,6 +9,8 @@
 //! step into a list reserved once per lap.
 
 mod board;
+#[cfg(feature = "visual-check")]
+pub(crate) use board::Browse;
 pub(crate) mod client;
 pub(crate) mod replay;
 pub(crate) mod run;

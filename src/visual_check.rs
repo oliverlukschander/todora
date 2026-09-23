@@ -11,6 +11,7 @@
 //! also holds the new-best banner and the lit clock.
 //! TODORA_GUIDE=0|1|2 shows a first-drive card; TODORA_DEVICE=pad shows the
 //! pad's buttons on it.
+//! TODORA_SCREEN=board opens the leaderboard on TODORA_VIEW=0..3 (3 is records).
 //! TODORA_SCREEN=settings opens the settings page, on TODORA_TAB=0..3 and
 //! TODORA_ROW=n.
 //! TODORA_COUNTDOWN=ready|3|2|1|go freezes the start lights at that moment and,
@@ -236,6 +237,7 @@ fn show_guide(
 fn open_screen(
     mut halt: ResMut<crate::pause::Halt>,
     mut page: ResMut<crate::settings::Page>,
+    mut browse: ResMut<crate::online::Browse>,
     mut frames: Local<u32>,
 ) {
     let number = |name: &str| {
@@ -244,6 +246,15 @@ fn open_screen(
             .and_then(|s| s.parse().ok())
             .unwrap_or(0)
     };
+    if std::env::var("TODORA_SCREEN").as_deref() == Ok("board") {
+        *frames += 1;
+        if *frames > 1 {
+            *halt = crate::pause::Halt::Board;
+        }
+        if *frames > 2 {
+            browse.show(number("TODORA_VIEW"));
+        }
+    }
     if std::env::var("TODORA_SCREEN").as_deref() == Ok("settings") {
         *frames += 1;
         // Opened on the second frame, the way a key would open it.
