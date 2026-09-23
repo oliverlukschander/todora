@@ -224,7 +224,16 @@ fn begin(
     }
 }
 
-fn tick(time: Res<Time>, mut start: ResMut<Start>, mut lights: MessageWriter<StartLight>) {
+fn tick(
+    time: Res<Time>,
+    guide: Option<Res<crate::onboarding::Guide>>,
+    mut start: ResMut<Start>,
+    mut lights: MessageWriter<StartLight>,
+) {
+    // The first-drive cards are read before the lights come on.
+    if guide.is_some_and(|g| g.open()) {
+        return;
+    }
     if start.elapsed.is_finite() {
         start.elapsed += time.delta_secs();
     }

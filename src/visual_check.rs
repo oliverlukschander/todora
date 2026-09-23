@@ -9,6 +9,8 @@
 //! TODORA_SETTINGS='{"tv_margin":true}' starts from those settings.
 //! TODORA_SUMMARY=best|valid|invalid holds the lap summary card up; `best`
 //! also holds the new-best banner and the lit clock.
+//! TODORA_GUIDE=0|1|2 shows a first-drive card; TODORA_DEVICE=pad shows the
+//! pad's buttons on it.
 //! TODORA_SCREEN=settings opens the settings page, on TODORA_TAB=0..3 and
 //! TODORA_ROW=n.
 //! TODORA_COUNTDOWN=ready|3|2|1|go freezes the start lights at that moment and,
@@ -99,7 +101,7 @@ pub fn configure(app: &mut App) {
             freeze_countdown.after(crate::countdown::CountdownSet),
         )
         .add_systems(PreUpdate, open_screen.after(crate::settings::PageSet))
-        .add_systems(Update, hold_summary)
+        .add_systems(Update, (hold_summary, show_guide))
         .add_systems(
             PostUpdate,
             capture.before(bevy::transform::TransformSystems::Propagate),
@@ -213,6 +215,21 @@ fn hold_summary(
         if kind == "best" {
             party.hold();
         }
+    }
+}
+
+fn show_guide(
+    mut guide: ResMut<crate::onboarding::Guide>,
+    mut device: ResMut<crate::input::LastDevice>,
+) {
+    if let Some(at) = std::env::var("TODORA_GUIDE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+    {
+        guide.show(at);
+    }
+    if std::env::var("TODORA_DEVICE").as_deref() == Ok("pad") {
+        device.set_if_neq(crate::input::LastDevice::Pad);
     }
 }
 

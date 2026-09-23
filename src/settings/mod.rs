@@ -91,6 +91,8 @@ pub(crate) struct Settings {
     // What was being driven.
     pub ghost: bool,
     pub onboarding_done: bool,
+    /// The one-time hint that Beginner mode exists has been shown.
+    pub beginner_hint_shown: bool,
     pub circuit: String,
     pub car: String,
     pub setup: String,
@@ -123,6 +125,7 @@ impl Default for Settings {
             rumble: true,
             ghost: true,
             onboarding_done: false,
+            beginner_hint_shown: false,
             circuit: String::new(),
             car: String::new(),
             setup: String::new(),

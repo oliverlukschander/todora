@@ -42,6 +42,8 @@ pub(crate) enum Halt {
     Menu,
     /// The settings page, opened from the pause; it goes back to the pause.
     Settings,
+    /// The how-to-drive cards, opened from the pause; they go back to it.
+    Guide,
 }
 
 impl Halt {
@@ -106,16 +108,18 @@ enum Action {
     Effects,
     ResetCurrent,
     ResetAll,
+    Guide,
     Settings,
     Quit,
 }
 impl Action {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Resume,
         Self::Music,
         Self::Effects,
         Self::ResetCurrent,
         Self::ResetAll,
+        Self::Guide,
         Self::Settings,
         Self::Quit,
     ];
@@ -172,6 +176,7 @@ fn setup(mut commands: Commands) {
                         (Action::Effects, "Sound effects / F8"),
                         (Action::ResetCurrent, "Reset this ghost"),
                         (Action::ResetAll, "Reset all ghosts"),
+                        (Action::Guide, "How to drive"),
                         (Action::Settings, "Settings"),
                         (Action::Quit, "Quit game"),
                     ] {
@@ -233,7 +238,12 @@ fn watch(
     mut resets: MessageWriter<ResetRequest>,
     mut toggles: MessageWriter<SoundToggle>,
     mut exits: MessageWriter<AppExit>,
+    guide: Option<Res<crate::onboarding::Guide>>,
 ) {
+    // The first-drive cards take Esc and Start for themselves.
+    if *halt == Halt::Nothing && guide.is_some_and(|g| g.open()) {
+        return;
+    }
     let mouse_moved = cursor
         .read()
         .any(|event| event.delta.is_none_or(|delta| delta != Vec2::ZERO));
@@ -306,6 +316,9 @@ fn watch(
             }
             Action::ResetAll => {
                 resets.write(ResetRequest(Some(ResetGhosts::All)));
+            }
+            Action::Guide => {
+                *halt = Halt::Guide;
             }
             Action::Settings => {
                 *halt = Halt::Settings;
@@ -483,6 +496,8 @@ mod tests {
                 }
             }
             press(&mut app, KeyCode::ArrowDown, GamepadButton::DPadDown);
+            assert_eq!(app.world().resource::<Selection>().action, Action::Guide);
+            press(&mut app, KeyCode::ArrowDown, GamepadButton::DPadDown);
             assert_eq!(app.world().resource::<Selection>().action, Action::Settings);
             press(&mut app, KeyCode::ArrowDown, GamepadButton::DPadDown);
             assert_eq!(app.world().resource::<Selection>().action, Action::Quit);
@@ -497,7 +512,7 @@ mod tests {
         tap(&mut app, KeyCode::Escape);
         tap(&mut app, KeyCode::ArrowUp);
         assert_eq!(app.world().resource::<Selection>().action, Action::Resume);
-        for _ in 0..8 {
+        for _ in 0..10 {
             tap(&mut app, KeyCode::ArrowDown);
         }
         assert_eq!(app.world().resource::<Selection>().action, Action::Quit);

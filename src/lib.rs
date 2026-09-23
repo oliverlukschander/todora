@@ -9,6 +9,7 @@ mod medals;
 mod menu;
 mod minimap;
 mod multiplayer;
+mod onboarding;
 mod pause;
 mod settings;
 mod skid;
@@ -105,6 +106,7 @@ impl Plugin for GamePlugin {
             .add_plugins((
                 countdown::CountdownPlugin,
                 summary::SummaryPlugin,
+                onboarding::OnboardingPlugin,
                 multiplayer::MultiplayerPlugin,
             ))
             .add_systems(Update, quit);

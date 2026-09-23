@@ -24,6 +24,8 @@ impl Plugin for InputPlugin {
         // listened to at all: while the game is stopped nothing they press
         // reaches the car, and the frame it starts again is a frame the keys
         // are read on.
+        app.init_resource::<LastDevice>()
+            .add_systems(PreUpdate, notice.after(bevy::input::InputSystems));
         app.add_systems(
             PreUpdate,
             read.in_set(InputSet)
@@ -32,6 +34,30 @@ impl Plugin for InputPlugin {
                 .run_if(running),
         );
     }
+}
+
+/// What the player touched last, so hints can show the right buttons.
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(crate) enum LastDevice {
+    #[default]
+    Keyboard,
+    Pad,
+}
+
+/// Any key makes it the keyboard; any pad button or a deliberate stick tilt
+/// makes it the pad. Only written when it changes.
+fn notice(keys: Res<ButtonInput<KeyCode>>, pads: Query<&Gamepad>, mut last: ResMut<LastDevice>) {
+    let pad = pads
+        .iter()
+        .any(|pad| pad.get_just_pressed().next().is_some() || pad.left_stick().length() > 0.5);
+    let wanted = if keys.get_just_pressed().next().is_some() {
+        LastDevice::Keyboard
+    } else if pad {
+        LastDevice::Pad
+    } else {
+        return;
+    };
+    last.set_if_neq(wanted);
 }
 
 /// A stick this far from centre is resting, not steering, unless the
