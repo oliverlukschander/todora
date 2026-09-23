@@ -14,6 +14,8 @@ pub(crate) mod replay;
 pub(crate) mod run;
 mod ui;
 
+pub(crate) use ui::Online;
+
 use bevy::prelude::*;
 
 use crate::car::{Car, Controls, Mode, Player, Setup, Spec};

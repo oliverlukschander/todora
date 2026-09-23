@@ -53,6 +53,17 @@ pub(crate) fn plausible(
 
 /// Drive `run` on `track` and judge the lap it makes.
 pub(crate) fn replay(run: &Run, track: &Track) -> Verdict {
+    replay_with(run, track, |_, _, _| {})
+}
+
+/// The same, telling `each_step` where the car is after every step — the
+/// clock, how far round the lap, and its pose. How a downloaded lap becomes a
+/// ghost to race.
+pub(crate) fn replay_with(
+    run: &Run,
+    track: &Track,
+    mut each_step: impl FnMut(f32, f32, &Transform),
+) -> Verdict {
     let handling = run
         .mode
         .applied_to(run.setup.applied_to(run.car.handling()));
@@ -76,7 +87,13 @@ pub(crate) fn replay(run: &Run, track: &Track) -> Verdict {
             sectors: track.sector_count(),
             speed: car.velocity.length(),
         };
-        if let Some(lap) = timer.judge(step, || track.on_start_gate(pos, car.along)) {
+        let lap = timer.judge(step, || track.on_start_gate(pos, car.along));
+        // The finishing step is the end of the lap, not the start of the next.
+        match &lap {
+            Some(lap) => each_step(lap.time, 1.0, &at),
+            None => each_step(timer.current, timer.progress(), &at),
+        }
+        if let Some(lap) = lap {
             let report = timer.report.take();
             return Verdict {
                 steps: Some(i as u32 + 1),

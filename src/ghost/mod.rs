@@ -19,7 +19,10 @@
 //! there to drive against with its time already on the board.
 
 pub(crate) mod clear;
+mod rival;
 mod store;
+
+pub(crate) use rival::Rival;
 
 /// The best lap saved on every circuit and mode, as far as the saved files
 /// say — for the circuit menu and the records. Read once at startup from the
@@ -112,6 +115,7 @@ impl Plugin for GhostPlugin {
                 Update,
                 (toggle.run_if(running), replay).chain().in_set(GhostSet),
             );
+        rival::plugin(app);
     }
 }
 
@@ -389,14 +393,28 @@ fn replay(
     ghost.delta = delta;
 }
 
-/// `G`, or the pad's north button, shows and hides the ghost.
-fn toggle(keys: Res<ButtonInput<KeyCode>>, pads: Query<&Gamepad>, mut ghost: ResMut<Ghost>) {
+/// `G`, or the pad's north button, shows and hides the ghost — and with a
+/// downloaded rival, steps through both, yours, theirs and neither.
+fn toggle(
+    keys: Res<ButtonInput<KeyCode>>,
+    pads: Query<&Gamepad>,
+    mut ghost: ResMut<Ghost>,
+    rival: Option<ResMut<Rival>>,
+) {
     let pressed = keys.just_pressed(KeyCode::KeyG)
         || pads
             .iter()
             .any(|pad| pad.just_pressed(GamepadButton::North));
-    if pressed {
-        ghost.on = !ghost.on;
+    if !pressed {
+        return;
+    }
+    match rival {
+        Some(mut rival) => {
+            let (mine, theirs) = rival::next_shown(ghost.on, rival.on, rival.loaded());
+            ghost.on = mine;
+            rival.on = theirs;
+        }
+        None => ghost.on = !ghost.on,
     }
 }
 

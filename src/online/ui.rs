@@ -26,6 +26,8 @@ pub(crate) struct Online {
     pub board: Option<Standing>,
     /// A downloaded ghost, as run bytes, and whose lap it was.
     pub ghost: Option<(String, Vec<u8>)>,
+    /// The ghost asked for: its run, the driver's name and their place.
+    pub wanted: Option<(String, String, u64)>,
     /// The name and country the server last confirmed.
     confirmed: Option<(String, String)>,
     /// A line to show for a few seconds, and how long it has left.
@@ -35,7 +37,7 @@ pub(crate) struct Online {
 }
 
 impl Online {
-    fn say(&mut self, text: impl Into<String>) {
+    pub(crate) fn say(&mut self, text: impl Into<String>) {
         self.toast = Some((text.into(), 4.5));
     }
 }

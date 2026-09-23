@@ -24,6 +24,7 @@ The approved plan, decisions and build order are in the
   run `cargo clippy --locked -p todora-server --all-targets -- -D warnings` and
   `cargo test --locked -p todora-server`.
 - [x] Game client: opt-in, signed uploads with backoff, Online settings tab, leaderboard overlay with world/country/rivals (2026-09-24).
+- [x] Race a downloaded ghost beside your own, with its delta and world-record purple (2026-09-24).
 - [ ] Online leaderboards at todora.lukschander.com.
 
 ## Game Center multiplayer

@@ -266,7 +266,7 @@ fn drive(
     pads: Query<&Gamepad>,
     time: Res<Time<Real>>,
     client: Option<Res<Client>>,
-    online: Res<Online>,
+    mut online: ResMut<Online>,
     mut halt: ResMut<Halt>,
     mut browse: ResMut<Browse>,
     mut settings: ResMut<Settings>,
@@ -324,7 +324,10 @@ fn drive(
     if (keys.just_pressed(KeyCode::Enter) || pad(GamepadButton::South))
         && let Some(client) = client
     {
+        let place = place.clone();
         client.ask(Ask::Ghost(place.run.clone()));
+        online.say(format!("Downloading {}'s lap…", place.name));
+        online.wanted = Some((place.run, place.name, place.rank));
     }
 }
 

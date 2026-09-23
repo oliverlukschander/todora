@@ -72,6 +72,9 @@ pub struct LapTimer {
     /// The fastest each sector has ever been driven on a lap that was still
     /// valid at the time, on this circuit and mode, whichever lap it was in.
     pub ever_sectors: Vec<f32>,
+    /// The world record's sectors, when its ghost has been downloaded: what
+    /// purple means then. Never saved, and never mistaken for your own.
+    pub world_sectors: Vec<f32>,
     /// Set when [`Self::ever_sectors`] improved, until someone saves it.
     pub ever_improved: bool,
     /// How each sector of this lap has gone so far.
@@ -225,9 +228,14 @@ impl LapTimer {
         let index = self.sectors.len();
         let best = self.best_sectors.get(index).copied();
         let ever = self.ever_sectors.get(index).copied().or(best);
+        // Purple is the world's fastest when the record's ghost is here.
+        let fastest = match (ever, self.world_sectors.get(index).copied()) {
+            (Some(ever), Some(world)) => Some(ever.min(world)),
+            (ever, world) => ever.or(world),
+        };
         let split = if self.invalid {
             Split::Plain
-        } else if ever.is_some_and(|ever| duration < ever) {
+        } else if fastest.is_some_and(|fastest| duration < fastest) {
             Split::Purple
         } else if best.is_some_and(|best| duration <= best) {
             Split::Green
@@ -289,6 +297,7 @@ impl Default for LapTimer {
             invalid: false,
             best_sectors: Vec::new(),
             ever_sectors: Vec::new(),
+            world_sectors: Vec::new(),
             ever_improved: false,
             splits: Vec::new(),
             why: None,
@@ -923,6 +932,26 @@ mod tests {
             vec![8.5, 9.5, 9.8],
             "a restart forgot the best sectors"
         );
+    }
+
+    #[test]
+    fn with_the_record_downloaded_purple_is_the_worlds_fastest() {
+        let mut timer = LapTimer {
+            best_sectors: vec![10.0],
+            ever_sectors: vec![9.5],
+            world_sectors: vec![9.0],
+            ..default()
+        };
+        timer.sector(9.2);
+        assert_eq!(
+            timer.sector_notice.unwrap().split,
+            Split::Green,
+            "beats yours, not the world's"
+        );
+        assert_eq!(timer.ever_sectors, vec![9.2], "still your own best ever");
+        timer.abandon();
+        timer.sector(8.9);
+        assert_eq!(timer.sector_notice.unwrap().split, Split::Purple);
     }
 
     #[test]

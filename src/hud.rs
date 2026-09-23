@@ -90,6 +90,9 @@ struct CarName;
 
 #[derive(Component)]
 struct DeltaReadout;
+/// The downloaded rival's delta, when both ghosts are shown.
+#[derive(Component)]
+struct RivalDelta;
 /// "KM/H" or "MPH" under the speed.
 #[derive(Component)]
 struct SpeedUnit;
@@ -288,6 +291,7 @@ fn setup(mut commands: Commands) {
             timing.spawn((InvalidReadout, label("", 18.0, BEHIND)));
             timing.spawn((SectorReadout, label("", 17.0, AMBER_DIM)));
             timing.spawn((DeltaReadout, label("GHOST  --", 20.0, AMBER_DIM)));
+            timing.spawn((RivalDelta, label("", 18.0, AMBER_DIM)));
         });
     commands.spawn((Instrument, ControlHints, label("WASD / Arrows  Drive    Space  Handbrake    R  Restart\nG  Ghost    Scroll  Zoom    Esc  Pause", 12.0, TEXT), Node {
         position_type: PositionType::Absolute, bottom: px(24), left: px(24),
@@ -391,25 +395,66 @@ fn draw_circuit(track: Res<Track>, mut readout: Query<&mut Text, With<CircuitNam
 
 /// The gap to the ghost, keyed to where the car is on the circuit: how many
 /// seconds ahead or behind this lap is against the best, right now.
+/// The gap to whichever ghost is shown: yours first, the downloaded one
+/// below it when both are, or the downloaded one alone.
+#[allow(clippy::type_complexity)]
 fn draw_delta(
     ghost: Res<Ghost>,
-    mut readout: Query<(&mut Text, &mut TextColor), With<DeltaReadout>>,
+    rival: Option<Res<crate::ghost::Rival>>,
+    mut readout: Query<(&mut Text, &mut TextColor), (With<DeltaReadout>, Without<RivalDelta>)>,
+    mut second: Query<(&mut Text, &mut TextColor), (With<RivalDelta>, Without<DeltaReadout>)>,
 ) {
-    let Ok((mut text, mut color)) = readout.single_mut() else {
-        return;
-    };
-    let (shown, tint) = match (ghost.on, ghost.delta) {
-        (false, _) => ("GHOST OFF".to_string(), AMBER_DIM),
-        (true, None) => ("GHOST  --".to_string(), AMBER_DIM),
-        (true, Some(delta)) => (
-            format!("{delta:+.2}"),
+    let theirs = rival
+        .as_ref()
+        .filter(|r| r.on && r.loaded())
+        .map(|r| (rival_label(r), r.delta));
+    let gap = |who: &str, delta: Option<f32>| match delta {
+        None => (format!("{who}  --"), AMBER_DIM),
+        Some(delta) => (
+            format!("{who}  {delta:+.2}"),
             if delta <= 0.0 { AHEAD } else { BEHIND },
         ),
     };
-    if text.0 != shown {
-        text.0 = shown;
+    let (first, below) = match (ghost.on, &theirs) {
+        // Your ghost alone reads as it always has: just the gap.
+        (true, None) => match ghost.delta {
+            Some(delta) => (
+                (
+                    format!("{delta:+.2}"),
+                    if delta <= 0.0 { AHEAD } else { BEHIND },
+                ),
+                None,
+            ),
+            None => (("GHOST  --".to_string(), AMBER_DIM), None),
+        },
+        (true, Some((who, delta))) => (gap("PB", ghost.delta), Some(gap(who, *delta))),
+        (false, Some((who, delta))) => (gap(who, *delta), None),
+        (false, None) => (("GHOST OFF".to_string(), AMBER_DIM), None),
+    };
+    if let Ok((mut text, mut color)) = readout.single_mut() {
+        if text.0 != first.0 {
+            text.0 = first.0;
+        }
+        color.0 = first.1;
     }
-    color.0 = tint;
+    if let Ok((mut text, mut color)) = second.single_mut() {
+        let (line, tint) = below.unwrap_or((String::new(), AMBER_DIM));
+        if text.0 != line {
+            text.0 = line;
+        }
+        color.0 = tint;
+    }
+}
+
+/// "WR" for the world record, else the driver's name, kept short.
+fn rival_label(rival: &crate::ghost::Rival) -> String {
+    if rival.rank == Some(1) {
+        "WR".into()
+    } else if rival.name.is_empty() {
+        "GHOST".into()
+    } else {
+        rival.name.chars().take(10).collect()
+    }
 }
 
 fn draw_clock(timer: Res<LapTimer>, mut readout: Query<&mut Text, With<ClockReadout>>) {
