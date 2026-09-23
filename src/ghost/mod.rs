@@ -394,7 +394,9 @@ mod tests {
     #[test]
     fn a_finished_ghost_includes_the_finish_time_and_pose() {
         let mut app = App::new();
-        app.add_message::<LapFinished>().add_systems(Update, finish);
+        app.add_message::<LapFinished>()
+            .init_resource::<LapTimer>()
+            .add_systems(Update, finish);
         let pose = Transform::from_xyz(20.0, 1.0, 3.0);
         let player = app.world_mut().spawn((Player, pose)).id();
         app.insert_resource(Ghost {
@@ -435,7 +437,9 @@ mod tests {
         recording.push(10.0, 1.0, &Transform::IDENTITY);
         assert!(recording.full);
         let mut app = App::new();
-        app.add_message::<LapFinished>().add_systems(Update, finish);
+        app.add_message::<LapFinished>()
+            .init_resource::<LapTimer>()
+            .add_systems(Update, finish);
         let player = app.world_mut().spawn((Player, Transform::IDENTITY)).id();
         app.insert_resource(Ghost {
             on: true,
