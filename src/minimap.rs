@@ -16,7 +16,8 @@ const SCALE: f32 = 2.15; // ~65 metres ahead: several seconds at racing speed.
 pub struct MinimapPlugin;
 impl Plugin for MinimapPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup).add_systems(Update, draw);
+        app.add_systems(Startup, setup)
+            .add_systems(Update, (draw, hide));
     }
 }
 #[derive(Component)]
@@ -47,6 +48,20 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         },
     ));
 }
+/// The settings can turn the map off.
+fn hide(settings: Option<Res<crate::settings::Settings>>, mut maps: Query<&mut Node, With<Map>>) {
+    let Some(settings) = settings.filter(|s| s.is_changed()) else {
+        return;
+    };
+    for mut node in &mut maps {
+        node.display = if settings.minimap {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+}
+
 fn project(point: Vec3, at: &Transform) -> Vec2 {
     let forward = level(*at.forward());
     let delta = point - at.translation;

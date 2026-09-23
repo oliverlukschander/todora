@@ -6,6 +6,7 @@
 //! metres behind the car in plan, as the follow lag does at speed.
 //! TODORA_SPLITS=PGY colours the sector bar (Purple, Green, Yellow, Plain) and
 //! shows the last as the sector notice, 0.18 s off the best lap.
+//! TODORA_SETTINGS='{"tv_margin":true}' starts from those settings.
 //! TODORA_SCREEN=settings opens the settings page, on TODORA_TAB=0..3 and
 //! TODORA_ROW=n.
 //! TODORA_COUNTDOWN=ready|3|2|1|go freezes the start lights at that moment and,
@@ -45,8 +46,13 @@ pub fn configure(app: &mut App) {
     );
     app.insert_resource(track)
         .insert_resource(crate::settings::ReadOnly)
-        // Captures start from the defaults, whatever this machine saved.
-        .insert_resource(crate::settings::Settings::default())
+        // Captures start from the defaults, whatever this machine saved, or
+        // from TODORA_SETTINGS='{"units":"mph"}' when a check needs a setting.
+        .insert_resource(
+            std::env::var("TODORA_SETTINGS")
+                .map(|text| crate::settings::Settings::parse(&text))
+                .unwrap_or_default(),
+        )
         .insert_resource(crate::car::Spec::default())
         .insert_resource(crate::car::Setup::default())
         .insert_resource(crate::car::Mode::default())

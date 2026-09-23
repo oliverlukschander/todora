@@ -12,7 +12,8 @@ The approved plan, decisions and build order are in the
 - [x] Pure lap judge (`LapTimer::judge`) shared with future replay checks (2026-09-23).
 - [x] Sector colours and sector bar (2026-09-23).
 - [x] Settings file: saved choices restored at launch (2026-09-23).
-- [ ] Settings page, lap summary, medals and onboarding.
+- [x] Settings page with audio, display, HUD and control rows wired in (2026-09-23).
+- [ ] Lap summary, medals and onboarding.
 - [ ] Online leaderboards at todora.lukschander.com.
 
 ## Game Center multiplayer

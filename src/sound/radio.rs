@@ -94,6 +94,7 @@ impl Iterator for Mixer {
                 self.beep.start(beeps & 1 == 1);
             }
             self.vehicle_sample += self.beep.sample();
+            self.vehicle_sample *= 1.0 - f32::from_bits(self.signal.effects_cut.load(Relaxed));
             self.music += (f32::from_bits(self.signal.music.load(Relaxed)) - self.music) * 0.001;
         }
         self.right = !self.right;

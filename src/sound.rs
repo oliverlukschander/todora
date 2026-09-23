@@ -76,6 +76,9 @@ struct Signal {
     scrub: AtomicU32,
     squeal: AtomicU32,
     rolling: AtomicU32,
+    /// How far everything the car makes is turned down, 0 (full volume) to 1.
+    /// Stored as the cut rather than the volume so a fresh signal is audible.
+    effects_cut: AtomicU32,
     /// Start-light beeps asked for: a count, doubled, plus one for GO.
     beep: AtomicU32,
 }
@@ -122,11 +125,19 @@ fn update(
     windows: Query<&Window, With<PrimaryWindow>>,
     players: Query<(&Car, &Transform), With<Player>>,
     track: Res<Track>,
+    settings: Option<Res<crate::settings::Settings>>,
     mut sound: ResMut<Sound>,
 ) {
     if sound.signal.shutting_down.load(Relaxed) {
         return;
     }
+    let (music_volume, effects_volume) = settings
+        .as_ref()
+        .map_or((0.8, 1.0), |s| (s.music_volume, s.effects_volume));
+    sound
+        .signal
+        .effects_cut
+        .store((1.0 - effects_volume).to_bits(), Relaxed);
     // Audio shortcuts work while driving and paused; garage input stays separate.
     if keys.just_pressed(KeyCode::KeyN) && *halt != Halt::Menu {
         sound.music = !sound.music;
@@ -152,8 +163,9 @@ fn update(
     };
     sound.signal.rolling.store(rolling.to_bits(), Relaxed);
     // A little extra room for the tyre warning when a slide becomes loud.
+    // 0.8 is where the radio has always sat.
     let music = if audible && sound.music {
-        0.075 - 0.08 * squeal
+        (0.075 - 0.08 * squeal) * music_volume / 0.8
     } else {
         0.0
     };

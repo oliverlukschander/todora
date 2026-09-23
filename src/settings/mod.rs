@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::car::{Mode, Setup, Spec};
 use crate::track::Track;
 
+mod apply;
 mod page;
 #[cfg(feature = "visual-check")]
 pub(crate) use page::{Page, PageSet};
@@ -283,6 +284,7 @@ impl Plugin for SettingsPlugin {
             .add_systems(PostStartup, apply_saved)
             .add_systems(Last, (share, remember, write).chain());
         page::plugin(app);
+        apply::plugin(app);
     }
 }
 

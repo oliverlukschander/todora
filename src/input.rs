@@ -34,11 +34,25 @@ impl Plugin for InputPlugin {
     }
 }
 
-/// A stick this far from centre is resting, not steering.
+/// A stick this far from centre is resting, not steering, unless the
+/// settings say otherwise.
 const DEADZONE: f32 = 0.12;
+
+/// A stick's steering for a deflection of `stick`: nothing inside the dead
+/// zone, then the rest of the travel rescaled so full stick is still full lock,
+/// through a curve the sensitivity bends. Above 1 the car answers more near the
+/// centre; below 1 less. Either way the ends stay where they were.
+pub(crate) fn stick_steer(stick: f32, deadzone: f32, sensitivity: f32) -> f32 {
+    if stick.abs() <= deadzone {
+        return 0.0;
+    }
+    let travel = ((stick.abs() - deadzone) / (1.0 - deadzone)).min(1.0);
+    stick.signum() * travel.powf(1.0 / sensitivity)
+}
 
 fn read(
     keys: Res<ButtonInput<KeyCode>>,
+    settings: Option<Res<crate::settings::Settings>>,
     pads: Query<&Gamepad>,
     mut reset: MessageWriter<Reset>,
     mut chosen: ResMut<Setup>,
@@ -81,11 +95,10 @@ fn read(
         // Stick right is steer right, which is negative here. Past the deadzone
         // the travel is rescaled so full stick is still full lock.
         let stick = -pad.left_stick().x;
-        let steer = if stick.abs() > DEADZONE {
-            (stick - DEADZONE * stick.signum()) / (1.0 - DEADZONE)
-        } else {
-            0.0
-        };
+        let (deadzone, sensitivity) = settings
+            .as_ref()
+            .map_or((DEADZONE, 1.0), |s| (s.deadzone, s.steering));
+        let steer = stick_steer(stick, deadzone, sensitivity);
         let dpad_steer = f32::from(pad.pressed(GamepadButton::DPadLeft))
             - f32::from(pad.pressed(GamepadButton::DPadRight));
         let steer = if dpad_steer.abs() > steer.abs() {
@@ -137,6 +150,19 @@ fn held<const N: usize>(keys: &ButtonInput<KeyCode>, any: [KeyCode; N]) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_stick_curve_keeps_its_ends_and_bends_in_between() {
+        use super::stick_steer;
+        for sensitivity in [0.5, 1.0, 1.5] {
+            assert_eq!(stick_steer(0.1, 0.12, sensitivity), 0.0);
+            assert_eq!(stick_steer(1.0, 0.12, sensitivity), 1.0);
+            assert_eq!(stick_steer(-1.0, 0.12, sensitivity), -1.0);
+        }
+        let half = |s| stick_steer(0.56, 0.12, s);
+        assert!((half(1.0) - 0.5).abs() < 1e-6);
+        assert!(half(1.5) > half(1.0) && half(1.0) > half(0.5));
+    }
+
     use super::*;
     use crate::pause::Halt;
 

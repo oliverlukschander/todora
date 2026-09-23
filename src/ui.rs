@@ -38,15 +38,32 @@ fn font(mut fonts: ResMut<Assets<Font>>) {
         .expect("the default font asset is available");
 }
 
-fn scale(windows: Query<&Window>, mut scale: ResMut<UiScale>) {
+/// The HUD is sized against the window as the display draws it natively, so
+/// lowering the render scale (which lowers the scale factor, and so grows the
+/// logical window) leaves it the same size on screen. The chosen text size
+/// multiplies that.
+fn scale(
+    windows: Query<&Window>,
+    settings: Option<Res<crate::settings::Settings>>,
+    mut scale: ResMut<UiScale>,
+) {
     if let Ok(window) = windows.single() {
-        let wanted = (window.width() / 1280.0)
-            .min(window.height() / 800.0)
-            .min(1.25);
+        let native = window.resolution.base_scale_factor();
+        let (width, height) = (
+            window.physical_width() as f32 / native,
+            window.physical_height() as f32 / native,
+        );
+        let chosen = settings.map_or(1.0, |s| s.ui_scale);
+        let wanted = fit(width, height) * chosen * native / window.scale_factor();
         if (scale.0 - wanted).abs() > 0.001 {
             scale.0 = wanted;
         }
     }
+}
+
+/// How much the HUD is scaled for a window of this logical size.
+pub(crate) fn fit(width: f32, height: f32) -> f32 {
+    (width / 1280.0).min(height / 800.0).min(1.25)
 }
 
 pub(crate) fn label(value: impl Into<String>, size: f32, color: Color) -> impl Bundle {

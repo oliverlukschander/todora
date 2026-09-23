@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use crate::car::{Car, Mode, Setup, Spec};
 use crate::ghost::Ghost;
 use crate::lap::{LapTimer, Split, format_time};
+use crate::settings::Units;
 use crate::track::Track;
 
 pub(crate) const AMBER: Color = crate::ui::ACCENT;
@@ -51,6 +52,8 @@ impl Plugin for HudPlugin {
                 draw_car,
                 draw_delta,
                 draw_circuit,
+                draw_optional,
+                (place, keep_safe).chain(),
             )
                 .after(crate::ghost::GhostSet),
         );
@@ -87,6 +90,25 @@ struct CarName;
 
 #[derive(Component)]
 struct DeltaReadout;
+/// "KM/H" or "MPH" under the speed.
+#[derive(Component)]
+struct SpeedUnit;
+/// The g-meter and its reading, which the settings can hide.
+#[derive(Component)]
+struct GMeterPart;
+
+/// Where a HUD panel was placed, before any TV-safe margin moved it in.
+#[derive(Component, Clone, Copy)]
+struct Placed {
+    top: Val,
+    right: Val,
+    bottom: Val,
+    left: Val,
+}
+
+/// How far each edge moves in for a TV: 5% of the screen, the usual title-safe
+/// allowance.
+const TV_SAFE: f32 = 0.05;
 
 #[derive(Component)]
 struct CircuitName;
@@ -144,7 +166,7 @@ fn setup(mut commands: Commands) {
                 .with_children(|speed| {
                     speed.spawn((CarName, label("", 12.0, AMBER_DIM)));
                     speed.spawn((SpeedReadout, label("0", 48.0, TEXT)));
-                    speed.spawn(label("KM/H", 11.0, AMBER_DIM));
+                    speed.spawn((SpeedUnit, label("KM/H", 11.0, AMBER_DIM)));
                     speed.spawn((SetupName, label("", 11.0, AMBER)));
                 });
             instruments
@@ -156,6 +178,7 @@ fn setup(mut commands: Commands) {
                 })
                 .with_children(|g| {
                     g.spawn((
+                        GMeterPart,
                         Node {
                             width: px(METER),
                             height: px(METER),
@@ -193,7 +216,7 @@ fn setup(mut commands: Commands) {
                             BackgroundColor(AMBER),
                         ));
                     });
-                    g.spawn((GReadout, label("0.00 G", 12.0, AMBER_DIM)));
+                    g.spawn((GReadout, GMeterPart, label("0.00 G", 12.0, AMBER_DIM)));
                     g.spawn((
                         Node {
                             width: px(SLIDER),
@@ -402,6 +425,7 @@ fn draw_clock(timer: Res<LapTimer>, mut readout: Query<&mut Text, With<ClockRead
 /// Put the needle where the car is pulling. Cornering moves it sideways,
 /// braking and the climb out of a dip move it up and down.
 fn draw_g_meter(
+    settings: Option<Res<crate::settings::Settings>>,
     cars: Query<&Car>,
     mut needle: Query<&mut Node, With<Needle>>,
     mut readout: Query<&mut Text, With<GReadout>>,
@@ -413,7 +437,8 @@ fn draw_g_meter(
     if let Ok(mut text) = speed.single_mut() {
         // A hill adds a lot of speed, and a corner that will not come round is
         // usually a corner arrived at too fast. Worth being able to see.
-        text.0 = format!("{:.0}", car.velocity.length() * 3.6 * DISPLAY_SPEED_SCALE);
+        let units = settings.as_ref().map_or(Units::Kmh, |s| s.units);
+        text.0 = format!("{:.0}", displayed_speed(car.velocity.length(), units));
     }
     let reading = (car.g_force / FULL_SCALE).clamp_length_max(1.0) * (METER - NEEDLE) / 2.0;
     if let Ok(mut node) = needle.single_mut() {
@@ -423,6 +448,98 @@ fn draw_g_meter(
     }
     if let Ok(mut text) = readout.single_mut() {
         text.0 = format!("{:.2} G", car.g_force.length());
+    }
+}
+
+/// The speedometer's reading for `speed` metres a second, in the chosen units.
+pub(crate) fn displayed_speed(speed: f32, units: Units) -> f32 {
+    let kmh = speed * 3.6 * DISPLAY_SPEED_SCALE;
+    match units {
+        Units::Kmh => kmh,
+        Units::Mph => kmh / 1.609_344,
+    }
+}
+
+/// The unit label and the g-meter, as the settings say.
+fn draw_optional(
+    settings: Option<Res<crate::settings::Settings>>,
+    mut units: Query<&mut Text, With<SpeedUnit>>,
+    mut parts: Query<&mut Node, With<GMeterPart>>,
+) {
+    let Some(settings) = settings.filter(|s| s.is_changed()) else {
+        return;
+    };
+    for mut text in &mut units {
+        text.0 = match settings.units {
+            Units::Kmh => "KM/H",
+            Units::Mph => "MPH",
+        }
+        .into();
+    }
+    for mut node in &mut parts {
+        node.display = if settings.g_meter {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    }
+}
+
+/// Note where every HUD panel was put, the first time it is seen.
+#[allow(clippy::type_complexity)]
+fn place(
+    mut commands: Commands,
+    panels: Query<(Entity, &Node), (With<Instrument>, Without<Placed>)>,
+) {
+    for (panel, node) in &panels {
+        commands.entity(panel).insert(Placed {
+            top: node.top,
+            right: node.right,
+            bottom: node.bottom,
+            left: node.left,
+        });
+    }
+}
+
+/// Move every panel in from the edges by the TV-safe margin, or back out.
+fn keep_safe(
+    settings: Option<Res<crate::settings::Settings>>,
+    windows: Query<&Window>,
+    scale: Res<UiScale>,
+    mut panels: Query<(&Placed, &mut Node), With<Instrument>>,
+    added: Query<(), Added<Placed>>,
+) {
+    let on = settings.as_ref().is_some_and(|s| s.tv_margin);
+    let moved = settings.as_ref().is_some_and(|s| s.is_changed()) || scale.is_changed();
+    if !moved && added.is_empty() {
+        return;
+    }
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let (across, down) = if on {
+        safe_margin(window.width(), window.height(), scale.0)
+    } else {
+        (0.0, 0.0)
+    };
+    for (placed, mut node) in &mut panels {
+        node.top = inset(placed.top, down);
+        node.bottom = inset(placed.bottom, down);
+        node.left = inset(placed.left, across);
+        node.right = inset(placed.right, across);
+    }
+}
+
+/// The TV-safe margin across and down, in UI pixels.
+fn safe_margin(width: f32, height: f32, scale: f32) -> (f32, f32) {
+    (width * TV_SAFE / scale, height * TV_SAFE / scale)
+}
+
+/// An edge moved in by `by`, if it is pinned in pixels at all.
+fn inset(edge: Val, by: f32) -> Val {
+    match edge {
+        Val::Px(at) => Val::Px(at + by),
+        other => other,
     }
 }
 

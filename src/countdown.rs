@@ -76,6 +76,15 @@ impl Start {
         }
     }
 
+    /// No countdown at all: free at once, nothing shown, nothing heard.
+    fn none() -> Self {
+        Self {
+            elapsed: 0.0,
+            go_at: 0.0,
+            given: 4,
+        }
+    }
+
     /// Waiting for something else to start the countdown — the other driver,
     /// in shared practice. Held, with nothing shown.
     fn waiting() -> Self {
@@ -134,7 +143,7 @@ impl Start {
 
     /// Whether the green lights are showing.
     fn green(&self) -> bool {
-        !self.held() && self.elapsed < self.go_at + GREEN_FOR
+        self.go_at > 0.0 && !self.held() && self.elapsed < self.go_at + GREEN_FOR
     }
 
     /// Signals given so far, counting GO as the fourth.
@@ -183,6 +192,7 @@ pub(crate) struct CountdownSet;
 /// A reset starts a countdown: the whole one onto a different circuit, mode or
 /// car, a short one for a restart. Shared practice has its own countdown,
 /// agreed with the other driver, and the lights show that one instead.
+#[allow(clippy::too_many_arguments)]
 fn begin(
     mut resets: MessageReader<Reset>,
     track: Res<Track>,
@@ -190,19 +200,27 @@ fn begin(
     spec: Res<Spec>,
     real: Res<Time<Real>>,
     session: Option<Res<crate::multiplayer::Session>>,
+    settings: Option<Res<crate::settings::Settings>>,
     mut start: ResMut<Start>,
 ) {
+    use crate::settings::Countdown;
     let restarted = resets.read().next().is_some();
     if let Some(session) = session.filter(|session| session.active()) {
         let now = real.elapsed_secs_f64();
         start.follow(session.seconds_to_start(now), session.driving());
         return;
     }
-    if track.is_changed() || mode.is_changed() || spec.is_changed() {
-        *start = Start::of(FULL);
-    } else if restarted || start.elapsed == f32::NEG_INFINITY {
-        // A session that ended mid-countdown leaves nobody to start it.
-        *start = Start::of(SHORT);
+    let chosen = settings.map_or(Countdown::Short, |s| s.countdown);
+    let new_start = track.is_changed() || mode.is_changed() || spec.is_changed();
+    // A session that ended mid-countdown leaves nobody to start it.
+    let again = restarted || start.elapsed == f32::NEG_INFINITY;
+    if new_start || again {
+        *start = match chosen {
+            Countdown::Off => Start::none(),
+            Countdown::Full => Start::of(FULL),
+            Countdown::Short if new_start => Start::of(FULL),
+            Countdown::Short => Start::of(SHORT),
+        };
     }
 }
 
@@ -531,6 +549,30 @@ mod tests {
         // Leaving the session and joining another starts from waiting again.
         start.follow(None, false);
         assert!(start.held() && !start.showing());
+    }
+
+    #[test]
+    fn the_countdown_setting_decides_how_long_a_start_waits() {
+        use crate::settings::{Countdown, Settings};
+        for (chosen, restart_waits) in [
+            (Countdown::Full, FULL),
+            (Countdown::Short, SHORT),
+            (Countdown::Off, 0.0),
+        ] {
+            let mut app = game();
+            app.insert_resource(Settings {
+                countdown: chosen,
+                ..Default::default()
+            });
+            frames(&mut app, 500);
+            app.world_mut().write_message(Reset);
+            frames(&mut app, 1);
+            assert_eq!(
+                app.world().resource::<Start>().go_at,
+                restart_waits,
+                "{chosen:?}"
+            );
+        }
     }
 
     #[test]
