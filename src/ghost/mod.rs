@@ -21,6 +21,59 @@
 pub(crate) mod clear;
 mod store;
 
+/// The best lap saved on every circuit and mode, as far as the saved files
+/// say — for the circuit menu and the records. Read once at startup from the
+/// files' headers, and kept up to date as laps are saved.
+#[derive(Resource, Default)]
+pub(crate) struct Records {
+    /// In the order of [`crate::track::all_circuits`]; Beginner, Regular, Pro.
+    best: Vec<[Option<f32>; 3]>,
+}
+
+impl Records {
+    /// Forget every saved lap, as a reset of all ghosts does.
+    pub(super) fn clear(&mut self) {
+        for row in &mut self.best {
+            *row = [None; 3];
+        }
+    }
+
+    pub(crate) fn best(&self, circuit: usize, mode: Mode) -> Option<f32> {
+        let m = Mode::ALL.iter().position(|x| *x == mode)?;
+        self.best.get(circuit)?[m]
+    }
+
+    pub(super) fn set(&mut self, circuit: &str, mode: Mode, time: Option<f32>) {
+        let at = crate::track::all_circuits()
+            .iter()
+            .position(|c| c.id == circuit);
+        let m = Mode::ALL.iter().position(|x| *x == mode);
+        if let (Some(at), Some(m)) = (at, m)
+            && let Some(row) = self.best.get_mut(at)
+        {
+            row[m] = time;
+        }
+    }
+}
+
+fn read_records(mut commands: Commands) {
+    let best = crate::track::all_circuits()
+        .iter()
+        .map(|circuit| {
+            let fingerprint = crate::medals::targets_for(circuit.id, Mode::Regular).map(|t| t.1);
+            Mode::ALL.map(|mode| fingerprint.and_then(|f| store::peek(circuit.id, mode, f)))
+        })
+        .collect();
+    commands.insert_resource(Records { best });
+}
+
+/// The best lap saved for this circuit and mode, if there is one that still
+/// fits the circuit: what the medal tool reads your author times from.
+#[cfg(test)]
+pub(crate) fn saved_time(track: &Track, mode: Mode) -> Option<f32> {
+    Some(store::Saved::of(track, mode)?.read()?.duration())
+}
+
 use bevy::{light::NotShadowCaster, prelude::*, world_serialization::WorldInstanceReady};
 
 use crate::Reset;
@@ -48,7 +101,8 @@ impl Plugin for GhostPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<clear::Confirmation>()
             .add_systems(Update, clear::handle_reset.before(GhostSet))
-            .add_systems(Startup, setup)
+            .init_resource::<Records>()
+            .add_systems(Startup, (setup, read_records))
             .add_systems(
                 PreUpdate,
                 reset.after(ClockSet).after(InputSet).after(TrackSet),
@@ -234,6 +288,9 @@ fn finish(
     player: Query<&Transform, With<Player>>,
     mut ghost: ResMut<Ghost>,
     mut timer: ResMut<LapTimer>,
+    track: Option<Res<Track>>,
+    mode: Option<Res<Mode>>,
+    mut records: Option<ResMut<Records>>,
 ) {
     for lap in laps.read() {
         // Best sectors are saved once a lap, whichever lap they came in.
@@ -251,6 +308,9 @@ fn finish(
             ghost.best = (recording.samples.len() > 1 && !recording.full).then_some(recording);
             if let (Some(best), Some(saved)) = (&ghost.best, &ghost.saved) {
                 saved.write(best);
+            }
+            if let (Some(track), Some(mode), Some(records)) = (&track, &mode, records.as_mut()) {
+                records.set(track.circuit().id, **mode, Some(lap.time));
             }
         }
     }

@@ -159,14 +159,19 @@ pub(super) fn show_launcher(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn draw(
     mut commands: Commands,
     menu: Res<Menu>,
     track: Res<Track>,
     spec: Res<Spec>,
+    mode: Option<Res<crate::car::Mode>>,
+    records: Option<Res<crate::ghost::Records>>,
     previews: Option<Res<Previews>>,
     mut panels: Query<(Entity, &mut Node), With<Panel>>,
 ) {
+    let mode = mode.map_or(crate::car::Mode::Regular, |m| *m);
+    let best = |at: usize| records.as_ref().and_then(|r| r.best(at, mode));
     if !menu.is_changed() {
         return;
     }
@@ -213,7 +218,7 @@ pub(super) fn draw(
                     else { "Three different characters. One setup that feels right to you." }, 16.0, MUTED));
             });
             panel.spawn(Node { column_gap: px(24), height: px(428), min_height: px(0), flex_shrink: 0.0, ..default() }).with_children(|body| {
-                if page == Page::Circuit { circuits(body, &menu, previews, &entries, &track); }
+                if page == Page::Circuit { circuits(body, &menu, previews, &entries, &track, mode, &best); }
                 else { garage(body, &menu, &spec); }
             });
             panel.spawn((Node {
@@ -236,12 +241,27 @@ pub(super) fn draw(
     });
 }
 
+/// A small square in a medal's colour, beside its name.
+fn badge(row: &mut ChildSpawnerCommands, medal: crate::medals::Medal, size: f32) {
+    row.spawn((
+        Node {
+            width: px(size),
+            height: px(size),
+            border_radius: BorderRadius::all(px(size / 4.0)),
+            ..default()
+        },
+        BackgroundColor(medal.colour()),
+    ));
+}
+
 fn circuits(
     body: &mut ChildSpawnerCommands,
     menu: &Menu,
     previews: &Previews,
     entries: &[usize],
     track: &Track,
+    mode: crate::car::Mode,
+    best: &dyn Fn(usize) -> Option<f32>,
 ) {
     let position = menu.position();
     let first = position / PAGE_SIZE * PAGE_SIZE;
@@ -368,6 +388,32 @@ fn circuits(
                                 10.0,
                                 MUTED,
                             ));
+                            if let Some(time) = best(at) {
+                                info.spawn(Node {
+                                    column_gap: px(6),
+                                    align_items: AlignItems::Center,
+                                    ..default()
+                                })
+                                .with_children(|row| {
+                                    let medal = crate::medals::targets_for(circuit.id, mode)
+                                        .and_then(|(t, _)| t.medal(time));
+                                    if let Some(medal) = medal {
+                                        badge(row, medal, 10.0);
+                                    }
+                                    row.spawn(label(
+                                        match medal {
+                                            Some(m) => format!(
+                                                "{}  {}",
+                                                crate::lap::format_time(time),
+                                                m.name().to_uppercase()
+                                            ),
+                                            None => crate::lap::format_time(time),
+                                        },
+                                        12.0,
+                                        TEXT,
+                                    ));
+                                });
+                            }
                         });
                     });
                 }
@@ -439,7 +485,7 @@ fn circuits(
             ImageNode::new(previews.images[menu.at].clone()),
             Node {
                 width: percent(100),
-                height: px(168),
+                height: px(110),
                 ..default()
             },
         ));
@@ -450,9 +496,10 @@ fn circuits(
                 ..default()
             })
             .with_children(|stats| {
+                let yours = best(menu.at).map_or("—".into(), crate::lap::format_time);
                 for (name, value) in [
                     ("IN-GAME LAP", format!("{:.0} m", circuit.lap)),
-                    ("SESSION", "Free drive".into()),
+                    ("YOUR BEST", yours),
                 ] {
                     stats
                         .spawn(Node {
@@ -465,11 +512,51 @@ fn circuits(
                         });
                 }
             });
-        detail.spawn(label(
-            "Your best lap becomes the ghost to beat.",
-            14.0,
-            MUTED,
-        ));
+        if let Some((targets, _)) = crate::medals::targets_for(circuit.id, mode) {
+            let yours = best(menu.at);
+            let earned = yours.and_then(|t| targets.medal(t));
+            detail
+                .spawn(Node {
+                    row_gap: px(4),
+                    ..column()
+                })
+                .with_children(|ladder| {
+                    for (medal, _) in crate::medals::STEPS {
+                        ladder
+                            .spawn(Node {
+                                column_gap: px(8),
+                                align_items: AlignItems::Center,
+                                ..default()
+                            })
+                            .with_children(|row| {
+                                badge(row, medal, 12.0);
+                                let got = earned.is_some_and(|e| e >= medal);
+                                row.spawn(label(
+                                    format!(
+                                        "{:<7} {}",
+                                        medal.name().to_uppercase(),
+                                        crate::lap::format_time(targets.time(medal))
+                                    ),
+                                    14.0,
+                                    if got { TEXT } else { MUTED },
+                                ));
+                            });
+                    }
+                });
+            detail.spawn(label(
+                format!(
+                    "{}{}",
+                    crate::medals::standing(&targets, yours),
+                    if targets.provisional {
+                        "  ·  provisional"
+                    } else {
+                        ""
+                    }
+                ),
+                13.0,
+                MUTED,
+            ));
+        }
     });
 }
 

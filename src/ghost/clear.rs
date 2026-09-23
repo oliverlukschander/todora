@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use super::{Ghost, Recording, store};
+use super::{Ghost, Recording, Records, store};
 use crate::{Reset, lap::LapTimer, pause::Halt};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -18,6 +18,7 @@ pub(crate) struct ResetRequest(pub Option<ResetGhosts>);
 #[derive(Resource, Default)]
 pub(super) struct Confirmation(Option<ResetGhosts>);
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_reset(
     halt: Res<Halt>,
     mut requests: MessageReader<ResetRequest>,
@@ -26,6 +27,8 @@ pub(super) fn handle_reset(
     mut ghost: ResMut<Ghost>,
     mut timer: ResMut<LapTimer>,
     mut reset: MessageWriter<Reset>,
+    context: Option<(Res<crate::track::Track>, Res<crate::car::Mode>)>,
+    mut records: Option<ResMut<Records>>,
 ) {
     if *halt != Halt::Pause {
         requests.clear();
@@ -64,6 +67,12 @@ pub(super) fn handle_reset(
                 }
                 Ok(()) => {
                     ghost.best = None;
+                    if let (Some(records), Some((track, mode))) = (records.as_mut(), &context) {
+                        records.set(track.circuit().id, **mode, None);
+                        if scope == ResetGhosts::All {
+                            records.clear();
+                        }
+                    }
                     ghost.recording = Recording::default();
                     ghost.delta = None;
                     *timer = LapTimer::default();

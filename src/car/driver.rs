@@ -260,7 +260,7 @@ impl Driver {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     //! Can the car get round the circuit? Everything else is a number in
     //! isolation; these lap the real track through the real game path — the same
     //! `advance` the system calls, the same `hold` the track applies.
@@ -348,7 +348,7 @@ mod tests {
     /// later, stops it. `None` if the driver never got round — which is a
     /// result, and the one the balance tests would rather hear about than
     /// average away.
-    fn lap_time(track: &Track, style: Style, handling: Handling) -> Option<f32> {
+    pub(crate) fn lap_time(track: &Track, style: Style, handling: Handling) -> Option<f32> {
         let mut driver = Driver::new(style);
         let mut transform = track.start_transform().with_scale(Vec3::splat(SCALE));
         let mut car = Car::default();

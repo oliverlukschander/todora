@@ -356,6 +356,14 @@ fn lean(g: Vec2) -> Quat {
     Quat::from_rotation_z(g.x * ROLL_PER_G) * Quat::from_rotation_x(g.y * DIVE_PER_G)
 }
 
+/// One timed lap by the plain AI driver in the default car, balanced, in
+/// `mode`: what the provisional medal times are made from.
+#[cfg(test)]
+pub(crate) fn ai_lap_time(track: &Track, mode: Mode) -> Option<f32> {
+    let handling = mode.applied_to(Setup::Balanced.applied_to(Spec::Tourer.handling()));
+    driver::tests::lap_time(track, driver::Style::Plain, handling)
+}
+
 /// Flatten a direction into the XZ plane. The car drives on the loft's surface
 /// but its own frame stays level, so gravity is the only thing a slope changes.
 pub(crate) fn level(direction: Vec3) -> Vec3 {

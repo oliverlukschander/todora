@@ -114,6 +114,9 @@ struct Headline;
 struct Detail;
 #[derive(Component)]
 struct Sectors;
+/// The medal the lap earned, or what the next one asks for.
+#[derive(Component)]
+struct MedalLine;
 #[derive(Component)]
 struct SectorSpan(usize);
 
@@ -229,6 +232,7 @@ fn setup(mut commands: Commands) {
                         }
                     });
                 card.spawn((Detail, label("", 15.0, AMBER_DIM)));
+                card.spawn((MedalLine, label("", 15.0, TEXT)));
             });
         });
 }
@@ -385,6 +389,11 @@ fn draw(
         (&SectorSpan, &mut TextSpan, &mut TextColor),
         (Without<Headline>, Without<Detail>),
     >,
+    mut medals: Query<
+        (&mut Text, &mut TextColor),
+        (With<MedalLine>, Without<Headline>, Without<Detail>),
+    >,
+    context: Option<(Res<crate::track::Track>, Res<crate::car::Mode>)>,
 ) {
     card.left = (card.left - time.delta_secs()).max(0.0);
     let showing = card.left > 0.0 && !halt.stopped() && timer.report.is_some();
@@ -420,6 +429,20 @@ fn draw(
         } else {
             text.0 = reason(report.why);
             colour.0 = RED;
+        }
+    }
+    if let Ok((mut text, mut colour)) = medals.single_mut() {
+        let targets = context
+            .as_ref()
+            .and_then(|(track, mode)| crate::medals::targets(track, **mode));
+        match targets.filter(|_| report.valid) {
+            Some(targets) => {
+                text.0 = crate::medals::standing(&targets, Some(report.time));
+                colour.0 = targets
+                    .medal(report.time)
+                    .map_or(TEXT, crate::medals::Medal::colour);
+            }
+            None => text.0.clear(),
         }
     }
     for (span, mut text, mut colour) in &mut spans {

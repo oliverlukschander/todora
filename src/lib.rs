@@ -5,6 +5,7 @@ mod ghost;
 mod hud;
 mod input;
 mod lap;
+mod medals;
 mod menu;
 mod minimap;
 mod multiplayer;

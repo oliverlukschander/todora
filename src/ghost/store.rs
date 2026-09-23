@@ -116,6 +116,33 @@ impl Saved {
     }
 }
 
+/// The time of the lap saved for a circuit and mode, if it was driven on the
+/// layout with this fingerprint — without reading the lap: the header says
+/// whose it is and how many samples it has, and the last sample says when it
+/// finished. What the records screen and the circuit menu show.
+pub(crate) fn peek(circuit: &str, mode: Mode, fingerprint: u64) -> Option<f32> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = fs::File::open(folder()?.join(filename(circuit, mode))).ok()?;
+    let mut header = [0u8; HEADER];
+    file.read_exact(&mut header).ok()?;
+    if header[..MAGIC.len()] != MAGIC
+        || u64::from_le_bytes(header[8..16].try_into().ok()?) != fingerprint
+    {
+        return None;
+    }
+    let count = u32::from_le_bytes(header[16..HEADER].try_into().ok()?) as u64;
+    let sample = (FIELDS * size_of::<f32>()) as u64;
+    if count < 2 || file.metadata().ok()?.len() != HEADER as u64 + count * sample {
+        return None;
+    }
+    file.seek(SeekFrom::Start(HEADER as u64 + (count - 1) * sample))
+        .ok()?;
+    let mut time = [0u8; 4];
+    file.read_exact(&mut time).ok()?;
+    let time = f32::from_le_bytes(time);
+    (time.is_finite() && time > 0.0).then_some(time)
+}
+
 fn filename(id: &str, mode: Mode) -> String {
     if mode == Mode::Regular {
         format!("{id}.lap")

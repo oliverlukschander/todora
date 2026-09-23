@@ -14,7 +14,9 @@ The approved plan, decisions and build order are in the
 - [x] Settings file: saved choices restored at launch (2026-09-23).
 - [x] Settings page with audio, display, HUD and control rows wired in (2026-09-23).
 - [x] Lap summary card and new-best celebration (2026-09-23).
-- [ ] Medals and onboarding.
+- [x] Medals: author times (provisional where not yet driven), menu badges and summary line (2026-09-23).
+- [ ] Drive author laps on all 40 circuits × 3 modes and rerun `write_the_author_times`.
+- [ ] First-run onboarding.
 - [ ] Online leaderboards at todora.lukschander.com.
 
 ## Game Center multiplayer
