@@ -302,9 +302,9 @@ fn draw_controls(
     mut text: Query<&mut Text, With<ControlHints>>,
 ) {
     let hint = if pads.is_empty() {
-        "WASD / Arrows  Drive    Space  Handbrake    R  Restart\nG  Ghost    Scroll  Zoom    Esc  Pause"
+        "WASD / Arrows  Drive    Space  Handbrake    R  Restart\nG  Ghost    V  Camera    L  Board    Scroll  Zoom    Esc  Pause"
     } else {
-        "Left stick  Steer    A  Gas    X  Brake    B  Handbrake    RB  Reset\nStart  Pause    LB  Garage    View  Circuits    Y  Ghost"
+        "Left stick  Steer    A  Gas    X  Brake    B  Handbrake    RB  Reset\nStart  Pause    LB  Garage    View  Circuits    Y  Ghost    D-pad up  Camera"
     };
     let hint = format!(
         "{hint}\nM  Music: {}    F8  Effects: {}",

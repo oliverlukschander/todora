@@ -36,6 +36,7 @@ The approved plan, decisions and build order are in the
 - [x] Accessibility: colour-blind palette with words, high contrast, reduced motion, tap-to-hold pedals, Beginner assists (2026-09-24).
 - [x] Weekly challenge circuit with its own board (2026-09-24).
 - [x] Finish presentation: band glow, waved flag, crowd cheer on a new best (2026-09-24).
+- [x] Camera views: chase, close chase, bonnet on V / D-pad up (2026-09-24). Check the bonnet height visually.
 - [ ] Online leaderboards at todora.lukschander.com.
 
 ## Game Center multiplayer

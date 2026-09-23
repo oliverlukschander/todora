@@ -8,7 +8,7 @@
 
 use bevy::prelude::*;
 
-use super::{Countdown, Settings, Units};
+use super::{CameraView, Countdown, Settings, Units};
 use crate::hud::{AMBER, AMBER_DIM, FRONT};
 use crate::pause::{Halt, HaltSet};
 use crate::ui::{LINE, Navigation, SURFACE, TEXT, label};
@@ -54,6 +54,7 @@ impl Tab {
                 UiScale,
                 TvMargin,
                 Fov,
+                Camera,
                 ShowFps,
             ],
             Self::Hud => &[
@@ -87,6 +88,7 @@ pub(crate) enum Row {
     UiScale,
     TvMargin,
     Fov,
+    Camera,
     ShowFps,
     Units,
     Minimap,
@@ -114,7 +116,7 @@ pub(crate) const COUNTRIES: [&str; 24] = [
 ];
 
 /// The most rows any tab has; that many row nodes are built once.
-const ROWS: usize = 9;
+const ROWS: usize = 10;
 const FPS_CAPS: [u32; 5] = [0, 30, 60, 120, 144];
 
 fn on_off(on: bool) -> String {
@@ -153,6 +155,7 @@ impl Row {
             Self::UiScale => "Text and HUD size",
             Self::TvMargin => "TV-safe margin",
             Self::Fov => "Field of view",
+            Self::Camera => "Camera  (V / D-pad up while driving)",
             Self::ShowFps => "Show frame rate",
             Self::Units => "Speed units",
             Self::Minimap => "Mini-map",
@@ -192,6 +195,7 @@ impl Row {
             Self::UiScale => percent(s.ui_scale),
             Self::TvMargin => on_off(s.tv_margin),
             Self::Fov => format!("{:.0}°", s.fov),
+            Self::Camera => s.camera.name().into(),
             Self::ShowFps => on_off(s.show_fps),
             Self::Units => match s.units {
                 Units::Kmh => "km/h",
@@ -244,6 +248,7 @@ impl Row {
             Self::UiScale => s.ui_scale = nudge(s.ui_scale, dir, 0.1, 0.9, 1.5),
             Self::TvMargin => s.tv_margin = !s.tv_margin,
             Self::Fov => s.fov = nudge(s.fov, dir, 5.0, 35.0, 75.0),
+            Self::Camera => s.camera = cycle(&CameraView::ALL, s.camera, dir),
             Self::ShowFps => s.show_fps = !s.show_fps,
             Self::Units => s.units = cycle(&[Units::Kmh, Units::Mph], s.units, dir),
             Self::Minimap => s.minimap = !s.minimap,

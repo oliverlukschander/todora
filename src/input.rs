@@ -188,13 +188,11 @@ fn read(
         asked.throttle = asked
             .throttle
             .max(pad.get(GamepadButton::RightTrigger2).unwrap_or(0.0))
-            .max(
-                if pad.pressed(GamepadButton::South) || pad.pressed(GamepadButton::DPadUp) {
-                    1.0
-                } else {
-                    0.0
-                },
-            );
+            .max(if pad.pressed(GamepadButton::South) {
+                1.0
+            } else {
+                0.0
+            });
         asked.brake = asked
             .brake
             .max(pad.get(GamepadButton::LeftTrigger2).unwrap_or(0.0))
@@ -222,10 +220,7 @@ fn read(
                     .iter()
                     .any(|pad| buttons.iter().any(|b| pad.just_pressed(*b)))
         };
-        let throttle = tapped(
-            &[KeyCode::KeyW, KeyCode::ArrowUp],
-            &[GamepadButton::South, GamepadButton::DPadUp],
-        );
+        let throttle = tapped(&[KeyCode::KeyW, KeyCode::ArrowUp], &[GamepadButton::South]);
         let brake = tapped(
             &[KeyCode::KeyS, KeyCode::ArrowDown],
             &[GamepadButton::West, GamepadButton::DPadDown],
@@ -319,6 +314,8 @@ mod tests {
     use crate::pause::Halt;
 
     #[test]
+    /// D-pad up is the camera now; down, left and right still drive like the
+    /// arrows, and none of them touches the setup.
     fn the_dpad_drives_exactly_like_arrows_without_changing_setup() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -330,7 +327,6 @@ mod tests {
         let player = app.world_mut().spawn((Player, Controls::default())).id();
         let controller = app.world_mut().spawn(Gamepad::default()).id();
         for (key, button) in [
-            (KeyCode::ArrowUp, GamepadButton::DPadUp),
             (KeyCode::ArrowDown, GamepadButton::DPadDown),
             (KeyCode::ArrowLeft, GamepadButton::DPadLeft),
             (KeyCode::ArrowRight, GamepadButton::DPadRight),
@@ -357,6 +353,22 @@ mod tests {
             assert_eq!(*app.world().get::<Controls>(player).unwrap(), keyboard);
             assert_eq!(*app.world().resource::<Setup>(), Setup::Balanced);
         }
+        app.world_mut()
+            .get_mut::<Gamepad>(controller)
+            .unwrap()
+            .digital_mut()
+            .reset_all();
+        app.world_mut()
+            .get_mut::<Gamepad>(controller)
+            .unwrap()
+            .digital_mut()
+            .press(GamepadButton::DPadUp);
+        app.update();
+        assert_eq!(
+            app.world().get::<Controls>(player).unwrap().throttle,
+            0.0,
+            "D-pad up no longer accelerates"
+        );
     }
 
     #[test]

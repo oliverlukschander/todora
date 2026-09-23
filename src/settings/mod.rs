@@ -39,6 +39,36 @@ pub(crate) enum Units {
     Mph,
 }
 
+/// Where the camera rides.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum CameraView {
+    /// The chase camera as it has always been.
+    #[default]
+    Far,
+    /// The chase camera, closer and lower.
+    Near,
+    /// On the bonnet, looking down the road.
+    Bonnet,
+}
+
+impl CameraView {
+    pub(crate) const ALL: [Self; 3] = [Self::Far, Self::Near, Self::Bonnet];
+
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Far => "Chase",
+            Self::Near => "Chase, close",
+            Self::Bonnet => "Bonnet",
+        }
+    }
+
+    pub(crate) fn next(self) -> Self {
+        let at = Self::ALL.iter().position(|v| *v == self).unwrap_or(0);
+        Self::ALL[(at + 1) % Self::ALL.len()]
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum Countdown {
@@ -79,6 +109,8 @@ pub(crate) struct Settings {
     pub show_fps: bool,
     /// The chase camera's vertical field of view, in degrees.
     pub fov: f32,
+    /// Where the camera rides; V or D-pad up changes it while driving.
+    pub camera: CameraView,
     // HUD.
     pub units: Units,
     pub minimap: bool,
@@ -154,6 +186,7 @@ impl Default for Settings {
             render_scale: 1.0,
             show_fps: false,
             fov: 45.0,
+            camera: CameraView::Far,
             units: Units::Kmh,
             minimap: true,
             g_meter: true,

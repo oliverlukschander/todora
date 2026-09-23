@@ -42,8 +42,10 @@ pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup)
-            .add_systems(Update, (zoom.run_if(crate::pause::running), follow).chain());
+        app.add_systems(Startup, setup).add_systems(
+            Update,
+            ((zoom, switch_view).run_if(crate::pause::running), follow).chain(),
+        );
     }
 }
 
@@ -85,10 +87,41 @@ fn zoom(scroll: Res<AccumulatedMouseScroll>, mut cameras: Query<&mut FollowCam>)
     }
 }
 
+/// The close chase camera's boom, as a share of the far one's.
+const NEAR: f32 = 0.68;
+/// The bonnet camera: forward of the car's centre, above it, and how far
+/// down the road it looks.
+const BONNET_FORWARD: f32 = 0.22;
+const BONNET_UP: f32 = 0.34;
+const BONNET_LOOK: f32 = 12.0;
+
+/// V, or the pad's D-pad up, steps through the camera views.
+fn switch_view(
+    keys: Res<ButtonInput<KeyCode>>,
+    pads: Query<&Gamepad>,
+    settings: Option<ResMut<crate::settings::Settings>>,
+) {
+    let pressed = keys.just_pressed(KeyCode::KeyV)
+        || pads
+            .iter()
+            .any(|pad| pad.just_pressed(GamepadButton::DPadUp));
+    if let (true, Some(mut settings)) = (pressed, settings) {
+        settings.camera = settings.camera.next();
+    }
+}
+
+/// Where the bonnet camera is and what it looks at, for a car at `car`.
+fn bonnet(car: &Transform) -> (Vec3, Vec3) {
+    let ahead = level(*car.forward());
+    let eye = car.translation + ahead * BONNET_FORWARD + Vec3::Y * BONNET_UP;
+    (eye, eye + ahead * BONNET_LOOK - Vec3::Y * 0.4)
+}
+
 fn follow(
     time: Res<Time>,
     mut resets: MessageReader<Reset>,
     track: Res<Track>,
+    settings: Option<Res<crate::settings::Settings>>,
     cars: Query<(&Car, &Transform), Without<FollowCam>>,
     mut cameras: Query<(&FollowCam, &mut Transform), Without<Car>>,
 ) {
@@ -103,12 +136,25 @@ fn follow(
         return;
     };
     let dt = time.delta_secs();
+    let view = settings.map_or(crate::settings::CameraView::Far, |s| s.camera);
+    if view == crate::settings::CameraView::Bonnet {
+        // Rigid on the car, level with the road ahead; nothing to lag or clear.
+        let (eye, look) = bonnet(car);
+        camera.translation = eye;
+        camera.look_at(look, Vec3::Y);
+        return;
+    }
+    let zoom = if view == crate::settings::CameraView::Near {
+        follow.zoom * NEAR
+    } else {
+        follow.zoom
+    };
     // The car lies along the slope; the camera must not. Hanging the boom off
     // the pitched nose lifts it a metre and tilts it ten degrees steeper on a
     // descent, which leaves the driver looking at the roof with the corner
     // ahead crushed into the bottom of the frame.
     let ahead = level(*car.forward());
-    let desired = car.translation - ahead * (BACK * follow.zoom) + Vec3::Y * (HEIGHT * follow.zoom);
+    let desired = car.translation - ahead * (BACK * zoom) + Vec3::Y * (HEIGHT * zoom);
     let t_xz = if cut {
         1.0
     } else {
@@ -129,7 +175,7 @@ fn follow(
         state.along,
         Vec3::new(camera.translation.x, desired.y, camera.translation.z),
         car.translation + Vec3::Y * SIGHT,
-        follow.zoom,
+        zoom,
     );
     camera.translation.y = camera
         .translation
