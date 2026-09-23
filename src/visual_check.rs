@@ -7,7 +7,8 @@
 //! TODORA_SPLITS=PGY colours the sector bar (Purple, Green, Yellow, Plain) and
 //! shows the last as the sector notice, 0.18 s off the best lap.
 //! TODORA_SETTINGS='{"tv_margin":true}' starts from those settings.
-//! TODORA_SUMMARY=best|valid|invalid holds the lap summary card up.
+//! TODORA_SUMMARY=best|valid|invalid holds the lap summary card up; `best`
+//! also holds the new-best banner and the lit clock.
 //! TODORA_SCREEN=settings opens the settings page, on TODORA_TAB=0..3 and
 //! TODORA_ROW=n.
 //! TODORA_COUNTDOWN=ready|3|2|1|go freezes the start lights at that moment and,
@@ -202,9 +203,16 @@ fn freeze_countdown(capture: Res<Capture>, mut start: ResMut<crate::countdown::S
     }
 }
 
-fn hold_summary(mut card: ResMut<crate::summary::Card>, mut timer: ResMut<crate::lap::LapTimer>) {
+fn hold_summary(
+    mut card: ResMut<crate::summary::Card>,
+    mut party: ResMut<crate::summary::Celebration>,
+    mut timer: ResMut<crate::lap::LapTimer>,
+) {
     if let Ok(kind) = std::env::var("TODORA_SUMMARY") {
         card.hold(&mut timer, crate::summary::Card::example(&kind));
+        if kind == "best" {
+            party.hold();
+        }
     }
 }
 
