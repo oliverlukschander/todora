@@ -6,6 +6,8 @@
 //! metres behind the car in plan, as the follow lag does at speed.
 //! TODORA_SPLITS=PGY colours the sector bar (Purple, Green, Yellow, Plain) and
 //! shows the last as the sector notice, 0.18 s off the best lap.
+//! TODORA_SCREEN=settings opens the settings page, on TODORA_TAB=0..3 and
+//! TODORA_ROW=n.
 //! TODORA_COUNTDOWN=ready|3|2|1|go freezes the start lights at that moment and,
 //! unless TODORA_PROGRESS is also given, leaves the car on the grid.
 use crate::{
@@ -88,6 +90,7 @@ pub fn configure(app: &mut App) {
             PreUpdate,
             freeze_countdown.after(crate::countdown::CountdownSet),
         )
+        .add_systems(PreUpdate, open_screen.after(crate::settings::PageSet))
         .add_systems(
             PostUpdate,
             capture.before(bevy::transform::TransformSystems::Propagate),
@@ -188,6 +191,29 @@ fn freeze_countdown(capture: Res<Capture>, mut start: ResMut<crate::countdown::S
         // A car put down round the lap is past any countdown.
         None if capture.placed => start.elapsed = f32::MAX,
         None => {}
+    }
+}
+
+fn open_screen(
+    mut halt: ResMut<crate::pause::Halt>,
+    mut page: ResMut<crate::settings::Page>,
+    mut frames: Local<u32>,
+) {
+    let number = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0)
+    };
+    if std::env::var("TODORA_SCREEN").as_deref() == Ok("settings") {
+        *frames += 1;
+        // Opened on the second frame, the way a key would open it.
+        if *frames > 1 {
+            *halt = crate::pause::Halt::Settings;
+        }
+        if *frames > 2 {
+            page.show(number("TODORA_TAB"), number("TODORA_ROW"));
+        }
     }
 }
 

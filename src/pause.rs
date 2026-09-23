@@ -40,6 +40,8 @@ pub(crate) enum Halt {
     /// A menu is up over the game. It owns both keys while it is, and closes
     /// itself — see [`crate::menu`].
     Menu,
+    /// The settings page, opened from the pause; it goes back to the pause.
+    Settings,
 }
 
 impl Halt {
@@ -104,15 +106,17 @@ enum Action {
     Effects,
     ResetCurrent,
     ResetAll,
+    Settings,
     Quit,
 }
 impl Action {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::Resume,
         Self::Music,
         Self::Effects,
         Self::ResetCurrent,
         Self::ResetAll,
+        Self::Settings,
         Self::Quit,
     ];
 }
@@ -168,6 +172,7 @@ fn setup(mut commands: Commands) {
                         (Action::Effects, "Sound effects / F8"),
                         (Action::ResetCurrent, "Reset this ghost"),
                         (Action::ResetAll, "Reset all ghosts"),
+                        (Action::Settings, "Settings"),
                         (Action::Quit, "Quit game"),
                     ] {
                         let mut button = panel.spawn((
@@ -301,6 +306,9 @@ fn watch(
             }
             Action::ResetAll => {
                 resets.write(ResetRequest(Some(ResetGhosts::All)));
+            }
+            Action::Settings => {
+                *halt = Halt::Settings;
             }
             Action::Quit => {
                 exits.write(AppExit::Success);
@@ -474,6 +482,8 @@ mod tests {
                     assert_eq!(requests, vec![Some(scope)]);
                 }
             }
+            press(&mut app, KeyCode::ArrowDown, GamepadButton::DPadDown);
+            assert_eq!(app.world().resource::<Selection>().action, Action::Settings);
             press(&mut app, KeyCode::ArrowDown, GamepadButton::DPadDown);
             assert_eq!(app.world().resource::<Selection>().action, Action::Quit);
             press(&mut app, KeyCode::Enter, GamepadButton::South);

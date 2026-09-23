@@ -19,6 +19,10 @@ use serde::{Deserialize, Serialize};
 use crate::car::{Mode, Setup, Spec};
 use crate::track::Track;
 
+mod page;
+#[cfg(feature = "visual-check")]
+pub(crate) use page::{Page, PageSet};
+
 /// Bumped when a field changes meaning; [`Settings::migrate`] then says how
 /// to read the old one.
 pub(crate) const VERSION: u32 = 1;
@@ -275,8 +279,10 @@ impl Plugin for SettingsPlugin {
         }
         app.insert_resource(settings)
             .init_resource::<Unsaved>()
+            .init_resource::<Agreed>()
             .add_systems(PostStartup, apply_saved)
-            .add_systems(Last, (remember, write).chain());
+            .add_systems(Last, (share, remember, write).chain());
+        page::plugin(app);
     }
 }
 
@@ -285,13 +291,91 @@ fn apply_saved(
     settings: Res<Settings>,
     mut sound: ResMut<crate::sound::Sound>,
     mut ghost: ResMut<crate::ghost::Ghost>,
+    mut agreed: ResMut<Agreed>,
 ) {
     sound.music = settings.music;
     sound.effects = settings.effects;
     ghost.on = settings.ghost;
+    agreed.0 = Shared::of(&settings);
 }
 
-/// Keep what was chosen elsewhere — a key, a menu — in the settings, touching
+/// The switches that can be flipped from two places: their own keys (`N`,
+/// `F8`, `G`) and the settings page.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+struct Shared {
+    music: bool,
+    effects: bool,
+    ghost: bool,
+}
+
+impl Shared {
+    fn of(settings: &Settings) -> Self {
+        Self {
+            music: settings.music,
+            effects: settings.effects,
+            ghost: settings.ghost,
+        }
+    }
+}
+
+/// What the two places last agreed on, so a difference says which one moved.
+#[derive(Resource, Default)]
+struct Agreed(Shared);
+
+/// Whichever side moved since they last agreed is copied to the other: a key
+/// into the settings, the page into the sound and the ghost.
+fn share(
+    mut settings: ResMut<Settings>,
+    mut sound: ResMut<crate::sound::Sound>,
+    mut ghost: ResMut<crate::ghost::Ghost>,
+    mut agreed: ResMut<Agreed>,
+) {
+    let there = Shared {
+        music: sound.music,
+        effects: sound.effects,
+        ghost: ghost.on,
+    };
+    let here = Shared::of(&settings);
+    match reconcile(agreed.0, here, there) {
+        Moved::There(now) => {
+            let settings = settings.as_mut();
+            settings.music = now.music;
+            settings.effects = now.effects;
+            settings.ghost = now.ghost;
+            agreed.0 = now;
+        }
+        Moved::Here(now) => {
+            sound.music = now.music;
+            sound.effects = now.effects;
+            ghost.on = now.ghost;
+            agreed.0 = now;
+        }
+        Moved::Neither => {}
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Moved {
+    /// A key moved them: the settings follow.
+    There(Shared),
+    /// The page moved them: the sound and the ghost follow.
+    Here(Shared),
+    Neither,
+}
+
+/// A key wins a tie, because it was pressed this frame and the page only
+/// changes what it shows.
+fn reconcile(agreed: Shared, here: Shared, there: Shared) -> Moved {
+    if there != agreed {
+        Moved::There(there)
+    } else if here != agreed {
+        Moved::Here(here)
+    } else {
+        Moved::Neither
+    }
+}
+
+/// Keep what was chosen elsewhere — a menu, a key — in the settings, touching
 /// them only when something actually differs so an unchanged frame saves
 /// nothing.
 fn remember(
@@ -300,27 +384,18 @@ fn remember(
     spec: Res<Spec>,
     setup: Res<Setup>,
     mode: Res<Mode>,
-    sound: Res<crate::sound::Sound>,
-    ghost: Res<crate::ghost::Ghost>,
 ) {
-    let current = &*settings;
     let circuit = track.circuit().id;
-    let differs = current.circuit != circuit
-        || current.car != key(&*spec)
-        || current.setup != key(&*setup)
-        || current.mode != key(&*mode)
-        || current.music != sound.music
-        || current.effects != sound.effects
-        || current.ghost != ghost.on;
+    let differs = settings.circuit != circuit
+        || settings.car != key(&*spec)
+        || settings.setup != key(&*setup)
+        || settings.mode != key(&*mode);
     if differs {
         let settings = settings.as_mut();
         settings.circuit = circuit.into();
         settings.car = key(&*spec);
         settings.setup = key(&*setup);
         settings.mode = key(&*mode);
-        settings.music = sound.music;
-        settings.effects = sound.effects;
-        settings.ghost = ghost.on;
     }
 }
 
@@ -388,6 +463,26 @@ mod tests {
     #[test]
     fn an_older_version_is_brought_up_to_date() {
         assert_eq!(Settings::parse(r#"{"version": 0}"#).version, VERSION);
+    }
+
+    #[test]
+    fn a_key_and_the_page_each_move_the_other_side() {
+        let on = Shared {
+            music: true,
+            effects: true,
+            ghost: true,
+        };
+        let radio_off = Shared { music: false, ..on };
+        let ghost_off = Shared { ghost: false, ..on };
+        assert_eq!(reconcile(on, on, on), Moved::Neither);
+        assert_eq!(reconcile(on, on, radio_off), Moved::There(radio_off), "N");
+        assert_eq!(
+            reconcile(on, ghost_off, on),
+            Moved::Here(ghost_off),
+            "the page"
+        );
+        // Once agreed, the next frame is quiet.
+        assert_eq!(reconcile(radio_off, radio_off, radio_off), Moved::Neither);
     }
 
     #[test]
