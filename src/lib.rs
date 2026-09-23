@@ -3,6 +3,7 @@ mod car;
 mod challenge;
 mod countdown;
 mod ghost;
+mod haptics;
 mod hud;
 mod input;
 mod lap;
@@ -112,6 +113,7 @@ impl Plugin for GamePlugin {
                 onboarding::OnboardingPlugin,
                 online::OnlinePlugin,
                 challenge::ChallengePlugin,
+                haptics::HapticsPlugin,
                 multiplayer::MultiplayerPlugin,
             ))
             .add_systems(Update, quit);
