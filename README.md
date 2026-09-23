@@ -31,6 +31,8 @@ The chase camera keeps its level boom on flat and uphill road. On steep descents
 
 Braking boards reading **150**, **100** and **50** stand on the outside verge before every big corner (more than 90° within 20 m). Their spacing uses the circuits’ 0.12 plan scale, so they stand 18, 12 and 6 m before the turn-in, which is about where the GT starts braking from top speed. Where the straight is too short, the farthest boards are dropped. All boards are one unlit mesh with numbers built from geometry: one draw call, no texture and nothing to collide with.
 
+A chequered start/finish band covers the painted line, with a chequered post on either side of the road. The chequer texture is generated at startup and mipmapped in linear light with 16× anisotropic filtering, so it stays crisp at distance without shimmer. The band adds one draw call; the posts share the boards’ mesh. The car drives through both.
+
 All forty racing directions have been [audited](docs/track-screening/directions.md). Paul Ricard now runs clockwise and Marina Bay anticlockwise; Buenos Aires was already correct. Ghosts from the two reversed layouts are automatically rejected.
 
 Todora 0.10.0 adds a circular mini-map, 4–8 mini-sectors per circuit, driveable surrounding grass with 25% less off-track resistance, persistent lap invalidity when all four wheels leave asphalt and kerbs, and a subtle rubbered racing path. Earlier ghosts are not loaded under the new track-limit rules. [Implementation and local testing notes](docs/testing/free-drive-features.md).

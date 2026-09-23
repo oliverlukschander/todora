@@ -32,6 +32,7 @@ mod markers;
 mod profile;
 mod ribbon;
 mod rubber;
+mod start;
 mod terrain;
 mod textures;
 
@@ -246,6 +247,7 @@ impl Plugin for TrackPlugin {
                 (
                     markers::rebuild.run_if(resource_changed::<Track>),
                     boards::rebuild.run_if(resource_changed::<Track>),
+                    start::rebuild.run_if(resource_changed::<Track>),
                     markers::show,
                     textures::prepare,
                 )

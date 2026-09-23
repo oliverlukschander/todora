@@ -75,7 +75,7 @@ pub(super) fn prepare(
     });
 }
 
-fn mipmaps(image: &mut Image) {
+pub(super) fn mipmaps(image: &mut Image) {
     assert_eq!(
         image.texture_descriptor.format,
         TextureFormat::Rgba8UnormSrgb

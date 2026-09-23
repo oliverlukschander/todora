@@ -44,6 +44,8 @@ const SINK: f32 = 0.08;
 /// Glyph height, and the numbers' offset off the face to stay in front of it.
 const GLYPH: f32 = 0.19;
 pub(super) const RAISED: f32 = 0.003;
+/// Centre to centre, the least a board may stand from a start/finish post.
+pub(super) const POST_ROOM: f32 = 0.7;
 /// Nothing of a board comes nearer than this to the kerb of any road.
 pub(super) const CLEAR: f32 = 0.5;
 
@@ -94,12 +96,13 @@ pub(super) fn rebuild(
     ));
 }
 
-/// Every board of a circuit that fits, merged.
+/// Every board of a circuit that fits, and the start/finish posts, merged.
 fn mesh(track: &Track) -> Mesh {
     let mut out = Builder::default();
     for board in placed(track) {
         out.board(track, &board);
     }
+    super::start::posts(track, &mut out);
     Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::RENDER_WORLD,
@@ -109,13 +112,15 @@ fn mesh(track: &Track) -> Mesh {
     .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, out.colors)
 }
 
-/// The planned boards that stand clear of every road and off any bridge. A board that does not fit is treated like a
+/// The planned boards that stand clear of every road, off any bridge and away
+/// from the start/finish posts. A board that does not fit is treated like a
 /// straight too short for it: it and the ones farther from its corner go, so a
 /// corner never has a gap in its countdown.
 pub(super) fn placed(track: &Track) -> Vec<Board> {
     let stations = track.ribbon.stations();
     let curvature: Vec<f32> = stations.iter().map(|s| s.curvature).collect();
     let step = track.ribbon.length() / stations.len() as f32;
+    let posts = super::start::post_bases(track);
     let mut blocked = None;
     plan(&curvature, step)
         .into_iter()
@@ -123,7 +128,12 @@ pub(super) fn placed(track: &Track) -> Vec<Board> {
             if blocked == Some(board.entry) {
                 return false;
             }
-            let fits = deep(&stations[board.at]) == 0.0 && clear(track, board);
+            let centre = frame(track, board).0;
+            let fits = deep(&stations[board.at]) == 0.0
+                && clear(track, board)
+                && posts
+                    .iter()
+                    .all(|post| (*post - centre).xz().length() > POST_ROOM);
             if !fits {
                 blocked = Some(board.entry);
             }
