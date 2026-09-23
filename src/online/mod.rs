@@ -165,7 +165,9 @@ fn record(
     let (Some(finished), Some(lap)) = (finished, lap) else {
         return;
     };
-    if !(lap.valid && lap.best) || read_only.is_some() {
+    // An assisted lap counts at home and never on the world boards.
+    let assisted = timer.report.as_ref().is_some_and(|r| r.assisted);
+    if !(lap.valid && lap.best) || assisted || read_only.is_some() {
         return;
     }
     let run = Run {

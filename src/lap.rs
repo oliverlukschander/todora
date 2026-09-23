@@ -81,6 +81,8 @@ pub struct LapTimer {
     pub splits: Vec<Split>,
     /// Why this lap stopped counting, the first time it did.
     pub why: Option<Why>,
+    /// The Beginner assists helped at some point of this lap.
+    pub assisted: bool,
     /// The last lap finished, for the summary card.
     pub report: Option<LapReport>,
     top_speed: f32,
@@ -135,6 +137,8 @@ pub struct LapReport {
     pub sectors: Vec<f32>,
     pub splits: Vec<Split>,
     pub why: Option<Why>,
+    /// The assists helped: counts here, never online.
+    pub assisted: bool,
     /// Metres a second.
     pub top_speed: f32,
     /// The slowest point of the lap: speed in metres a second, and the sector.
@@ -184,6 +188,7 @@ impl LapTimer {
         self.notice_left = 0.0;
         self.splits.clear();
         self.why = None;
+        self.assisted = false;
         self.top_speed = 0.0;
         self.slowest = None;
     }
@@ -301,6 +306,7 @@ impl Default for LapTimer {
             ever_improved: false,
             splits: Vec::new(),
             why: None,
+            assisted: false,
             report: None,
             top_speed: 0.0,
             slowest: None,
@@ -418,6 +424,7 @@ impl LapTimer {
                 self.net_progress = progress;
                 self.invalid = false;
                 self.why = None;
+                self.assisted = false;
                 self.top_speed = speed;
                 self.slowest = None;
                 self.finish_runup = 0.0;
@@ -448,6 +455,7 @@ impl LapTimer {
                     sectors: self.sectors.clone(),
                     splits: self.splits.clone(),
                     why: self.why,
+                    assisted: self.assisted,
                     top_speed: self.top_speed,
                     slowest: self.slowest.map(|(speed, at)| {
                         let into = (at - start).clamp(0.0, 0.999);
@@ -467,6 +475,7 @@ impl LapTimer {
                 self.net_progress = progress;
                 self.invalid = !legal;
                 self.why = (!legal).then_some(Why::OffTrack { sector: 1 });
+                self.assisted = false;
                 self.top_speed = speed;
                 self.slowest = None;
                 self.finish_runup = 0.0;

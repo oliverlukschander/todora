@@ -19,10 +19,7 @@ use crate::ui::{LINE, TEXT, label};
 const SHOWN_FOR: f32 = 5.0;
 /// The most sectors a circuit has, and so the sector spans built.
 const SPANS: usize = 8;
-const PURPLE: Color = Color::srgb(0.74, 0.42, 1.0);
-const GREEN: Color = Color::srgb(0.38, 0.86, 0.42);
-const YELLOW: Color = Color::srgb(0.98, 0.83, 0.27);
-const RED: Color = Color::srgb(0.96, 0.32, 0.26);
+const RED: Color = crate::ui::Palette::STANDARD.behind;
 
 pub struct SummaryPlugin;
 
@@ -72,6 +69,7 @@ impl Card {
                 Split::Green,
             ],
             why: None,
+            assisted: false,
             top_speed: 21.4,
             slowest: Some((7.8, 4)),
         };
@@ -136,7 +134,8 @@ pub(crate) fn headline(report: &LapReport) -> String {
             None => String::new(),
         }
     };
-    format!("LAP {}    {time}    {meaning}", report.number)
+    let assisted = if report.assisted { "    ASSISTED" } else { "" };
+    format!("LAP {}    {time}    {meaning}{assisted}", report.number)
         .trim_end()
         .to_string()
 }
@@ -179,13 +178,8 @@ pub(crate) fn speeds(report: &LapReport, units: Units) -> String {
     }
 }
 
-fn split_colour(split: Split) -> Color {
-    match split {
-        Split::Purple => PURPLE,
-        Split::Green => GREEN,
-        Split::Yellow => YELLOW,
-        Split::Plain => TEXT,
-    }
+fn split_colour(split: Split, palette: crate::ui::Palette) -> Color {
+    crate::hud::split_colour(split, palette).unwrap_or(TEXT)
 }
 
 fn setup(mut commands: Commands) {
@@ -333,9 +327,10 @@ fn setup_banner(mut commands: Commands) {
 }
 
 /// The banner, the flashing clock, and nothing at all once it is over.
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn celebrate(
     time: Res<Time>,
+    settings: Option<Res<Settings>>,
     halt: Res<Halt>,
     timer: Res<LapTimer>,
     mut party: ResMut<Celebration>,
@@ -369,7 +364,8 @@ fn celebrate(
             };
         }
     }
-    let lit = showing && flash_on(party.left);
+    let still = settings.as_ref().is_some_and(|s| s.reduced_motion);
+    let lit = showing && !still && flash_on(party.left);
     for mut colour in &mut clocks {
         colour.set_if_neq(TextColor(if lit { AMBER } else { TEXT }));
     }
@@ -411,6 +407,7 @@ fn draw(
         return;
     };
     card.fresh = false;
+    let palette = crate::ui::Palette::of(settings.as_deref());
     let units = settings.map_or(Units::Kmh, |s| s.units);
     if let Ok((mut text, mut colour)) = headlines.single_mut() {
         text.0 = headline(report);
@@ -452,7 +449,7 @@ fn draw(
                 colour.0 = report
                     .splits
                     .get(span.0)
-                    .map_or(TEXT, |split| split_colour(*split));
+                    .map_or(TEXT, |split| split_colour(*split, palette));
             }
             None => text.0.clear(),
         }
@@ -473,6 +470,7 @@ mod tests {
             sectors: vec![11.02, 12.4],
             splits: vec![Split::Purple, Split::Green],
             why: None,
+            assisted: false,
             top_speed: 21.4,
             slowest: Some((7.8, 4)),
         }

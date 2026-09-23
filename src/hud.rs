@@ -10,12 +10,8 @@ pub(crate) const AMBER: Color = crate::ui::ACCENT;
 pub(crate) const AMBER_DIM: Color = crate::ui::MUTED;
 pub(crate) const PANEL: Color = Color::srgba(0.035, 0.05, 0.065, 0.9);
 pub(crate) const FRONT: Color = Color::srgba(0.045, 0.06, 0.073, 0.98);
-/// The delta to the ghost: green when this lap is ahead of it, red when behind.
-const AHEAD: Color = Color::srgb(0.38, 0.86, 0.42);
-const BEHIND: Color = Color::srgb(0.96, 0.32, 0.26);
-/// Sector colours: the fastest ever, faster than the best lap, slower.
-const PURPLE: Color = Color::srgb(0.74, 0.42, 1.0);
-const YELLOW: Color = Color::srgb(0.98, 0.83, 0.27);
+/// What the invalid-lap warning is written in.
+const BEHIND: Color = crate::ui::Palette::STANDARD.behind;
 /// The most sectors any circuit is split into.
 const MOST_SECTORS: usize = 8;
 
@@ -53,6 +49,7 @@ impl Plugin for HudPlugin {
                 draw_delta,
                 draw_circuit,
                 draw_optional,
+                draw_contrast,
                 (place, keep_safe).chain(),
             )
                 .after(crate::ghost::GhostSet),
@@ -401,9 +398,12 @@ fn draw_circuit(track: Res<Track>, mut readout: Query<&mut Text, With<CircuitNam
 fn draw_delta(
     ghost: Res<Ghost>,
     rival: Option<Res<crate::ghost::Rival>>,
+    settings: Option<Res<crate::settings::Settings>>,
     mut readout: Query<(&mut Text, &mut TextColor), (With<DeltaReadout>, Without<RivalDelta>)>,
     mut second: Query<(&mut Text, &mut TextColor), (With<RivalDelta>, Without<DeltaReadout>)>,
 ) {
+    let palette = crate::ui::Palette::of(settings.as_deref());
+    let (ahead, behind) = (palette.ahead, palette.behind);
     let theirs = rival
         .as_ref()
         .filter(|r| r.on && r.loaded())
@@ -412,7 +412,7 @@ fn draw_delta(
         None => (format!("{who}  --"), AMBER_DIM),
         Some(delta) => (
             format!("{who}  {delta:+.2}"),
-            if delta <= 0.0 { AHEAD } else { BEHIND },
+            if delta <= 0.0 { ahead } else { behind },
         ),
     };
     let (first, below) = match (ghost.on, &theirs) {
@@ -421,7 +421,7 @@ fn draw_delta(
             Some(delta) => (
                 (
                     format!("{delta:+.2}"),
-                    if delta <= 0.0 { AHEAD } else { BEHIND },
+                    if delta <= 0.0 { ahead } else { behind },
                 ),
                 None,
             ),
@@ -530,6 +530,26 @@ fn draw_optional(
     }
 }
 
+/// Opaque black panels for the high-contrast HUD, or the usual smoke.
+fn draw_contrast(
+    settings: Option<Res<crate::settings::Settings>>,
+    mut panels: Query<&mut BackgroundColor, With<Instrument>>,
+    added: Query<(), Added<Instrument>>,
+) {
+    let changed = settings.as_ref().is_some_and(|s| s.is_changed());
+    if !changed && added.is_empty() {
+        return;
+    }
+    let wanted = if settings.is_some_and(|s| s.high_contrast) {
+        Color::BLACK
+    } else {
+        PANEL
+    };
+    for mut colour in &mut panels {
+        colour.set_if_neq(BackgroundColor(wanted));
+    }
+}
+
 /// Note where every HUD panel was put, the first time it is seen.
 #[allow(clippy::type_complexity)]
 fn place(
@@ -607,12 +627,23 @@ fn clock_text(timer: &LapTimer) -> String {
 }
 
 /// What colour a sector went, or `None` for one with nothing to go by.
-fn split_colour(split: Split) -> Option<Color> {
+pub(crate) fn split_colour(split: Split, palette: crate::ui::Palette) -> Option<Color> {
     match split {
-        Split::Purple => Some(PURPLE),
-        Split::Green => Some(AHEAD),
-        Split::Yellow => Some(YELLOW),
+        Split::Purple => Some(palette.purple),
+        Split::Green => Some(palette.green),
+        Split::Yellow => Some(palette.yellow),
         Split::Plain => None,
+    }
+}
+
+/// A word for how a sector went, for the colour-blind palette: colour is never
+/// the only thing that says it.
+pub(crate) fn split_word(split: Split) -> &'static str {
+    match split {
+        Split::Purple => "  FASTEST",
+        Split::Green => "  FASTER",
+        Split::Yellow => "  SLOWER",
+        Split::Plain => "",
     }
 }
 
@@ -620,11 +651,14 @@ fn split_colour(split: Split) -> Option<Color> {
 fn draw_sector_bar(
     timer: Res<LapTimer>,
     track: Res<Track>,
+    settings: Option<Res<crate::settings::Settings>>,
     mut segments: Query<(&SectorSegment, &mut Node, &mut BackgroundColor)>,
 ) {
-    if !timer.is_changed() && !track.is_changed() {
+    let repainted = settings.as_ref().is_some_and(|s| s.is_changed());
+    if !timer.is_changed() && !track.is_changed() && !repainted {
         return;
     }
+    let palette = crate::ui::Palette::of(settings.as_deref());
     let count = track.sector_count();
     for (segment, mut node, mut colour) in &mut segments {
         let display = if segment.0 < count {
@@ -636,7 +670,7 @@ fn draw_sector_bar(
             node.display = display;
         }
         let wanted = match timer.splits.get(segment.0) {
-            Some(split) => split_colour(*split).unwrap_or(crate::ui::TEXT),
+            Some(split) => split_colour(*split, palette).unwrap_or(crate::ui::TEXT),
             None => crate::ui::LINE,
         };
         colour.set_if_neq(BackgroundColor(wanted));
@@ -645,6 +679,7 @@ fn draw_sector_bar(
 
 fn draw_sector(
     timer: Res<LapTimer>,
+    settings: Option<Res<crate::settings::Settings>>,
     mut sectors: Query<(&mut Text, &mut TextColor), With<SectorReadout>>,
     mut invalid: Query<&mut Text, (With<InvalidReadout>, Without<SectorReadout>)>,
 ) {
@@ -652,13 +687,16 @@ fn draw_sector(
         text.0 = if timer.invalid { "LAP INVALID" } else { "" }.into();
     }
     if let Ok((mut text, mut color)) = sectors.single_mut() {
+        let palette = crate::ui::Palette::of(settings.as_deref());
+        let words = settings.as_ref().is_some_and(|s| s.colour_blind);
         match timer.sector_notice {
             Some(s) => {
+                let word = if words { split_word(s.split) } else { "" };
                 text.0 = match s.delta {
-                    Some(d) => format!("SECTOR {}   {d:+.2}", s.number),
+                    Some(d) => format!("SECTOR {}   {d:+.2}{word}", s.number),
                     None => format!("SECTOR {}   {}", s.number, format_time(s.time)),
                 };
-                color.0 = split_colour(s.split).unwrap_or(AMBER_DIM);
+                color.0 = split_colour(s.split, palette).unwrap_or(AMBER_DIM);
             }
             None => text.0.clear(),
         }

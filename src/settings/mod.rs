@@ -84,6 +84,17 @@ pub(crate) struct Settings {
     pub minimap: bool,
     pub g_meter: bool,
     pub countdown: Countdown,
+    // Accessibility.
+    /// Blue and orange for ahead and behind, and words beside sector colours.
+    pub colour_blind: bool,
+    /// Opaque black HUD panels behind the text, instead of smoke.
+    pub high_contrast: bool,
+    /// Nothing flashes.
+    pub reduced_motion: bool,
+    /// Tap throttle or brake to hold it; tap again to let go.
+    pub sticky_pedals: bool,
+    /// In Beginner mode, the car helps with steering and brakes for big corners.
+    pub assists: bool,
     // Controls.
     /// Multiplies steering input; 0.5 to 1.5.
     pub steering: f32,
@@ -143,6 +154,11 @@ impl Default for Settings {
             minimap: true,
             g_meter: true,
             countdown: Countdown::Short,
+            colour_blind: false,
+            high_contrast: false,
+            reduced_motion: false,
+            sticky_pedals: false,
+            assists: false,
             steering: 1.0,
             deadzone: 0.12,
             rumble: true,

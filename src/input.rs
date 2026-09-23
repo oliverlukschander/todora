@@ -76,6 +76,51 @@ pub(crate) fn stick_steer(stick: f32, deadzone: f32, sensitivity: f32) -> f32 {
     stick.signum() * travel.powf(1.0 / sensitivity)
 }
 
+/// The pedals a tap has latched on, when pedals are sticky.
+#[derive(Default)]
+struct Latched {
+    throttle: bool,
+    brake: bool,
+}
+
+/// The AI's hands, borrowed for the Beginner assists.
+type Helper = Box<
+    dyn FnMut(&crate::track::Track, &crate::car::Handling, &Transform, &crate::car::Car) -> Controls
+        + Send
+        + Sync,
+>;
+
+/// A tap latches a pedal on and the next tap lets it go; holding does nothing
+/// more. Either pedal pressed releases the other, so the car is never asked to
+/// accelerate and brake by a latch left on.
+fn latch(latched: &mut Latched, throttle_tapped: bool, brake_tapped: bool) {
+    if throttle_tapped {
+        latched.throttle = !latched.throttle;
+        latched.brake = false;
+    }
+    if brake_tapped {
+        latched.brake = !latched.brake;
+        latched.throttle = false;
+    }
+}
+
+/// The Beginner assists: half the steering comes from the AI's line, and where
+/// the AI would brake the car brakes too, however hard the throttle is pressed.
+pub(crate) fn assist(driver: Controls, helper: Controls) -> Controls {
+    let braking = helper.brake > 0.2;
+    Controls {
+        steer: 0.5 * driver.steer + 0.5 * helper.steer,
+        brake: driver.brake.max(if braking { helper.brake } else { 0.0 }),
+        throttle: if braking {
+            driver.throttle.min(helper.throttle)
+        } else {
+            driver.throttle
+        },
+        handbrake: driver.handbrake,
+    }
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn read(
     keys: Res<ButtonInput<KeyCode>>,
     settings: Option<Res<crate::settings::Settings>>,
@@ -83,6 +128,11 @@ fn read(
     mut reset: MessageWriter<Reset>,
     mut chosen: ResMut<Setup>,
     mut players: Query<&mut Controls, With<Player>>,
+    bodies: Query<(&Transform, &crate::car::Car, &crate::car::Handling), With<Player>>,
+    context: Option<(Res<crate::track::Track>, Res<crate::car::Mode>)>,
+    mut timer: Option<ResMut<crate::lap::LapTimer>>,
+    mut latched: Local<Latched>,
+    mut helper: Local<Option<Helper>>,
 ) {
     // Number keys pick a setup outright; the garage also exposes it.
     // Only write a change, so holding a key does not re-lean the car each frame.
@@ -165,6 +215,43 @@ fn read(
     if restart {
         reset.write(Reset);
     }
+    if settings.as_ref().is_some_and(|s| s.sticky_pedals) {
+        let tapped = |codes: &[KeyCode], buttons: &[GamepadButton]| {
+            keys.any_just_pressed(codes.iter().copied())
+                || pads
+                    .iter()
+                    .any(|pad| buttons.iter().any(|b| pad.just_pressed(*b)))
+        };
+        let throttle = tapped(
+            &[KeyCode::KeyW, KeyCode::ArrowUp],
+            &[GamepadButton::South, GamepadButton::DPadUp],
+        );
+        let brake = tapped(
+            &[KeyCode::KeyS, KeyCode::ArrowDown],
+            &[GamepadButton::West, GamepadButton::DPadDown],
+        );
+        latch(&mut latched, throttle, brake);
+        if restart {
+            *latched = Latched::default();
+        }
+        asked.throttle = if latched.throttle { 1.0 } else { 0.0 };
+        asked.brake = if latched.brake { 1.0 } else { 0.0 };
+    } else {
+        *latched = Latched::default();
+    }
+    let assisting = settings.as_ref().is_some_and(|s| s.assists)
+        && context
+            .as_ref()
+            .is_some_and(|(_, mode)| **mode == crate::car::Mode::Beginner);
+    if assisting && let (Some((track, _)), Ok((at, car, handling))) = (&context, bodies.single()) {
+        let helper = helper.get_or_insert_with(|| Box::new(crate::car::ai_driver()));
+        asked = assist(asked, helper(track, handling, at, car));
+        if let Some(timer) = timer.as_mut()
+            && timer.running()
+        {
+            timer.assisted = true;
+        }
+    }
     for mut controls in &mut players {
         *controls = asked;
     }
@@ -176,6 +263,45 @@ fn held<const N: usize>(keys: &ButtonInput<KeyCode>, any: [KeyCode; N]) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_tap_holds_a_pedal_until_the_next_and_never_both() {
+        use super::{Latched, latch};
+        let mut latched = Latched::default();
+        latch(&mut latched, true, false);
+        assert!(latched.throttle && !latched.brake);
+        latch(&mut latched, false, true);
+        assert!(
+            !latched.throttle && latched.brake,
+            "braking lets the throttle go"
+        );
+        latch(&mut latched, false, true);
+        assert!(!latched.brake);
+    }
+
+    #[test]
+    fn the_assists_share_the_steering_and_brake_where_the_line_does() {
+        use super::{Controls, assist};
+        let driver = Controls {
+            throttle: 1.0,
+            steer: 1.0,
+            ..Default::default()
+        };
+        let cruising = Controls {
+            throttle: 1.0,
+            steer: 0.0,
+            ..Default::default()
+        };
+        let braking = Controls {
+            brake: 0.8,
+            steer: -0.2,
+            ..Default::default()
+        };
+        assert_eq!(assist(driver, cruising).steer, 0.5);
+        assert_eq!(assist(driver, cruising).throttle, 1.0);
+        let helped = assist(driver, braking);
+        assert_eq!((helped.brake, helped.throttle), (0.8, 0.0));
+    }
+
     #[test]
     fn the_stick_curve_keeps_its_ends_and_bends_in_between() {
         use super::stick_steer;

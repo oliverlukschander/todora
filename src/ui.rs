@@ -8,6 +8,43 @@ pub(crate) const SURFACE: Color = Color::srgb(0.075, 0.095, 0.11);
 pub(crate) const RAISED: Color = Color::srgb(0.11, 0.14, 0.16);
 pub(crate) const LINE: Color = Color::srgb(0.21, 0.26, 0.29);
 
+/// The colours that carry meaning: ahead and behind, and the three sector
+/// colours. The colour-blind set swaps red and green for orange and blue and
+/// keeps purple apart from both, so no pair relies on telling red from green.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Palette {
+    pub ahead: Color,
+    pub behind: Color,
+    pub purple: Color,
+    pub green: Color,
+    pub yellow: Color,
+}
+
+impl Palette {
+    pub(crate) const STANDARD: Self = Self {
+        ahead: Color::srgb(0.38, 0.86, 0.42),
+        behind: Color::srgb(0.96, 0.32, 0.26),
+        purple: Color::srgb(0.74, 0.42, 1.0),
+        green: Color::srgb(0.38, 0.86, 0.42),
+        yellow: Color::srgb(0.98, 0.83, 0.27),
+    };
+    pub(crate) const COLOUR_BLIND: Self = Self {
+        ahead: Color::srgb(0.30, 0.62, 1.0),
+        behind: Color::srgb(1.0, 0.60, 0.12),
+        purple: Color::srgb(0.86, 0.50, 0.98),
+        green: Color::srgb(0.30, 0.62, 1.0),
+        yellow: Color::srgb(1.0, 0.60, 0.12),
+    };
+
+    pub(crate) fn of(settings: Option<&crate::settings::Settings>) -> Self {
+        if settings.is_some_and(|s| s.colour_blind) {
+            Self::COLOUR_BLIND
+        } else {
+            Self::STANDARD
+        }
+    }
+}
+
 pub(crate) struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
