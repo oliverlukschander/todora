@@ -42,6 +42,12 @@ pub fn configure(app: &mut App) {
             .expect("capture circuit"),
     );
     app.insert_resource(track)
+        .insert_resource(crate::settings::ReadOnly)
+        // Captures start from the defaults, whatever this machine saved.
+        .insert_resource(crate::settings::Settings::default())
+        .insert_resource(crate::car::Spec::default())
+        .insert_resource(crate::car::Setup::default())
+        .insert_resource(crate::car::Mode::default())
         .insert_resource(Capture {
             path,
             progress: std::env::var("TODORA_PROGRESS")

@@ -9,6 +9,7 @@ mod menu;
 mod minimap;
 mod multiplayer;
 mod pause;
+mod settings;
 mod skid;
 mod sky;
 mod sound;
@@ -80,6 +81,8 @@ pub struct GamePlugin;
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Reset>()
+            // First, so every plugin after it starts from what was saved.
+            .add_plugins(settings::SettingsPlugin)
             .add_plugins((
                 ui::UiPlugin,
                 world::WorldPlugin,

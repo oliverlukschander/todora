@@ -239,7 +239,12 @@ impl Plugin for TrackPlugin {
     fn build(&self, app: &mut App) {
         // Built here rather than in a startup system so the car and the camera
         // can read the grid slot the moment they spawn.
-        app.insert_resource(Track::new(circuits::first()))
+        let circuit = app
+            .world()
+            .get_resource::<crate::settings::Settings>()
+            .and_then(crate::settings::Settings::chosen_circuit)
+            .unwrap_or_else(circuits::first);
+        app.insert_resource(Track::new(circuit))
             .add_message::<GoTo>()
             .add_systems(Startup, setup)
             .add_systems(PreUpdate, switch.in_set(TrackSet).after(MenuSet))

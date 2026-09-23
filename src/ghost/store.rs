@@ -177,27 +177,9 @@ fn decode_sectors(bytes: &[u8], fingerprint: u64, count: usize) -> Option<Vec<f3
         .then_some(sectors)
 }
 
-/// Where this machine keeps what a game saves.
+/// Where the laps are kept.
 fn folder() -> Option<PathBuf> {
-    #[cfg(all(target_os = "macos", feature = "game-center"))]
-    let base = crate::multiplayer::support_directory();
-    #[cfg(target_os = "windows")]
-    let base = std::env::var_os("APPDATA").map(PathBuf::from);
-    #[cfg(not(any(
-        target_os = "windows",
-        all(target_os = "macos", feature = "game-center")
-    )))]
-    let base = {
-        let home = std::env::var_os("HOME").map(PathBuf::from);
-        if cfg!(target_os = "macos") {
-            home.map(|home| home.join("Library/Application Support"))
-        } else {
-            std::env::var_os("XDG_DATA_HOME")
-                .map(PathBuf::from)
-                .or_else(|| home.map(|home| home.join(".local/share")))
-        }
-    };
-    Some(base?.join("Todora").join("laps"))
+    Some(crate::settings::data_dir()?.join("laps"))
 }
 
 fn encode(lap: &Recording, fingerprint: u64) -> Vec<u8> {
