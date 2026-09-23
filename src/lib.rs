@@ -9,6 +9,7 @@ mod minimap;
 mod multiplayer;
 mod pause;
 mod skid;
+mod sky;
 mod sound;
 mod track;
 mod ui;
@@ -81,6 +82,7 @@ impl Plugin for GamePlugin {
             .add_plugins((
                 ui::UiPlugin,
                 world::WorldPlugin,
+                sky::SkyPlugin,
                 track::TrackPlugin,
                 input::InputPlugin,
                 car::CarPlugin,
