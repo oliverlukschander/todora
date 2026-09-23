@@ -35,6 +35,7 @@ The approved plan, decisions and build order are in the
 - [x] Synthesised engine note with its own volume (2026-09-24). Listen to `dist/engine.wav` and tune.
 - [x] Accessibility: colour-blind palette with words, high contrast, reduced motion, tap-to-hold pedals, Beginner assists (2026-09-24).
 - [x] Weekly challenge circuit with its own board (2026-09-24).
+- [x] Finish presentation: band glow, waved flag, crowd cheer on a new best (2026-09-24).
 - [ ] Online leaderboards at todora.lukschander.com.
 
 ## Game Center multiplayer

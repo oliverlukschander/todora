@@ -246,6 +246,7 @@ fn hear(
             party.left = CELEBRATE_FOR;
             party.fresh = true;
             cues.write(crate::sound::Cue::Best);
+            cues.write(crate::sound::Cue::Cheer);
         }
     }
 }

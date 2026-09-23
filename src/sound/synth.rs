@@ -71,7 +71,7 @@ impl Engine {
             .noise
             .wrapping_mul(1_664_525)
             .wrapping_add(1_013_904_223);
-        let white = (self.noise >> 9) as f32 / (1u32 << 23) as f32 - 1.0;
+        let white = (self.noise >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
         self.rumble += (white - self.rumble) * 0.05;
         let voice = tone * (0.35 + 0.65 * self.load) + self.rumble * 1.2 * self.load;
         voice * level * 0.045
@@ -103,6 +103,8 @@ pub(crate) enum Cue {
     Go,
     /// A new best lap: three rising notes.
     Best,
+    /// The crowd, for a new best: a swell of voices, no tune.
+    Cheer,
 }
 
 impl Cue {
@@ -111,6 +113,7 @@ impl Cue {
             Self::Red => 0,
             Self::Go => 1,
             Self::Best => 2,
+            Self::Cheer => 3,
         }
     }
 
@@ -118,6 +121,7 @@ impl Cue {
         match code {
             1 => Self::Go,
             2 => Self::Best,
+            3 => Self::Cheer,
             _ => Self::Red,
         }
     }
@@ -128,6 +132,7 @@ impl Cue {
             Self::Red => &[(660.0, 0.2)],
             Self::Go => &[(1_320.0, 0.42)],
             Self::Best => &[(880.0, 0.13), (1_174.7, 0.13), (1_760.0, 0.38)],
+            Self::Cheer => &[],
         }
     }
 }
@@ -143,15 +148,47 @@ pub(super) struct Beep {
     length: u32,
     /// Notes still to come after this one.
     queue: &'static [(f32, f32)],
+    /// The cheer: samples left, noise state, and two filters that make white
+    /// noise sound like many voices far off.
+    cheer_left: u32,
+    noise: u32,
+    low: f32,
+    lower: f32,
 }
+
+/// How long a cheer lasts, in seconds.
+const CHEER: f32 = 2.4;
 
 /// Samples a second, per channel, as the mixer runs.
 const RATE: f32 = 44_100.0;
 
 impl Beep {
     pub fn start(&mut self, cue: Cue) {
+        if cue == Cue::Cheer {
+            self.cheer_left = (CHEER * RATE) as u32;
+            return;
+        }
         self.queue = cue.notes();
         self.next();
+    }
+
+    fn cheer(&mut self) -> f32 {
+        if self.cheer_left == 0 {
+            return 0.0;
+        }
+        self.cheer_left -= 1;
+        let into = CHEER - self.cheer_left as f32 / RATE;
+        // Swells over a third of a second, then falls away.
+        let envelope = (into / 0.35).min(1.0) * (self.cheer_left as f32 / RATE / 1.6).min(1.0);
+        self.noise = self
+            .noise
+            .wrapping_mul(1_664_525)
+            .wrapping_add(1_013_904_223);
+        let white = (self.noise >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
+        // A band around the voice's range: low-pass, less a lower low-pass.
+        self.low += (white - self.low) * 0.18;
+        self.lower += (white - self.lower) * 0.02;
+        (self.low - self.lower) * envelope * 0.35
     }
 
     fn next(&mut self) {
@@ -166,10 +203,11 @@ impl Beep {
     }
 
     pub fn sample(&mut self) -> f32 {
+        let crowd = self.cheer();
         if self.left == 0 {
             self.next();
             if self.left == 0 {
-                return 0.0;
+                return crowd;
             }
         }
         let done = (self.length - self.left) as f32 / RATE;
@@ -177,7 +215,7 @@ impl Beep {
         let envelope = (done / 0.008).min(1.0) * (remaining / 0.06).min(1.0);
         self.left -= 1;
         self.phase = (self.phase + self.step) % std::f32::consts::TAU;
-        self.phase.sin() * envelope * 0.16
+        self.phase.sin() * envelope * 0.16 + crowd
     }
 }
 
@@ -244,15 +282,15 @@ mod tests {
 
     #[test]
     fn a_beep_is_bounded_and_ends_in_silence() {
-        for cue in [Cue::Red, Cue::Go, Cue::Best] {
+        for cue in [Cue::Red, Cue::Go, Cue::Best, Cue::Cheer] {
             let mut beep = Beep::default();
             assert_eq!(beep.sample(), 0.0);
             beep.start(cue);
-            let samples: Vec<f32> = (0..40_000).map(|_| beep.sample()).collect();
-            assert!(samples.iter().all(|s| s.abs() <= 0.16));
-            assert!(samples.iter().any(|s| s.abs() > 0.1));
+            let samples: Vec<f32> = (0..(3 * 44_100)).map(|_| beep.sample()).collect();
+            assert!(samples.iter().all(|s| s.abs() <= 0.2), "{cue:?} too loud");
+            assert!(samples.iter().any(|s| s.abs() > 0.02), "{cue:?} silent");
             assert!(
-                samples[35_000..].iter().all(|s| *s == 0.0),
+                samples[(26 * 4_410)..].iter().all(|s| *s == 0.0),
                 "{cue:?} rang on"
             );
             assert_eq!(Cue::from_code(cue.code()), cue);

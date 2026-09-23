@@ -244,6 +244,7 @@ impl Plugin for TrackPlugin {
             .get_resource::<crate::settings::Settings>()
             .and_then(crate::settings::Settings::chosen_circuit)
             .unwrap_or_else(circuits::first);
+        app.init_resource::<start::Finish>();
         app.insert_resource(Track::new(circuit))
             .add_message::<GoTo>()
             .add_systems(Startup, setup)
@@ -255,6 +256,7 @@ impl Plugin for TrackPlugin {
                     trackside::rebuild.run_if(resource_changed::<Track>),
                     start::rebuild.run_if(resource_changed::<Track>),
                     markers::show,
+                    start::finish,
                     textures::prepare,
                 )
                     .chain(),

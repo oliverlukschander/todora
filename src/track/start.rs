@@ -47,6 +47,32 @@ const EDGE: (f32, f32, f32) = (0.25, 0.28, 0.27);
 #[derive(Component)]
 pub(super) struct StartLine;
 
+/// The flag waved over the left-hand post as a lap ends, and where it swings.
+#[derive(Component)]
+pub(super) struct Flag {
+    /// Facing down the road, before any swing.
+    rest: Quat,
+}
+
+/// The band's material, so the finish can light it.
+#[derive(Resource)]
+pub(super) struct Band(Handle<StandardMaterial>);
+
+/// How long the band stays lit and the flag keeps waving after a lap.
+const FLASH_FOR: f32 = 0.6;
+const WAVE_FOR: f32 = 3.0;
+/// The flag: half its size, and how far its staff rises above the post.
+const FLAG_HALF: Vec2 = Vec2::new(0.26, 0.18);
+const STAFF: f32 = 0.55;
+
+/// Seconds of flash and of waving left.
+#[derive(Resource, Default)]
+pub(super) struct Finish {
+    flash: f32,
+    wave: f32,
+    clock: f32,
+}
+
 pub(super) fn rebuild(
     mut commands: Commands,
     track: Res<Track>,
@@ -59,22 +85,109 @@ pub(super) fn rebuild(
     for entity in &old {
         commands.entity(entity).despawn();
     }
+    let chequer = images.add(chequer());
     let material = material
         .get_or_insert_with(|| {
             materials.add(StandardMaterial {
-                base_color_texture: Some(images.add(chequer())),
+                base_color_texture: Some(chequer.clone()),
                 unlit: true,
                 depth_bias: DEPTH_BIAS,
                 ..default()
             })
         })
         .clone();
+    commands.insert_resource(Band(material.clone()));
     commands.spawn((
         StartLine,
         Mesh3d(meshes.add(band(&track))),
         MeshMaterial3d(material),
         NotShadowCaster,
     ));
+    // A staff above the left-hand post, and the flag on it, seen from both
+    // sides; hidden until a lap ends.
+    let (base, _, _) = frame(&track, -1.0);
+    let pivot = base + Vec3::Y * (POST_HEIGHT + STAFF);
+    let facing =
+        Transform::from_translation(pivot).looking_to(track.ribbon.start().tangent, Vec3::Y);
+    commands
+        .spawn((
+            StartLine,
+            Flag {
+                rest: facing.rotation,
+            },
+            facing,
+            Visibility::Hidden,
+        ))
+        .with_children(|pivot| {
+            pivot.spawn((
+                Mesh3d(meshes.add(Rectangle::new(2.0 * FLAG_HALF.x, 2.0 * FLAG_HALF.y))),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color_texture: Some(chequer),
+                    unlit: true,
+                    cull_mode: None,
+                    ..default()
+                })),
+                Transform::from_xyz(FLAG_HALF.x, -FLAG_HALF.y, 0.0),
+                NotShadowCaster,
+            ));
+            pivot.spawn((
+                Mesh3d(meshes.add(Cuboid::new(0.02, STAFF + 0.1, 0.02))),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgb(POST.0, POST.1, POST.2),
+                    unlit: true,
+                    ..default()
+                })),
+                Transform::from_xyz(0.0, -STAFF / 2.0, 0.0),
+                NotShadowCaster,
+            ));
+        });
+}
+
+/// A lap ended: light the band for a moment and wave the flag. Neither
+/// happens with reduced motion.
+pub(super) fn finish(
+    time: Res<Time>,
+    mut laps: MessageReader<crate::lap::LapFinished>,
+    settings: Option<Res<crate::settings::Settings>>,
+    band: Option<Res<Band>>,
+    mut finish: ResMut<Finish>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut flags: Query<(&Flag, &mut Transform, &mut Visibility)>,
+) {
+    let still = settings.is_some_and(|s| s.reduced_motion);
+    if laps.read().last().is_some() && !still {
+        finish.flash = FLASH_FOR;
+        finish.wave = WAVE_FOR;
+    }
+    if finish.flash == 0.0 && finish.wave == 0.0 {
+        return;
+    }
+    let dt = time.delta_secs();
+    let was_lit = finish.flash > 0.0;
+    finish.flash = (finish.flash - dt).max(0.0);
+    finish.wave = (finish.wave - dt).max(0.0);
+    finish.clock += dt;
+    if let Some(mut material) = band.and_then(|b| materials.get_mut(&b.0)) {
+        material.base_color = if finish.flash > 0.0 {
+            // Warm gold fading back to the plain chequer.
+            let lit = finish.flash / FLASH_FOR;
+            Color::srgb(1.0, 1.0 - 0.25 * lit, 1.0 - 0.7 * lit)
+        } else if was_lit {
+            Color::WHITE
+        } else {
+            material.base_color
+        };
+    }
+    for (flag, mut at, mut visibility) in &mut flags {
+        visibility.set_if_neq(if finish.wave > 0.0 {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        });
+        // Swung about the staff, the way a marshal waves it.
+        let swing = (finish.clock * 9.0).sin() * 0.7;
+        at.rotation = flag.rest * Quat::from_rotation_y(swing);
+    }
 }
 
 /// The chequer, [`ACROSS`] by [`ALONG`] squares, with its mip chain.
@@ -340,5 +453,72 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod finish_tests {
+    use super::*;
+    use crate::lap::LapFinished;
+
+    fn app(reduced_motion: bool) -> (App, Entity) {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<LapFinished>()
+            .init_resource::<Finish>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .insert_resource(crate::settings::Settings {
+                reduced_motion,
+                ..Default::default()
+            })
+            .add_systems(Update, finish);
+        let flag = app
+            .world_mut()
+            .spawn((
+                Flag {
+                    rest: Quat::IDENTITY,
+                },
+                Transform::default(),
+                Visibility::Hidden,
+            ))
+            .id();
+        (app, flag)
+    }
+
+    fn lap(app: &mut App) {
+        app.world_mut().write_message(LapFinished {
+            time: 60.0,
+            best: false,
+            valid: true,
+        });
+        app.update();
+    }
+
+    #[test]
+    fn a_finished_lap_waves_the_flag_and_it_settles_again() {
+        let (mut app, flag) = app(false);
+        lap(&mut app);
+        assert_eq!(
+            app.world().get::<Visibility>(flag),
+            Some(&Visibility::Visible)
+        );
+        app.world_mut().resource_mut::<Finish>().wave = 0.001;
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        app.update();
+        app.update();
+        assert_eq!(
+            app.world().get::<Visibility>(flag),
+            Some(&Visibility::Hidden)
+        );
+    }
+
+    #[test]
+    fn reduced_motion_keeps_the_flag_down() {
+        let (mut app, flag) = app(true);
+        lap(&mut app);
+        assert_eq!(
+            app.world().get::<Visibility>(flag),
+            Some(&Visibility::Hidden)
+        );
     }
 }
