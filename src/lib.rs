@@ -19,6 +19,7 @@ mod sound;
 mod summary;
 mod track;
 mod ui;
+pub mod verify;
 #[cfg(feature = "visual-check")]
 mod visual_check;
 mod world;

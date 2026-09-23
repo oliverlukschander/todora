@@ -367,8 +367,7 @@ fn lean(g: Vec2) -> Quat {
 }
 
 /// The plain AI driver, as a function from the car's situation to what it
-/// asks for.
-#[cfg(test)]
+/// asks for. The tests lap with it, and the server seeds boards with it.
 pub(crate) fn ai_driver() -> impl FnMut(&Track, &Handling, &Transform, &Car) -> Controls {
     let mut driver = driver::Driver::new(driver::Style::Plain);
     move |track, handling, at, car| driver.decide(track, handling, at, car)

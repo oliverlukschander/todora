@@ -141,6 +141,76 @@ fn record(
     outbox::keep(run);
 }
 
+/// The plain AI drives from the grid through the run-up and `count` laps,
+/// timed by the judge and recorded by the recorder exactly as in the game.
+/// Every lap it finishes must replay from its run to the same step count,
+/// validity and sectors.
+pub(crate) fn ai_laps(
+    track: &Track,
+    mode: Mode,
+    count: usize,
+) -> Vec<(Run, crate::lap::LapFinished, Vec<f32>)> {
+    use crate::car::{SCALE, step_seconds};
+    use crate::lap::Step;
+    let handling = mode.applied_to(Setup::Balanced.applied_to(Spec::Tourer.handling()));
+    let mut driver = crate::car::ai_driver();
+    let mut at = track.start_transform().with_scale(Vec3::splat(SCALE));
+    let mut car = Car {
+        along: Some(track.start_along_lap()),
+        ..Car::default()
+    };
+    let dt = step_seconds();
+    let mut timer = LapTimer::default();
+    let mut recorder = Recorder::default();
+    let mut laps = Vec::new();
+    let budget = (3.5 * track.length() / 5.9 * 240.0) as usize;
+    for _ in 0..budget {
+        let controls = driver(track, &handling, &at, &car);
+        crate::car::advance(track, &handling, controls, &mut at, &mut car, dt);
+        timer.count(dt);
+        let recovered = std::mem::take(&mut car.recovered);
+        let pos = at.translation;
+        let step = Step {
+            legal: track.legal_contact(&at, car.along),
+            recovered,
+            along: track.start_along(pos),
+            progress: track.progress(pos, car.along),
+            length: track.length(),
+            sectors: track.sector_count(),
+            speed: car.velocity.length(),
+        };
+        let lap = timer.judge(step, || track.on_start_gate(pos, car.along));
+        if let Some(done) = recorder.step(
+            controls,
+            timer.running(),
+            lap.is_some(),
+            Entry::of(&at, &car),
+        ) {
+            let lap = lap.unwrap();
+            let sectors = timer.report.as_ref().unwrap().sectors.clone();
+            let run = Run {
+                app_version: "test".into(),
+                physics: crate::car::PHYSICS_VERSION,
+                circuit: track.circuit().id.into(),
+                fingerprint: track.fingerprint(),
+                mode,
+                car: Spec::Tourer,
+                setup: Setup::Balanced,
+                multiplayer: false,
+                steps: done.inputs.len() as u32,
+                sectors: sectors.clone(),
+                entry: done.entry,
+                inputs: done.inputs,
+            };
+            laps.push((run, lap, sectors));
+            if laps.len() == count {
+                break;
+            }
+        }
+    }
+    laps
+}
+
 pub(crate) mod outbox {
     //! Runs waiting to be sent: one file each, named for what they are and
     //! the hash of their bytes, written off the main thread.
@@ -186,79 +256,13 @@ pub(crate) mod outbox {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::car::{SCALE, step_seconds};
-    use crate::lap::Step;
     use crate::track::all_circuits;
-
-    /// The plain AI drives from the grid through the run-up and two laps,
-    /// timed by the judge and recorded by the recorder exactly as in the game.
-    /// Every lap it finishes must replay from its run to the same step count,
-    /// validity and sectors.
-    fn record_laps(track: &Track, mode: Mode) -> Vec<(Run, crate::lap::LapFinished, Vec<f32>)> {
-        let handling = mode.applied_to(Setup::Balanced.applied_to(Spec::Tourer.handling()));
-        let mut driver = crate::car::ai_driver();
-        let mut at = track.start_transform().with_scale(Vec3::splat(SCALE));
-        let mut car = Car {
-            along: Some(track.start_along_lap()),
-            ..Car::default()
-        };
-        let dt = step_seconds();
-        let mut timer = LapTimer::default();
-        let mut recorder = Recorder::default();
-        let mut laps = Vec::new();
-        let budget = (3.5 * track.length() / 5.9 * 240.0) as usize;
-        for _ in 0..budget {
-            let controls = driver(track, &handling, &at, &car);
-            crate::car::advance(track, &handling, controls, &mut at, &mut car, dt);
-            timer.count(dt);
-            let recovered = std::mem::take(&mut car.recovered);
-            let pos = at.translation;
-            let step = Step {
-                legal: track.legal_contact(&at, car.along),
-                recovered,
-                along: track.start_along(pos),
-                progress: track.progress(pos, car.along),
-                length: track.length(),
-                sectors: track.sector_count(),
-                speed: car.velocity.length(),
-            };
-            let lap = timer.judge(step, || track.on_start_gate(pos, car.along));
-            if let Some(done) = recorder.step(
-                controls,
-                timer.running(),
-                lap.is_some(),
-                Entry::of(&at, &car),
-            ) {
-                let lap = lap.unwrap();
-                let sectors = timer.report.as_ref().unwrap().sectors.clone();
-                let run = Run {
-                    app_version: "test".into(),
-                    physics: crate::car::PHYSICS_VERSION,
-                    circuit: track.circuit().id.into(),
-                    fingerprint: track.fingerprint(),
-                    mode,
-                    car: Spec::Tourer,
-                    setup: Setup::Balanced,
-                    multiplayer: false,
-                    steps: done.inputs.len() as u32,
-                    sectors: sectors.clone(),
-                    entry: done.entry,
-                    inputs: done.inputs,
-                };
-                laps.push((run, lap, sectors));
-                if laps.len() == 2 {
-                    break;
-                }
-            }
-        }
-        laps
-    }
 
     #[test]
     fn a_recorded_lap_replays_to_the_same_lap() {
         for id in ["monza", "suzuka", "monaco"] {
             let track = Track::new(all_circuits().iter().find(|c| c.id == id).unwrap());
-            let laps = record_laps(&track, Mode::Regular);
+            let laps = ai_laps(&track, Mode::Regular, 2);
             assert_eq!(laps.len(), 2, "{id}: the AI did not finish two laps");
             for (run, lap, sectors) in &laps {
                 let bytes = run.encode();
@@ -286,7 +290,7 @@ mod tests {
     #[test]
     fn a_forged_time_or_layout_or_entry_is_refused() {
         let track = Track::new(all_circuits().iter().find(|c| c.id == "monza").unwrap());
-        let (run, lap, _) = record_laps(&track, Mode::Regular)
+        let (run, lap, _) = ai_laps(&track, Mode::Regular, 2)
             .into_iter()
             .find(|(_, lap, _)| lap.valid)
             .expect("a valid lap");

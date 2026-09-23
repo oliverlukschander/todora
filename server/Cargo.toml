@@ -1,0 +1,24 @@
+[package]
+name = "todora-server"
+version = "0.1.0"
+edition = "2024"
+description = "Leaderboards for Todora: every lap is driven again before it counts"
+license = "MIT"
+publish = false
+
+[dependencies]
+todora = { path = ".." }
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+ed25519-dalek = "2"
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+getrandom = "0.3"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
