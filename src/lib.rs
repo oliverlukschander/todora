@@ -21,6 +21,7 @@ mod skid;
 mod sky;
 mod sound;
 mod summary;
+mod title;
 mod track;
 mod ui;
 pub mod verify;
@@ -118,6 +119,7 @@ impl Plugin for GamePlugin {
                 haptics::HapticsPlugin,
                 achievements::AchievementsPlugin,
                 replay::ReplayPlugin,
+                title::TitlePlugin,
                 multiplayer::MultiplayerPlugin,
             ))
             .add_systems(Update, quit);

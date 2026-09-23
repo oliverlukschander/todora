@@ -50,6 +50,8 @@ pub(crate) enum Halt {
     Board,
     /// Watching a lap again, or taking a picture of it.
     Replay,
+    /// The title screen the game opens on.
+    Title,
 }
 
 impl Halt {

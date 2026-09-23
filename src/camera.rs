@@ -133,7 +133,7 @@ fn follow(
     // across the circuit, or between two of them.
     let cut = resets.read().next().is_some();
     // The replay moves the camera itself.
-    if halt.is_some_and(|h| *h == crate::pause::Halt::Replay) {
+    if halt.is_some_and(|h| matches!(*h, crate::pause::Halt::Replay | crate::pause::Halt::Title)) {
         return;
     }
     let Ok((state, car)) = cars.single() else {

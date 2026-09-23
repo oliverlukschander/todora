@@ -472,6 +472,7 @@ fn drive(
     rows: Query<(&RowLine, Ref<Interaction>)>,
     tabs: Query<(&TabLabel, Ref<Interaction>)>,
     mut typed: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    title: Option<Res<crate::title::Title>>,
 ) {
     if *halt != Halt::Settings {
         typed.clear();
@@ -517,7 +518,7 @@ fn drive(
         }
     }
     if keys.just_pressed(KeyCode::Escape) || pad(GamepadButton::East) || pad(GamepadButton::Start) {
-        *halt = Halt::Pause;
+        *halt = crate::title::Title::back_to(title.as_deref());
         return;
     }
     let key = |code| !naming && keys.just_pressed(code);

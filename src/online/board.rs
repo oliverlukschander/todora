@@ -339,6 +339,7 @@ fn drive(
     challenge: Res<crate::challenge::Challenge>,
     mut go: MessageWriter<crate::track::GoTo>,
     mut mode: ResMut<Mode>,
+    title: Option<Res<crate::title::Title>>,
 ) {
     if *halt != Halt::Board || halt.is_changed() {
         return;
@@ -346,7 +347,7 @@ fn drive(
     let pad = |button| pads.iter().any(|pad| pad.just_pressed(button));
     if keys.just_pressed(KeyCode::Escape) || pad(GamepadButton::East) || pad(GamepadButton::Start) {
         *halt = if browse.from_pause {
-            Halt::Pause
+            crate::title::Title::back_to(title.as_deref())
         } else {
             Halt::Nothing
         };

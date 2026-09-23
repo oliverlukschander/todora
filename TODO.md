@@ -42,6 +42,7 @@ The approved plan, decisions and build order are in the
 - [x] Fifty achievements with toasts and an Awards view (2026-09-24).
 - [x] Replay viewer with trackside, chase and bonnet cameras, and photo mode (2026-09-24).
 - [x] Control remapping for keyboard and pad, settings version 2 (2026-09-24).
+- [x] Title screen with an orbit of the last circuit, and a fade on circuit changes (2026-09-24).
 - [ ] Online leaderboards at todora.lukschander.com.
 
 ## Game Center multiplayer

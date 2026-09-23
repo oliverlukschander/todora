@@ -198,6 +198,10 @@ fn drive(
     let Some(at) = guide.card else {
         return;
     };
+    // The cards wait for the title and any page over the game to go.
+    if !matches!(*halt, Halt::Nothing | Halt::Guide) || halt.is_changed() {
+        return;
+    }
     let pad = |button| pads.iter().any(|pad| pad.just_pressed(button));
     let skip = keys.just_pressed(KeyCode::Escape) || pad(GamepadButton::East);
     let next = keys.just_pressed(KeyCode::Enter) || pad(GamepadButton::South);

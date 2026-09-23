@@ -22,6 +22,10 @@ use bevy::{
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct MenuSet;
 
+/// Open a menu page from elsewhere: the title screen's Circuits button.
+#[derive(Message, Clone, Copy, Debug)]
+pub(crate) struct OpenMenu(pub Page);
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Page {
     Car,
@@ -122,6 +126,7 @@ enum Action {
 pub struct MenuPlugin;
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
+        app.add_message::<OpenMenu>();
         app.init_resource::<Menu>()
             .add_systems(Startup, view::setup)
             .add_systems(
@@ -155,9 +160,14 @@ fn open(
     spec: Res<Spec>,
     setup: Res<Setup>,
     mode: Res<Mode>,
+    mut asked: MessageReader<OpenMenu>,
     mut menu: ResMut<Menu>,
     mut halt: ResMut<Halt>,
 ) {
+    if let Some(OpenMenu(page)) = asked.read().last().copied() {
+        enter(page, &mut menu, &mut halt, &spec, &setup, &mode, &track);
+        return;
+    }
     if let Some(page) = menu.page {
         if pads.iter().any(|pad| {
             pad.just_pressed(GamepadButton::LeftTrigger)
