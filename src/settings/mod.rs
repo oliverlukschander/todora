@@ -20,13 +20,14 @@ use crate::car::{Mode, Setup, Spec};
 use crate::track::Track;
 
 mod apply;
+pub(crate) mod bindings;
 mod page;
 #[cfg(feature = "visual-check")]
 pub(crate) use page::{Page, PageSet};
 
 /// Bumped when a field changes meaning; [`Settings::migrate`] then says how
 /// to read the old one.
-pub(crate) const VERSION: u32 = 1;
+pub(crate) const VERSION: u32 = 2;
 const FILE: &str = "settings.json";
 /// Seconds after the last change before it is written.
 const SETTLE: f64 = 1.0;
@@ -133,6 +134,8 @@ pub(crate) struct Settings {
     /// How far a stick has to move before it steers, 0.02 to 0.4.
     pub deadzone: f32,
     pub rumble: bool,
+    /// Which key and pad button does what; added in version 2.
+    pub bindings: bindings::Bindings,
     // What was being driven.
     pub ghost: bool,
     pub onboarding_done: bool,
@@ -199,6 +202,7 @@ impl Default for Settings {
             steering: 1.0,
             deadzone: 0.12,
             rumble: true,
+            bindings: bindings::Bindings::default(),
             ghost: true,
             onboarding_done: false,
             beginner_hint_shown: false,
@@ -232,9 +236,13 @@ impl Settings {
         }
     }
 
-    /// Bring a file written by an older version up to this one. There is only
-    /// one version so far; a change of meaning goes in here as a match arm.
+    /// Bring a file written by an older version up to this one. Version 1 had
+    /// no key bindings, which the defaults fill in; a change of meaning goes in
+    /// here as a match arm.
     fn migrate(mut self) -> Self {
+        if self.version < 2 {
+            self.bindings = bindings::Bindings::default();
+        }
         self.version = VERSION;
         self
     }
@@ -555,6 +563,9 @@ mod tests {
     #[test]
     fn an_older_version_is_brought_up_to_date() {
         assert_eq!(Settings::parse(r#"{"version": 0}"#).version, VERSION);
+        let v1 = Settings::parse(r#"{"version": 1, "units": "mph"}"#);
+        assert_eq!(v1.bindings, bindings::Bindings::default());
+        assert_eq!(v1.units, Units::Mph);
     }
 
     #[test]

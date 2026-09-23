@@ -147,27 +147,32 @@ fn read(
         }
     }
 
-    let mut asked = Controls {
-        throttle: held(&keys, [KeyCode::KeyW, KeyCode::ArrowUp]),
-        // Shift still brakes, for anyone who learned it that way.
-        brake: held(
-            &keys,
-            [
-                KeyCode::KeyS,
-                KeyCode::ArrowDown,
-                KeyCode::ShiftLeft,
-                KeyCode::ShiftRight,
-            ],
-        ),
-        steer: held(&keys, [KeyCode::KeyA, KeyCode::ArrowLeft])
-            - held(&keys, [KeyCode::KeyD, KeyCode::ArrowRight]),
-        handbrake: keys.pressed(KeyCode::Space),
+    use crate::settings::bindings::{Act, current};
+    let b = current(settings.as_deref());
+    let on = |act, fixed: &[KeyCode]| {
+        if b.key_held(&keys, act) || keys.any_pressed(fixed.iter().copied()) {
+            1.0
+        } else {
+            0.0
+        }
     };
-    let mut restart = keys.just_pressed(KeyCode::KeyR);
+    let mut asked = Controls {
+        throttle: on(Act::Throttle, &[KeyCode::ArrowUp]),
+        // Shift still brakes, for anyone who learned it that way.
+        brake: on(
+            Act::Brake,
+            &[KeyCode::ArrowDown, KeyCode::ShiftLeft, KeyCode::ShiftRight],
+        ),
+        steer: on(Act::Left, &[KeyCode::ArrowLeft]) - on(Act::Right, &[KeyCode::ArrowRight]),
+        handbrake: b.key_held(&keys, Act::Handbrake),
+    };
+    let mut restart = b.key(Act::Restart).is_some_and(|k| keys.just_pressed(k));
+    let button = |pad: &Gamepad, act| b.pad(act).is_some_and(|button| pad.pressed(button));
 
     for pad in &pads {
-        // Bevy's RightTrigger is the bumper (RB); RightTrigger2 is RT.
-        restart |= pad.just_pressed(GamepadButton::RightTrigger);
+        restart |= b
+            .pad(Act::Restart)
+            .is_some_and(|button| pad.just_pressed(button));
         // Stick right is steer right, which is negative here. Past the deadzone
         // the travel is rescaled so full stick is still full lock.
         let stick = -pad.left_stick().x;
@@ -175,8 +180,7 @@ fn read(
             .as_ref()
             .map_or((DEADZONE, 1.0), |s| (s.deadzone, s.steering));
         let steer = stick_steer(stick, deadzone, sensitivity);
-        let dpad_steer = f32::from(pad.pressed(GamepadButton::DPadLeft))
-            - f32::from(pad.pressed(GamepadButton::DPadRight));
+        let dpad_steer = f32::from(button(pad, Act::Left)) - f32::from(button(pad, Act::Right));
         let steer = if dpad_steer.abs() > steer.abs() {
             dpad_steer
         } else {
@@ -188,22 +192,18 @@ fn read(
         asked.throttle = asked
             .throttle
             .max(pad.get(GamepadButton::RightTrigger2).unwrap_or(0.0))
-            .max(if pad.pressed(GamepadButton::South) {
-                1.0
-            } else {
-                0.0
-            });
+            .max(if button(pad, Act::Throttle) { 1.0 } else { 0.0 });
         asked.brake = asked
             .brake
             .max(pad.get(GamepadButton::LeftTrigger2).unwrap_or(0.0))
             .max(
-                if pad.pressed(GamepadButton::West) || pad.pressed(GamepadButton::DPadDown) {
+                if button(pad, Act::Brake) || pad.pressed(GamepadButton::DPadDown) {
                     1.0
                 } else {
                     0.0
                 },
             );
-        asked.handbrake |= pad.pressed(GamepadButton::East);
+        asked.handbrake |= button(pad, Act::Handbrake);
     }
 
     if wanted != *chosen {
@@ -214,17 +214,8 @@ fn read(
         reset.write(Reset);
     }
     if settings.as_ref().is_some_and(|s| s.sticky_pedals) {
-        let tapped = |codes: &[KeyCode], buttons: &[GamepadButton]| {
-            keys.any_just_pressed(codes.iter().copied())
-                || pads
-                    .iter()
-                    .any(|pad| buttons.iter().any(|b| pad.just_pressed(*b)))
-        };
-        let throttle = tapped(&[KeyCode::KeyW, KeyCode::ArrowUp], &[GamepadButton::South]);
-        let brake = tapped(
-            &[KeyCode::KeyS, KeyCode::ArrowDown],
-            &[GamepadButton::West, GamepadButton::DPadDown],
-        );
+        let throttle = b.just(&keys, &pads, Act::Throttle) || keys.just_pressed(KeyCode::ArrowUp);
+        let brake = b.just(&keys, &pads, Act::Brake) || keys.just_pressed(KeyCode::ArrowDown);
         latch(&mut latched, throttle, brake);
         if restart {
             *latched = Latched::default();
@@ -250,10 +241,6 @@ fn read(
     for mut controls in &mut players {
         *controls = asked;
     }
-}
-
-fn held<const N: usize>(keys: &ButtonInput<KeyCode>, any: [KeyCode; N]) -> f32 {
-    if keys.any_pressed(any) { 1.0 } else { 0.0 }
 }
 
 #[cfg(test)]

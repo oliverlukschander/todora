@@ -19,15 +19,17 @@ pub(crate) enum Tab {
     Display,
     Hud,
     Controls,
+    Keys,
     Online,
 }
 
 impl Tab {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::Audio,
         Self::Display,
         Self::Hud,
         Self::Controls,
+        Self::Keys,
         Self::Online,
     ];
 
@@ -37,6 +39,7 @@ impl Tab {
             Self::Display => "Display",
             Self::Hud => "HUD",
             Self::Controls => "Controls",
+            Self::Keys => "Keys",
             Self::Online => "Online",
         }
     }
@@ -67,6 +70,18 @@ impl Tab {
                 ReducedMotion,
             ],
             Self::Controls => &[Steering, Deadzone, Rumble, StickyPedals, Assists],
+            Self::Keys => &[
+                Bind(0),
+                Bind(1),
+                Bind(2),
+                Bind(3),
+                Bind(4),
+                Bind(5),
+                Bind(6),
+                Bind(7),
+                Bind(8),
+                Defaults,
+            ],
             Self::Online => &[Online, Name, Country, Pending, Forget],
         }
     }
@@ -107,6 +122,9 @@ pub(crate) enum Row {
     Country,
     Pending,
     Forget,
+    /// One action's key and button, by its place in [`super::bindings::Act::ALL`].
+    Bind(u8),
+    Defaults,
 }
 
 /// Countries offered on the page, as two-letter codes; empty is none.
@@ -174,6 +192,8 @@ impl Row {
             Self::Country => "Country",
             Self::Pending => "Laps waiting to upload",
             Self::Forget => "Delete my online data",
+            Self::Bind(at) => super::bindings::Act::ALL[at as usize].name(),
+            Self::Defaults => "Put every key back",
         }
     }
 
@@ -225,6 +245,8 @@ impl Row {
             Self::Country if s.country.is_empty() => "None".into(),
             Self::Country => s.country.clone(),
             Self::Pending => s.pending.to_string(),
+            Self::Bind(at) => s.bindings.shown(super::bindings::Act::ALL[at as usize]),
+            Self::Defaults => "Enter".into(),
             Self::Forget => match s.forget_presses {
                 0 => "Press to delete".into(),
                 _ => "Press again to delete everything".into(),
@@ -291,6 +313,9 @@ impl Row {
             }
             Self::Pending => {}
             Self::Forget => s.forget_presses = s.forget_presses.saturating_add(1).min(2),
+            // Rebinding waits for a key; see `drive`.
+            Self::Bind(_) => {}
+            Self::Defaults => s.bindings = super::bindings::Bindings::default(),
         }
     }
 }
@@ -301,7 +326,12 @@ pub(crate) struct Page {
     tab: usize,
     row: usize,
     navigation: Navigation,
+    /// Waiting for a key or button for this row, until this time.
+    capturing: Option<(usize, f64)>,
 }
+
+/// How long a rebind waits for a key or button.
+const CAPTURE_FOR: f64 = 5.0;
 
 impl Page {
     /// Open on a tab and row, for a visual check.
@@ -453,6 +483,32 @@ fn drive(
         return;
     }
     let pad = |button| pads.iter().any(|pad| pad.just_pressed(button));
+    let now = time.elapsed_secs_f64();
+    if let Some((row, until)) = page.capturing {
+        typed.clear();
+        if keys.just_pressed(KeyCode::Escape) || now > until {
+            page.capturing = None;
+            return;
+        }
+        let Row::Bind(at) = page.tab().rows()[row] else {
+            page.capturing = None;
+            return;
+        };
+        let act = super::bindings::Act::ALL[at as usize];
+        let bindings = &mut settings.bindings;
+        let bound = match (
+            super::bindings::Bindings::pressed_key(&keys),
+            super::bindings::Bindings::pressed_pad(&pads),
+        ) {
+            (Some(key), _) => bindings.bind_key(act, key),
+            (None, Some(button)) => bindings.bind_pad(act, button),
+            (None, None) => false,
+        };
+        if bound {
+            page.capturing = None;
+        }
+        return;
+    }
     // On the name row the keyboard types; Q and E are letters there.
     let naming = page.row() == Row::Name;
     for key in typed.read() {
@@ -488,12 +544,15 @@ fn drive(
             clicked = true;
         }
     }
-    let now = time.elapsed_secs_f64();
     let step = page.navigation.read(&keys, &pads, now);
     if step.y != 0 {
         page.row = (page.row as i32 + step.y).clamp(0, count as i32 - 1) as usize;
     }
     let forward = clicked || keys.just_pressed(KeyCode::Enter) || pad(GamepadButton::South);
+    if forward && matches!(page.row(), Row::Bind(_)) {
+        page.capturing = Some((page.row, now + CAPTURE_FOR));
+        return;
+    }
     let dir = if forward { 1 } else { step.x };
     if dir != 0 {
         let row = page.row();
@@ -581,7 +640,11 @@ fn draw(
     }
     for (value, mut text, mut colour) in &mut values {
         if let Some(row) = rows.get(value.0) {
-            let wanted = row.value(&settings);
+            let wanted = if page.capturing.is_some_and(|(at, _)| at == value.0) {
+                "Press a key or button…  (Esc cancels)".to_string()
+            } else {
+                row.value(&settings)
+            };
             if text.0 != wanted {
                 text.0 = wanted;
             }
@@ -603,7 +666,8 @@ mod tests {
             );
             for row in tab.rows() {
                 let mut settings = Settings::default();
-                if *row == Row::Pending {
+                // Read-only, or changed by pressing the key itself.
+                if matches!(row, Row::Pending | Row::Bind(_) | Row::Defaults) {
                     continue;
                 }
                 let before = row.value(&settings);
@@ -706,6 +770,30 @@ mod tests {
             type_into(&mut name, &Key::Character("x".into()));
         }
         assert_eq!(name.chars().count(), 16);
+    }
+
+    #[test]
+    fn a_key_row_waits_for_the_key_and_takes_it() {
+        let mut app = app();
+        *app.world_mut().resource_mut::<Halt>() = Halt::Settings;
+        app.update();
+        while app.world().resource::<Page>().tab() != Tab::Keys {
+            tap(&mut app, KeyCode::KeyE);
+        }
+        tap(&mut app, KeyCode::Enter);
+        assert!(app.world().resource::<Page>().capturing.is_some());
+        tap(&mut app, KeyCode::KeyI);
+        assert!(app.world().resource::<Page>().capturing.is_none());
+        let settings = app.world().resource::<Settings>();
+        assert_eq!(
+            settings.bindings.key(super::super::bindings::Act::Throttle),
+            Some(KeyCode::KeyI)
+        );
+        // Esc gives up waiting without leaving the page.
+        tap(&mut app, KeyCode::Enter);
+        tap(&mut app, KeyCode::Escape);
+        assert!(app.world().resource::<Page>().capturing.is_none());
+        assert_eq!(*app.world().resource::<Halt>(), Halt::Settings);
     }
 
     #[test]

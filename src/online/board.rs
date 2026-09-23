@@ -299,14 +299,21 @@ fn setup(mut commands: Commands) {
 /// `L` while driving; the pause's button sets the halt itself.
 fn open(
     keys: Res<ButtonInput<KeyCode>>,
+    pads: Query<&Gamepad>,
+    settings: Option<Res<Settings>>,
     track: Res<Track>,
     mut halt: ResMut<Halt>,
     mut browse: ResMut<Browse>,
 ) {
-    if *halt == Halt::Nothing && keys.just_pressed(KeyCode::KeyL) {
+    let asked = crate::settings::bindings::current(settings.as_deref()).just(
+        &keys,
+        &pads,
+        crate::settings::bindings::Act::Board,
+    );
+    if *halt == Halt::Nothing && asked {
         *halt = Halt::Board;
         browse.from_pause = false;
-    } else if *halt == Halt::Board && halt.is_changed() && !keys.just_pressed(KeyCode::KeyL) {
+    } else if *halt == Halt::Board && halt.is_changed() && !asked {
         browse.from_pause = true;
     } else {
         return;

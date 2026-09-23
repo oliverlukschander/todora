@@ -416,13 +416,15 @@ fn replay(
 fn toggle(
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
+    settings: Option<Res<crate::settings::Settings>>,
     mut ghost: ResMut<Ghost>,
     rival: Option<ResMut<Rival>>,
 ) {
-    let pressed = keys.just_pressed(KeyCode::KeyG)
-        || pads
-            .iter()
-            .any(|pad| pad.just_pressed(GamepadButton::North));
+    let pressed = crate::settings::bindings::current(settings.as_deref()).just(
+        &keys,
+        &pads,
+        crate::settings::bindings::Act::Ghost,
+    );
     if !pressed {
         return;
     }

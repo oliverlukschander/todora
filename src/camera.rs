@@ -101,10 +101,11 @@ fn switch_view(
     pads: Query<&Gamepad>,
     settings: Option<ResMut<crate::settings::Settings>>,
 ) {
-    let pressed = keys.just_pressed(KeyCode::KeyV)
-        || pads
-            .iter()
-            .any(|pad| pad.just_pressed(GamepadButton::DPadUp));
+    let pressed = crate::settings::bindings::current(settings.as_deref()).just(
+        &keys,
+        &pads,
+        crate::settings::bindings::Act::Camera,
+    );
     if let (true, Some(mut settings)) = (pressed, settings) {
         settings.camera = settings.camera.next();
     }
