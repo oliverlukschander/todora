@@ -39,6 +39,7 @@ The approved plan, decisions and build order are in the
 - [x] Camera views: chase, close chase, bonnet on V / D-pad up (2026-09-24). Check the bonnet height visually.
 - [x] Controller haptics for road, grip, GO, wall hits and a new best (2026-09-24).
 - [ ] Try rumble with a real pad on macOS; gilrs force feedback there is unverified.
+- [x] Fifty achievements with toasts and an Awards view (2026-09-24).
 - [ ] Online leaderboards at todora.lukschander.com.
 
 ## Game Center multiplayer

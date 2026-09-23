@@ -30,6 +30,8 @@ pub(crate) struct Online {
     pub wanted: Option<(String, String, u64)>,
     /// Your place and the board's size on each circuit, as last seen.
     pub ranks: std::collections::HashMap<String, (u64, u64)>,
+    /// Laps that reached the board since someone last looked.
+    pub sent: Vec<super::client::Submitted>,
     /// The name and country the server last confirmed.
     confirmed: Option<(String, String)>,
     /// A line to show for a few seconds, and how long it has left.
@@ -128,6 +130,7 @@ fn listen(client: Option<Res<Client>>, mut online: ResMut<Online>, mut settings:
                 }
             }
             Heard::Sent(sent) => {
+                online.sent.push(sent.clone());
                 let place = match sent.rank {
                     Some(rank) => format!("#{rank} of {}", sent.total),
                     None => "on the board".into(),

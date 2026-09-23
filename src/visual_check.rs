@@ -11,7 +11,7 @@
 //! also holds the new-best banner and the lit clock.
 //! TODORA_GUIDE=0|1|2 shows a first-drive card; TODORA_DEVICE=pad shows the
 //! pad's buttons on it.
-//! TODORA_SCREEN=board opens the leaderboard on TODORA_VIEW=0..4 (3 this week, 4 records).
+//! TODORA_SCREEN=board opens the leaderboard on TODORA_VIEW=0..5 (3 this week, 4 records, 5 awards).
 //! TODORA_SCREEN=settings opens the settings page, on TODORA_TAB=0..3 and
 //! TODORA_ROW=n.
 //! TODORA_COUNTDOWN=ready|3|2|1|go freezes the start lights at that moment and,

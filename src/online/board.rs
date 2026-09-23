@@ -37,15 +37,18 @@ pub(crate) enum View {
     Records,
     /// The weekly challenge's board.
     Week,
+    /// The fifty achievements, earned or not.
+    Awards,
 }
 
 impl View {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::World,
         Self::Country,
         Self::Rivals,
         Self::Week,
         Self::Records,
+        Self::Awards,
     ];
     fn name(self) -> &'static str {
         match self {
@@ -54,6 +57,7 @@ impl View {
             Self::Rivals => "Rivals",
             Self::Week => "This week",
             Self::Records => "Records",
+            Self::Awards => "Awards",
         }
     }
 }
@@ -125,7 +129,7 @@ pub(crate) enum Line {
 pub(crate) fn lines(standing: &Standing, view: View) -> Vec<Line> {
     let mut out: Vec<Line> = Vec::new();
     match view {
-        View::Records => {}
+        View::Records | View::Awards => {}
         View::Rivals => {
             let mut places = standing.rivals.clone();
             if let Some(you) = &standing.you
@@ -364,6 +368,11 @@ fn drive(
             return;
         }
     }
+    if browse.view == View::Awards {
+        let n = crate::achievements::all().len() as i32;
+        browse.row = (browse.row as i32 + step.y).clamp(0, n - 1) as usize;
+        return;
+    }
     if browse.view == View::Records {
         let n = all_circuits().len() as i32;
         browse.row = (browse.row as i32 + step.y).clamp(0, n - 1) as usize;
@@ -428,6 +437,9 @@ fn ask(
         return;
     };
     let wanted = (browse.circuit, browse.view);
+    if browse.view == View::Awards {
+        return;
+    }
     if browse.view == View::Records {
         if browse.asked != Some(wanted) {
             browse.asked = Some(wanted);
@@ -469,6 +481,7 @@ fn draw(
     settings: Res<Settings>,
     challenge: Res<crate::challenge::Challenge>,
     records: Option<Res<crate::ghost::Records>>,
+    earned: Option<Res<crate::achievements::Earned>>,
     mut panels: Query<&mut Visibility, With<Panel>>,
     mut titles: Query<
         &mut Text,
@@ -518,6 +531,45 @@ fn draw(
     for (tab, mut colour) in &mut tabs {
         let active = View::ALL[tab.0] == browse.view;
         colour.set_if_neq(BackgroundColor(if active { AMBER } else { SURFACE }));
+    }
+    if browse.view == View::Awards {
+        let all = crate::achievements::all();
+        let first = browse.row.saturating_sub(ROWS / 2).min(all.len() - ROWS);
+        let got = |id: &str| earned.as_ref().and_then(|e| e.earned.get(id).copied());
+        if let Ok(mut text) = titles.single_mut() {
+            let n = all.iter().filter(|(id, _, _)| got(id).is_some()).count();
+            let wanted = format!("Awards   ·   {n} of {}", all.len());
+            if text.0 != wanted {
+                text.0 = wanted;
+            }
+        }
+        for (line, mut colour) in &mut lines_q {
+            let active = first + line.0 == browse.row;
+            colour.set_if_neq(BackgroundColor(if active { SURFACE } else { Color::NONE }));
+        }
+        for (row, mut text, mut colour) in &mut texts {
+            let Some((id, name, what)) = all.get(first + row.0) else {
+                continue;
+            };
+            let wanted = format!("{name:<26} {what}");
+            if text.0 != wanted {
+                text.0 = wanted;
+            }
+            colour.set_if_neq(TextColor(if got(id).is_some() { AMBER } else { MUTED }));
+        }
+        if let Ok(mut text) = footers.single_mut() {
+            let km = earned.as_ref().map_or(0.0, |e| e.metres / 1000.0);
+            let wanted = format!("{km:.1} km driven  ·  earned ones are lit");
+            if text.0 != wanted {
+                text.0 = wanted;
+            }
+        }
+        if let Ok(mut text) = notes.single_mut()
+            && !text.0.is_empty()
+        {
+            text.0.clear();
+        }
+        return;
     }
     if browse.view == View::Records {
         let medal = |at: usize| {

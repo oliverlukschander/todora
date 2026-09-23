@@ -46,6 +46,11 @@ impl Rival {
     pub(crate) fn loaded(&self) -> bool {
         self.lap.is_some()
     }
+
+    /// The downloaded lap's time, if there is one.
+    pub(crate) fn lap_time(&self) -> Option<f32> {
+        self.lap.as_ref().map(Recording::duration)
+    }
 }
 
 pub(super) fn plugin(app: &mut App) {

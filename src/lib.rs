@@ -1,3 +1,4 @@
+mod achievements;
 mod camera;
 mod car;
 mod challenge;
@@ -114,6 +115,7 @@ impl Plugin for GamePlugin {
                 online::OnlinePlugin,
                 challenge::ChallengePlugin,
                 haptics::HapticsPlugin,
+                achievements::AchievementsPlugin,
                 multiplayer::MultiplayerPlugin,
             ))
             .add_systems(Update, quit);
