@@ -88,6 +88,18 @@ server/deploy/deploy.sh root@your-hetzner-host          # ARCH=arm64 for CAX mac
 server/deploy/deploy.sh local                           # try the same thing on this machine
 ```
 
+On a host whose proxy is Traefik watching Docker, name Traefik's Docker network
+and the container is routed by labels, with HTTPS from Traefik's certificate
+resolver and plain HTTP redirected:
+
+```sh
+ARCH=arm64 TRAEFIK_NETWORK=<traefik's network> server/deploy/deploy.sh root@your-host
+```
+
+`TODORA_HOST` and `TRAEFIK_RESOLVER` change the name (default
+`todora.lukschander.com`) and the resolver (default `myresolver`). The name's
+DNS must point at the host before Traefik can get its certificate.
+
 The script builds the image for the target, copies it over SSH, and runs one
 container on `127.0.0.1:8787` with its data in the `todora-data` volume,
 `--restart unless-stopped`, 512 MB of memory and 1.5 CPUs. It makes an admin

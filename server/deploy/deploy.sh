@@ -14,11 +14,31 @@
 # (or ~/.todora-admin-token locally), and never leaves it.
 #
 # ARCH=arm64 for Hetzner's Ampere (CAX) machines; the default is amd64.
+#
+# TRAEFIK_NETWORK=<network> puts the container on that Docker network
+# with labels for a Traefik already watching Docker: HTTPS for TODORA_HOST
+# (default todora.lukschander.com) with TRAEFIK_RESOLVER's certificate
+# (default myresolver), and plain HTTP redirected to it.
 set -euo pipefail
 
 TARGET="${1:?usage: deploy.sh <user@host | local>}"
 ARCH="${ARCH:-amd64}"
 IMAGE="todora-server:$(git rev-parse --short HEAD)"
+HOST_NAME="${TODORA_HOST:-todora.lukschander.com}"
+PROXY=""
+if [ -n "${TRAEFIK_NETWORK:-}" ]; then
+  RESOLVER="${TRAEFIK_RESOLVER:-myresolver}"
+  RULE="Host(\`$HOST_NAME\`)"
+  PROXY="--network $TRAEFIK_NETWORK --label traefik.enable=true"
+  PROXY+=" --label 'traefik.http.routers.todora.rule=$RULE'"
+  PROXY+=" --label traefik.http.routers.todora.entrypoints=websecure"
+  PROXY+=" --label traefik.http.routers.todora.tls.certresolver=$RESOLVER"
+  PROXY+=" --label 'traefik.http.routers.todora-web.rule=$RULE'"
+  PROXY+=" --label traefik.http.routers.todora-web.entrypoints=web"
+  PROXY+=" --label traefik.http.routers.todora-web.middlewares=todora-https"
+  PROXY+=" --label traefik.http.middlewares.todora-https.redirectscheme.scheme=https"
+  PROXY+=" --label traefik.http.services.todora.loadbalancer.server.port=8787"
+fi
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 echo "building $IMAGE for linux/$ARCH"
@@ -39,6 +59,7 @@ docker run -d --name todora-server --restart unless-stopped \
   -v todora-data:/data \
   -e TODORA_ADMIN_TOKEN="\$(cat "\$token_file")" \
   --memory 512m --cpus 1.5 \
+  $PROXY \
   $IMAGE >/dev/null
 for i in \$(seq 1 30); do
   if curl -sf http://127.0.0.1:\${TODORA_PORT:-8787}/v1/health; then echo; exit 0; fi
