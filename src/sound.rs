@@ -56,14 +56,15 @@ pub(crate) enum SoundToggle {
 }
 
 impl Sound {
+    /// The radio's state, as a key into [`crate::text`].
     pub fn station(&self) -> &'static str {
         if !self.music {
-            return "off";
+            return "word.off";
         }
         match self.signal.status.load(Relaxed) {
-            1 => "playing",
-            2 => "reconnecting",
-            _ => "connecting",
+            1 => "radio.playing",
+            2 => "radio.reconnecting",
+            _ => "radio.connecting",
         }
     }
 }

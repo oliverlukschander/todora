@@ -63,12 +63,22 @@ impl Setup {
         Self::ALL[at as usize]
     }
 
+    #[cfg(test)]
     pub fn name(self) -> &'static str {
         match self {
             Setup::Understeer => "UNDERSTEER",
             Setup::Balanced => "BALANCED",
             Setup::Oversteer => "OVERSTEER",
         }
+    }
+
+    /// The name shown, in the language in force.
+    pub fn shown(self) -> &'static str {
+        crate::text::t(match self {
+            Setup::Understeer => "setup.stable",
+            Setup::Balanced => "setup.balanced",
+            Setup::Oversteer => "setup.loose",
+        })
     }
 
     /// How far this notch leans a car, as a fraction of what that car brings.

@@ -296,22 +296,34 @@ fn setup(mut commands: Commands) {
     }, BackgroundColor(PANEL)));
 }
 
+/// Rewritten only when a pad comes or goes, the radio or effects change, or
+/// the language does.
 fn draw_controls(
     pads: Query<&Gamepad>,
     sound: Res<crate::sound::Sound>,
     mut text: Query<&mut Text, With<ControlHints>>,
+    mut seen: Local<Option<(bool, &'static str, bool, crate::text::Language)>>,
 ) {
     use crate::text::{t, tf};
+    let wanted = (
+        pads.is_empty(),
+        sound.station(),
+        sound.effects,
+        crate::text::current(),
+    );
+    if *seen == Some(wanted) {
+        return;
+    }
     let keys = t(if pads.is_empty() {
         "hud.keys"
     } else {
         "hud.pad"
     });
     let effects = t(if sound.effects { "word.on" } else { "word.off" }).to_lowercase();
-    let hint = format!("{keys}\n{}", tf("hud.sound", &[&sound.station(), &effects]));
-    if let Ok(mut text) = text.single_mut()
-        && text.0 != hint
-    {
+    let radio = t(sound.station()).to_lowercase();
+    let hint = format!("{keys}\n{}", tf("hud.sound", &[&radio, &effects]));
+    if let Ok(mut text) = text.single_mut() {
+        *seen = Some(wanted);
         text.0 = hint;
     }
 }
@@ -353,25 +365,35 @@ fn draw_setup(
     chosen: Res<Setup>,
     mut knob: Query<&mut Node, With<SetupKnob>>,
     mut name: Query<&mut Text, With<SetupName>>,
+    mut language: Local<Option<crate::text::Language>>,
 ) {
-    if !chosen.is_changed() {
+    let now = crate::text::current();
+    if !chosen.is_changed() && *language == Some(now) {
         return;
     }
+    *language = Some(now);
     if let Ok(mut node) = knob.single_mut() {
         node.left = px(knob_left(chosen.notch()));
     }
     if let Ok(mut text) = name.single_mut() {
-        text.0 = chosen.name().into();
+        text.0 = chosen.shown().to_uppercase();
     }
 }
 
 /// Name the car being driven. It sits over the meter rather than in the menu,
 /// because which car you are in is a thing you want to know while driving it and
 /// the menu is only up when you are not.
-fn draw_car(spec: Res<Spec>, mode: Res<Mode>, mut readout: Query<&mut Text, With<CarName>>) {
-    if !spec.is_changed() && !mode.is_changed() {
+fn draw_car(
+    spec: Res<Spec>,
+    mode: Res<Mode>,
+    mut readout: Query<&mut Text, With<CarName>>,
+    mut language: Local<Option<crate::text::Language>>,
+) {
+    let now = crate::text::current();
+    if !spec.is_changed() && !mode.is_changed() && *language == Some(now) {
         return;
     }
+    *language = Some(now);
     if let Ok(mut text) = readout.single_mut() {
         text.0 = format!("{} / {}", spec.name(), mode.shown().to_uppercase());
     }
