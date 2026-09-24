@@ -29,7 +29,7 @@ pub(super) const CROWDS: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(in crate::track) enum Cell {
-    /// An advertising board, one per made-up brand.
+    /// An advertising board: Omarchy, or one of the made-up brands.
     Brand(usize),
     /// A braking board: 50, 100 or 150.
     Label(usize),
@@ -148,21 +148,30 @@ pub(super) fn image() -> Image {
     image
 }
 
-/// A made-up brand: background, lettering, and an accent block if any.
+/// A board's brand: a made-up one, drawn as blocks of lettering, or Omarchy.
 struct Brand {
     ground: (f32, f32, f32),
     letters: (f32, f32, f32),
+    /// An accent block before a made-up word; for Omarchy, the logo mark's
+    /// colour.
     accent: Option<(f32, f32, f32)>,
-    /// Letter widths of the "word", as fractions of the board.
+    /// Letter widths of the "word", as fractions of the board; empty for
+    /// Omarchy, whose wordmark is drawn instead.
     word: &'static [f32],
 }
 
+/// Omarchy's green and the Tokyo Night background and foreground it sits on.
+const OMARCHY_GREEN: (f32, f32, f32) = (0.620, 0.808, 0.416);
+const TOKYO_NIGHT: (f32, f32, f32) = (0.102, 0.106, 0.149);
+const TOKYO_LIGHT: (f32, f32, f32) = (0.753, 0.792, 0.961);
+
 const BRAND: [Brand; BRANDS] = [
+    // Omarchy as it is drawn: green mark and wordmark on Tokyo Night.
     Brand {
-        ground: (0.1, 0.2, 0.55),
-        letters: (0.95, 0.95, 0.95),
-        accent: Some((0.98, 0.8, 0.1)),
-        word: &[0.07, 0.05, 0.08, 0.05, 0.07, 0.06],
+        ground: TOKYO_NIGHT,
+        letters: OMARCHY_GREEN,
+        accent: Some(OMARCHY_GREEN),
+        word: &[],
     },
     Brand {
         ground: (0.97, 0.8, 0.1),
@@ -176,17 +185,19 @@ const BRAND: [Brand; BRANDS] = [
         accent: Some((0.96, 0.96, 0.95)),
         word: &[0.06, 0.06, 0.05, 0.08, 0.06, 0.06, 0.05],
     },
+    // Omarchy the other way round: Tokyo Night on green.
     Brand {
-        ground: (0.94, 0.94, 0.92),
-        letters: (0.1, 0.45, 0.25),
-        accent: Some((0.1, 0.45, 0.25)),
-        word: &[0.08, 0.07, 0.06, 0.08],
+        ground: OMARCHY_GREEN,
+        letters: TOKYO_NIGHT,
+        accent: Some(TOKYO_NIGHT),
+        word: &[],
     },
+    // Omarchy with a pale wordmark beside the green mark.
     Brand {
-        ground: (0.08, 0.08, 0.09),
-        letters: (0.95, 0.95, 0.95),
-        accent: Some((0.95, 0.45, 0.1)),
-        word: &[0.05, 0.06, 0.05, 0.07, 0.05],
+        ground: TOKYO_NIGHT,
+        letters: TOKYO_LIGHT,
+        accent: Some(OMARCHY_GREEN),
+        word: &[],
     },
     Brand {
         ground: (0.05, 0.5, 0.52),
@@ -198,6 +209,9 @@ const BRAND: [Brand; BRANDS] = [
 
 fn brand(i: usize, u: f32, v: f32) -> (f32, f32, f32) {
     let brand = &BRAND[i];
+    if brand.word.is_empty() {
+        return omarchy(brand, u, v);
+    }
     let inside =
         |u0: f32, u1: f32, v0: f32, v1: f32| (u0..u1).contains(&u) && (v0..v1).contains(&v);
     let gap = 0.022;
@@ -218,6 +232,81 @@ fn brand(i: usize, u: f32, v: f32) -> (f32, f32, f32) {
     }
     brand.ground
 }
+
+/// The Omarchy mark and wordmark side by side, centred and the same height.
+fn omarchy(brand: &Brand, u: f32, v: f32) -> (f32, f32, f32) {
+    // The cell is 496 by 64 texels: a unit of height is this much of the width.
+    const ASPECT: f32 = 64.0 / 496.0;
+    const HEIGHT: f32 = 0.70;
+    const GAP: f32 = 0.03;
+    let word_aspect = (OMARCHY_WORD[0].len() as f32 * 51.0) / (OMARCHY_WORD.len() as f32 * 50.0);
+    let mark_w = HEIGHT * ASPECT;
+    let word_w = HEIGHT * ASPECT * word_aspect;
+    let left = 0.5 - (mark_w + GAP + word_w) / 2.0;
+    let bottom = (1.0 - HEIGHT) / 2.0;
+    // The row counts from the top, as the bitmaps are written.
+    let lit = |rows: &[&str], x0: f32, width: f32| {
+        let fx = (u - x0) / width;
+        let fy = (bottom + HEIGHT - v) / HEIGHT;
+        if !(0.0..1.0).contains(&fx) || !(0.0..1.0).contains(&fy) {
+            return false;
+        }
+        let row = rows[(fy * rows.len() as f32) as usize].as_bytes();
+        row[(fx * row.len() as f32) as usize] == b'#'
+    };
+    if lit(&OMARCHY_MARK, left, mark_w) {
+        brand.accent.unwrap_or(brand.letters)
+    } else if lit(&OMARCHY_WORD, left + mark_w + GAP, word_w) {
+        brand.letters
+    } else {
+        brand.ground
+    }
+}
+
+/// The Omarchy logo mark, cell for cell from the official `omarchy-logo.svg`
+/// (omarchy.org/brand): a 15 by 15 grid, top row first.
+const OMARCHY_MARK: [&str; 15] = [
+    "###############",
+    "#......#......#",
+    "#.######...##.#",
+    "#.#.........#.#",
+    "#.#.........#.#",
+    "#.#.........#.#",
+    "#.#.........#.#",
+    "###.........#.#",
+    "#.#.........#.#",
+    "#.#.........#.#",
+    "#.#.........#.#",
+    "#.#.........#.#",
+    "#.###########.#",
+    "#......#......#",
+    "########.######",
+];
+
+/// The Omarchy wordmark, cell for cell from the official
+/// `omarchy-wordmark.svg`: the Delta Corps Priest 1 lettering on an 82 by 19
+/// grid of cells 51 wide and 50 tall, top row first.
+const OMARCHY_WORD: [&str; 19] = [
+    ".................###.............................................................",
+    "..#####......###########......#######....#######....#######....#...#......#...#..",
+    ".#######....#############....########...########...########...##...##....##...##.",
+    "###...###..###...###...###..###...###..###...###..###...###..###...###..###...###",
+    "###...###..###...###...###..###...###..###...###..###...###..###...###..###...###",
+    "###...###..###...###...###..###...###..###...###..###...##...###...###..###...###",
+    "###...###..###...###...###..###...###..###...###..###...#....###...###..###...###",
+    "###...###..###...###...###..###...###..###...###..###........###...###..###...###",
+    "###...###..###...###...###.##########.#########...###.......###########.#########",
+    "###...###..###...###...###.##########.########....###......###########..#########",
+    "###...###..###...###...###..###...###..###........###........###...###........###",
+    "###...###..###...###...###..###...###.##########..###...#....###...###...##...###",
+    "###...###..###...###...###..###...###.##########..###...##...###...###..###...###",
+    "###...###..###...###...###..###...###..###...###..###...###..###...###..###...###",
+    "###...###..###...###...###..###...###..###...###..###...###..###...###..###...###",
+    ".#######....##...###...##...###...##...###...###..########...###...##....#######.",
+    "..#####......#...###...#....###...#....###...###..#######....###...#......#####..",
+    ".......................................###...##..................................",
+    ".......................................###...#...................................",
+];
 
 /// A tyre stack's face: black tyres, with the belt across the middle.
 fn belt(i: usize, u: f32, v: f32) -> (f32, f32, f32) {
