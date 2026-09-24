@@ -7,9 +7,10 @@
 use std::time::{Duration, Instant};
 
 use bevy::{
-    camera::Projection,
+    camera::{ImageRenderTarget, Projection, RenderTarget},
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
     prelude::*,
+    render::render_resource::TextureFormat,
     render::view::Msaa,
     window::{MonitorSelection, PresentMode, PrimaryWindow, WindowMode},
 };
@@ -22,23 +23,17 @@ pub(super) fn plugin(app: &mut App) {
         app.add_plugins(FrameTimeDiagnosticsPlugin::default());
     }
     app.add_systems(Startup, spawn_readout)
-        .add_systems(Update, (window, camera, readout))
+        .add_systems(Update, (window, scale, camera, readout))
         .add_systems(Last, limit);
 }
 
-/// Full screen, vertical sync and render scale, on the window.
-///
-/// Render scale lowers the scale factor the window is drawn at, which is the
-/// one knob that makes the whole frame cheaper without a second render
-/// target: at half scale a Retina display draws a quarter of the pixels. The
-/// HUD keeps its size, because [`crate::ui`] scales it against the physical
-/// window rather than the logical one.
+/// Full screen and vertical sync, on the window.
 fn window(
     settings: Res<Settings>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
-    mut seen: Local<Option<(bool, bool, f32)>>,
+    mut seen: Local<Option<(bool, bool)>>,
 ) {
-    let wanted = (settings.fullscreen, settings.vsync, settings.render_scale);
+    let wanted = (settings.fullscreen, settings.vsync);
     if *seen == Some(wanted) {
         return;
     }
@@ -56,15 +51,91 @@ fn window(
     } else {
         PresentMode::AutoNoVsync
     };
-    let native = window.resolution.base_scale_factor();
-    window
-        .resolution
-        .set_scale_factor_override(render_factor(native, settings.render_scale));
 }
 
-/// The scale factor to draw at, or `None` for the display's own.
-fn render_factor(native: f32, scale: f32) -> Option<f32> {
-    (scale < 0.999).then_some(native * scale)
+/// The camera that puts a scaled-down world on the window, and the picture it
+/// shows. Only there while the render scale is below 100%.
+#[derive(Component)]
+struct Present;
+
+/// The size, in pixels, to draw the world at for a window this big, or `None`
+/// to draw it straight to the window.
+fn scaled_size(window: UVec2, scale: f32) -> Option<UVec2> {
+    (scale < 0.999).then(|| {
+        (window.as_vec2() * scale)
+            .round()
+            .as_uvec2()
+            .max(UVec2::ONE)
+    })
+}
+
+/// Render scale. Below 100% the 3D camera draws into an image that many times
+/// the window's size, and a second camera stretches it over the window with
+/// the HUD drawn on top at full resolution: at half scale the world costs a
+/// quarter of the pixels, for one more full-screen quad. At 100% the world is
+/// drawn straight to the window, as it always was.
+fn scale(
+    settings: Res<Settings>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    worlds: Query<Entity, With<Camera3d>>,
+    presents: Query<Entity, With<Present>>,
+    mut seen: Local<Option<Option<UVec2>>>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let wanted = scaled_size(window.physical_size(), settings.render_scale);
+    if *seen == Some(wanted) {
+        return;
+    }
+    *seen = Some(wanted);
+    for present in &presents {
+        commands.entity(present).despawn();
+    }
+    let Some(size) = wanted else {
+        for world in &worlds {
+            commands
+                .entity(world)
+                .insert(RenderTarget::Window(bevy::window::WindowRef::Primary));
+        }
+        return;
+    };
+    let image = images.add(Image::new_target_texture(
+        size.x,
+        size.y,
+        TextureFormat::Rgba8UnormSrgb,
+        None,
+    ));
+    for world in &worlds {
+        commands
+            .entity(world)
+            .insert(RenderTarget::Image(ImageRenderTarget {
+                handle: image.clone(),
+                scale_factor: 1.0,
+            }));
+    }
+    commands.spawn((
+        Present,
+        Camera2d,
+        Camera {
+            order: 1,
+            ..default()
+        },
+        IsDefaultUiCamera,
+    ));
+    commands.spawn((
+        Present,
+        ImageNode::new(image),
+        GlobalZIndex(i32::MIN),
+        Node {
+            position_type: PositionType::Absolute,
+            width: percent(100),
+            height: percent(100),
+            ..default()
+        },
+    ));
 }
 
 /// Anti-aliasing and field of view, on the 3D camera.
@@ -159,10 +230,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn render_scale_lowers_the_scale_factor_and_full_scale_leaves_it_alone() {
-        assert_eq!(render_factor(2.0, 1.0), None);
-        assert_eq!(render_factor(2.0, 0.5), Some(1.0));
-        assert_eq!(render_factor(1.0, 0.75), Some(0.75));
+    fn render_scale_draws_fewer_pixels_and_full_scale_draws_to_the_window() {
+        assert_eq!(scaled_size(UVec2::new(2560, 1440), 1.0), None);
+        assert_eq!(
+            scaled_size(UVec2::new(2560, 1440), 0.5),
+            Some(UVec2::new(1280, 720))
+        );
+        assert_eq!(
+            scaled_size(UVec2::new(2560, 1440), 0.75),
+            Some(UVec2::new(1920, 1080))
+        );
     }
 
     #[test]
