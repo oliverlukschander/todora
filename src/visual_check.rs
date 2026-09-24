@@ -14,6 +14,8 @@
 //! TODORA_SCREEN=board opens the leaderboard on TODORA_VIEW=0..5 (3 this week, 4 records, 5 awards).
 //! TODORA_SCREEN=settings opens the settings page, on TODORA_TAB=0..3 and
 //! TODORA_ROW=n.
+//! TODORA_SCREEN=title|replay|offer|circuits|garage opens that screen, and
+//! TODORA_EXAMPLE=21 fills the leaderboard as if you were 21st of 300.
 //! TODORA_COUNTDOWN=ready|3|2|1|go freezes the start lights at that moment and,
 //! unless TODORA_PROGRESS is also given, leaves the car on the grid.
 use crate::{
@@ -234,12 +236,42 @@ fn show_guide(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn open_screen(
     mut halt: ResMut<crate::pause::Halt>,
     mut page: ResMut<crate::settings::Page>,
     mut browse: ResMut<crate::online::Browse>,
+    mut title: ResMut<crate::title::Title>,
+    mut online: ResMut<crate::online::Online>,
+    track: Res<Track>,
+    challenge: Res<crate::challenge::Challenge>,
+    mut menus: MessageWriter<crate::menu::OpenMenu>,
     mut frames: Local<u32>,
 ) {
+    let screen = std::env::var("TODORA_SCREEN").unwrap_or_default();
+    let simple = match screen.as_str() {
+        "title" => Some(crate::pause::Halt::Title),
+        "replay" => Some(crate::pause::Halt::Replay),
+        "offer" => Some(crate::pause::Halt::Offer),
+        _ => None,
+    };
+    if let Some(wanted) = simple {
+        *frames += 1;
+        if *frames > 1 && *halt != wanted {
+            *halt = wanted;
+            title.active = wanted == crate::pause::Halt::Title;
+        }
+    }
+    if screen == "circuits" || screen == "garage" {
+        *frames += 1;
+        if *frames == 2 {
+            menus.write(crate::menu::OpenMenu(if screen == "circuits" {
+                crate::menu::Page::Circuit
+            } else {
+                crate::menu::Page::Car
+            }));
+        }
+    }
     let number = |name: &str| {
         std::env::var(name)
             .ok()
@@ -253,6 +285,20 @@ fn open_screen(
         }
         if *frames > 2 {
             browse.show(number("TODORA_VIEW"));
+        }
+        // TODORA_EXAMPLE=21 fills the board as if you were 21st of 300.
+        if *frames == 3
+            && let Some(you) = std::env::var("TODORA_EXAMPLE")
+                .ok()
+                .and_then(|s| s.parse().ok())
+        {
+            let mut standing = crate::online::example(you);
+            standing.circuit = track.circuit().id.to_string();
+            standing.fetched_at = crate::online::client::unix_now();
+            if number("TODORA_VIEW") == 3 {
+                standing.week = Some(challenge.label());
+            }
+            online.board = Some(standing);
         }
     }
     if std::env::var("TODORA_SCREEN").as_deref() == Ok("settings") {

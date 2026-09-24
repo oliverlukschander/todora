@@ -11,6 +11,8 @@
 mod board;
 #[cfg(feature = "visual-check")]
 pub(crate) use board::Browse;
+#[cfg(feature = "visual-check")]
+pub(crate) use board::example;
 pub(crate) mod client;
 pub(crate) mod replay;
 pub(crate) mod run;

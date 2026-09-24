@@ -70,7 +70,7 @@ pub(crate) fn record_line(
     rank: Option<(u64, u64)>,
 ) -> String {
     format!(
-        "{:<24} {:>9}   {:<7} {}",
+        "{}\t{}\t{}\t{}",
         name,
         best.map_or("—".into(), format_time),
         medal.map_or("", |m| m.name()).to_uppercase(),
@@ -155,10 +155,22 @@ pub(crate) fn lines(standing: &Standing, view: View) -> Vec<Line> {
                 .cloned()
                 .collect();
             if let Some(first) = rest.first() {
-                if first.rank > last_top + 1 {
+                let gap = first.rank > last_top + 1;
+                if gap {
                     out.push(Line::Gap);
                 }
-                out.extend(rest.into_iter().map(Line::Place));
+                // What fits below the top, centred on you so you are never
+                // the row cut off.
+                let room = ROWS.saturating_sub(out.len());
+                let you = standing
+                    .you
+                    .as_ref()
+                    .and_then(|you| rest.iter().position(|p| p.player == you.player))
+                    .unwrap_or(0);
+                let start = you
+                    .saturating_sub(room.saturating_sub(1) / 2)
+                    .min(rest.len().saturating_sub(room));
+                out.extend(rest.into_iter().skip(start).take(room).map(Line::Place));
             }
         }
     }
@@ -202,7 +214,20 @@ struct ViewTab(usize);
 #[derive(Component)]
 struct RowLine(usize);
 #[derive(Component)]
-struct RowText(usize);
+struct RowText(usize, usize);
+
+/// How many cells a row has; a row's text puts a tab between them.
+const CELLS: usize = 5;
+
+/// Each view's column widths, in pixels. Figtree is proportional, so columns
+/// are real boxes rather than runs of spaces.
+fn widths(view: View) -> [f32; CELLS] {
+    match view {
+        View::Records => [300.0, 110.0, 110.0, 200.0, 0.0],
+        View::Awards => [270.0, 440.0, 0.0, 0.0, 0.0],
+        _ => [80.0, 280.0, 60.0, 110.0, 150.0],
+    }
+}
 #[derive(Component)]
 struct Footer;
 #[derive(Component)]
@@ -247,16 +272,17 @@ fn setup(mut commands: Commands) {
                     BorderColor::all(LINE),
                 ))
                 .with_children(|panel| {
-                    panel.spawn(crate::text::label("board.label", 12.0, AMBER));
+                    // The tabs share a line with the label, so a long title
+                    // (this week's, in German) has the whole width below.
                     panel
                         .spawn(Node {
                             justify_content: JustifyContent::SpaceBetween,
                             align_items: AlignItems::Center,
-                            margin: UiRect::bottom(px(8)),
+                            column_gap: px(16),
                             ..default()
                         })
                         .with_children(|header| {
-                            header.spawn((Title, label("", 24.0, TEXT)));
+                            header.spawn(crate::text::label("board.label", 12.0, AMBER));
                             header
                                 .spawn(Node {
                                     column_gap: px(8),
@@ -285,6 +311,14 @@ fn setup(mut commands: Commands) {
                                     }
                                 });
                         });
+                    panel.spawn((
+                        Title,
+                        label("", 24.0, TEXT),
+                        Node {
+                            margin: UiRect::bottom(px(6)),
+                            ..default()
+                        },
+                    ));
                     for i in 0..ROWS {
                         panel
                             .spawn((
@@ -297,11 +331,18 @@ fn setup(mut commands: Commands) {
                                 BackgroundColor(Color::NONE),
                             ))
                             .with_children(|row| {
-                                row.spawn((
-                                    RowText(i),
-                                    TextLayout::no_wrap(),
-                                    label("", 17.0, TEXT),
-                                ));
+                                for cell in 0..CELLS {
+                                    row.spawn((
+                                        RowText(i, cell),
+                                        TextLayout::no_wrap(),
+                                        label("", 17.0, TEXT),
+                                        Node {
+                                            width: px(widths(View::World)[cell]),
+                                            overflow: Overflow::clip(),
+                                            ..default()
+                                        },
+                                    ));
+                                }
                             });
                     }
                     panel.spawn((Note, label("", 15.0, MUTED)));
@@ -518,7 +559,7 @@ fn draw(
     mut tabs: Query<(&ViewTab, &mut BackgroundColor), Without<RowLine>>,
     mut lines_q: Query<(&RowLine, &mut BackgroundColor), Without<ViewTab>>,
     mut texts: Query<
-        (&RowText, &mut Text, &mut TextColor),
+        (&RowText, &mut Text, &mut TextColor, &mut Node),
         (Without<Title>, Without<Footer>, Without<Note>),
     >,
     mut footers: Query<
@@ -555,6 +596,18 @@ fn draw(
         let active = View::ALL[tab.0] == browse.view;
         colour.set_if_neq(BackgroundColor(if active { AMBER } else { SURFACE }));
     }
+    let columns = widths(browse.view);
+    for (cell, _, _, mut node) in &mut texts {
+        let width = px(columns[cell.1]);
+        if node.width != width {
+            node.width = width;
+            node.display = if columns[cell.1] > 0.0 {
+                Display::Flex
+            } else {
+                Display::None
+            };
+        }
+    }
     if browse.view == View::Awards {
         let all = crate::achievements::all();
         let first = browse.row.saturating_sub(ROWS / 2).min(all.len() - ROWS);
@@ -570,14 +623,11 @@ fn draw(
             let active = first + line.0 == browse.row;
             colour.set_if_neq(BackgroundColor(if active { SURFACE } else { Color::NONE }));
         }
-        for (row, mut text, mut colour) in &mut texts {
+        for (row, mut text, mut colour, _) in &mut texts {
             let Some((id, name, what)) = all.get(first + row.0) else {
                 continue;
             };
-            let wanted = format!("{name:<26} {what}");
-            if text.0 != wanted {
-                text.0 = wanted;
-            }
+            set_cell(&mut text, [name.as_str(), what.as_str()], row.1);
             colour.set_if_neq(TextColor(if got(id).is_some() { AMBER } else { MUTED }));
         }
         if let Ok(mut text) = footers.single_mut() {
@@ -617,15 +667,13 @@ fn draw(
             let active = first + line.0 == browse.row;
             colour.set_if_neq(BackgroundColor(if active { SURFACE } else { Color::NONE }));
         }
-        for (row, mut text, mut colour) in &mut texts {
+        for (row, mut text, mut colour, _) in &mut texts {
             let at = first + row.0;
             let circuit = &all_circuits()[at];
             let (best, earned) = medal(at);
             let rank = online.ranks.get(circuit.id).copied();
             let wanted = record_line(circuit.name, best, earned, rank);
-            if text.0 != wanted {
-                text.0 = wanted;
-            }
+            set_cell(&mut text, wanted.split('\t'), row.1);
             colour.set_if_neq(TextColor(earned.map_or(TEXT, crate::medals::Medal::colour)));
         }
         let all: Vec<_> = (0..all_circuits().len()).map(|at| medal(at).1).collect();
@@ -669,16 +717,16 @@ fn draw(
         let active = line.0 == browse.row && line.0 < shown.len();
         colour.set_if_neq(BackgroundColor(if active { SURFACE } else { Color::NONE }));
     }
-    for (row, mut text, mut colour) in &mut texts {
+    for (row, mut text, mut colour, _) in &mut texts {
         let (wanted, tint) = match shown.get(row.0) {
             Some(Line::Place(p)) => (
                 format!(
-                    "{:>5}   {:<17} {:<3} {:>9}   {}",
-                    format!("#{}", p.rank),
+                    "#{}\t{}\t{}\t{}\t{}",
+                    p.rank,
                     p.name,
                     p.country.as_deref().unwrap_or(""),
                     format_time(p.seconds as f32),
-                    p.car.to_uppercase()
+                    car_name(&p.car)
                 ),
                 if you.as_deref() == Some(p.player.as_str()) {
                     AMBER
@@ -688,12 +736,10 @@ fn draw(
                     TEXT
                 },
             ),
-            Some(Line::Gap) => ("        ·  ·  ·".into(), MUTED),
+            Some(Line::Gap) => ("\t·  ·  ·".into(), MUTED),
             None => (String::new(), TEXT),
         };
-        if text.0 != wanted {
-            text.0 = wanted;
-        }
+        set_cell(&mut text, wanted.split('\t'), row.1);
         colour.set_if_neq(TextColor(tint));
     }
     let weekly_best = (settings.challenge_week == challenge.label())
@@ -733,6 +779,23 @@ fn draw(
     }
 }
 
+/// A car's name as the garage shows it, from the id the server keeps.
+fn car_name(id: &str) -> &str {
+    crate::car::Spec::ALL
+        .into_iter()
+        .find(|spec| format!("{spec:?}").eq_ignore_ascii_case(id))
+        .map_or(id, |spec| spec.name())
+}
+
+/// Put the `at`th of a row's cells in `text`, if it changed.
+fn set_cell<'a>(text: &mut Text, cells: impl IntoIterator<Item = &'a str>, at: usize) {
+    let wanted = cells.into_iter().nth(at).unwrap_or("");
+    if text.0 != wanted {
+        text.0.clear();
+        text.0.push_str(wanted);
+    }
+}
+
 fn ago(seconds: i64) -> String {
     match seconds {
         s if s < 3600 => crate::text::tf("time.minutes", &[&(s / 60)]),
@@ -741,49 +804,61 @@ fn ago(seconds: i64) -> String {
     }
 }
 
+#[cfg(any(test, feature = "visual-check"))]
+fn example_place(rank: u64, player: &str) -> Place {
+    Place {
+        rank,
+        player: player.into(),
+        name: format!("Driver {rank}"),
+        country: None,
+        steps: 10_000 + rank as u32,
+        seconds: 41.0 + rank as f64 * 0.1,
+        car: "tourer".into(),
+        setup: "balanced".into(),
+        multiplayer: false,
+        run: format!("{rank:016x}"),
+    }
+}
+
+/// A made-up board of 300 with you at `you`, for tests and visual checks.
+#[cfg(any(test, feature = "visual-check"))]
+pub(crate) fn example(you: u64) -> Standing {
+    Standing {
+        circuit: "monza".into(),
+        mode: "regular".into(),
+        season: 1,
+        total: 300,
+        top: (1..=10)
+            .map(|r| example_place(r, &format!("p{r}")))
+            .collect(),
+        around: (you.saturating_sub(5).max(1)..=you + 5)
+            .map(|r| example_place(r, &format!("p{r}")))
+            .collect(),
+        you: Some(example_place(you, &format!("p{you}"))),
+        rivals: vec![example_place(40, "p40"), example_place(3, "p3")],
+        fetched_at: 0,
+        week: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn place(rank: u64, player: &str) -> Place {
-        Place {
-            rank,
-            player: player.into(),
-            name: format!("Driver {rank}"),
-            country: None,
-            steps: 10_000 + rank as u32,
-            seconds: 41.0 + rank as f64 * 0.1,
-            car: "tourer".into(),
-            setup: "balanced".into(),
-            multiplayer: false,
-            run: format!("{rank:016x}"),
-        }
-    }
-
-    fn standing(you: u64) -> Standing {
-        Standing {
-            circuit: "monza".into(),
-            mode: "regular".into(),
-            season: 1,
-            total: 300,
-            top: (1..=10).map(|r| place(r, &format!("p{r}"))).collect(),
-            around: (you.saturating_sub(5).max(1)..=you + 5)
-                .map(|r| place(r, &format!("p{r}")))
-                .collect(),
-            you: Some(place(you, &format!("p{you}"))),
-            rivals: vec![place(40, "p40"), place(3, "p3")],
-            fetched_at: 0,
-            week: None,
-        }
-    }
-
     #[test]
     fn the_world_view_is_the_top_ten_a_gap_and_you_either_side() {
-        let shown = lines(&standing(100), View::World);
+        let shown = lines(&example(100), View::World);
         assert_eq!(shown.len(), ROWS, "held to the rows there are");
         assert_eq!(shown[10], Line::Gap);
-        assert!(matches!(&shown[11], Line::Place(p) if p.rank == 95));
-        let near_the_top = lines(&standing(8), View::World);
+        let below: Vec<u64> = shown[11..]
+            .iter()
+            .map(|l| match l {
+                Line::Place(p) => p.rank,
+                Line::Gap => 0,
+            })
+            .collect();
+        assert_eq!(below, vec![99, 100, 101], "you, with a place either side");
+        let near_the_top = lines(&example(8), View::World);
         assert!(
             !near_the_top.contains(&Line::Gap),
             "no gap when you are in reach of the top"
@@ -793,7 +868,7 @@ mod tests {
 
     #[test]
     fn the_rivals_view_puts_you_among_your_rivals_in_order() {
-        let shown = lines(&standing(21), View::Rivals);
+        let shown = lines(&example(21), View::Rivals);
         let ranks: Vec<u64> = shown
             .iter()
             .map(|l| match l {
@@ -809,7 +884,7 @@ mod tests {
         use crate::medals::Medal;
         assert_eq!(
             record_line("Monza", Some(62.88), Some(Medal::Silver), Some((96, 1390))),
-            "Monza                      1:02.88   SILVER  #96 of 1390"
+            "Monza\t1:02.88\tSILVER\t#96 of 1390"
         );
         assert_eq!(
             medal_totals(&[
@@ -823,9 +898,15 @@ mod tests {
     }
 
     #[test]
+    fn a_car_is_named_as_the_garage_names_it() {
+        assert_eq!(car_name("clubman"), "CLUBMAN");
+        assert_eq!(car_name("something new"), "something new");
+    }
+
+    #[test]
     fn the_footer_measures_you_against_the_record() {
         assert_eq!(
-            footer(&standing(21)),
+            footer(&example(21)),
             "You #21 of 300  ·  0:43.10  ·  record 0:41.10 by Driver 1  ·  +2.00"
         );
     }
