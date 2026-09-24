@@ -1,8 +1,9 @@
 """Build the Omarchy GT #95, Todora's own endurance racer.
 
 Original Blender geometry, fitted to Todora's existing wheel-contact coordinates:
-a front-engined GT of no particular maker, in charcoal with a lime accent,
-OMARCHY RACING on the wing and DHH on the plate. Notes: docs/models/omarchy-gt-95.md.
+a front-engined GT of no particular maker, in the pale blue and orange
+DHH raced in, OMARCHY RACING on the wing and DHH on the plate. No real
+maker's or sponsor's name or badge is on it. Notes: docs/models/omarchy-gt-95.md.
 Run with Blender --background --python tools/make_omarchy_gt.py.
 """
 from __future__ import annotations
@@ -171,7 +172,7 @@ def bodywork(root, m):
     pts=[(side*w,y,z+.004) for y,z,w in rows for side in [-1,1]]
     surface('Accent bonnet stripe',pts,[(2*i,2*i+1,2*i+3,2*i+2) for i in range(len(rows)-1)],m['accent'],root)
     for side in [-1,1]:
-        tube('Bonnet stripe keyline',[(side*(w+.004),y,z+.004) for y,z,w in rows],.003,m['black'],root)
+        tube('Bonnet stripe keyline',[(side*(w+.004),y,z+.004) for y,z,w in rows],.003,m['navy'],root)
         # Recessed cooling slots and bonnet catches.
         for y,z in [(.60,.455),(.68,.469),(.76,.467)]:
             panel('Bonnet vent',[(side*.254+dx,y+dy,z) for dx,dy in [(-.055,-.02),(.055,-.02),(.055,.02),(-.055,.02)]],m['black'],root)
@@ -180,7 +181,7 @@ def bodywork(root, m):
 
     # Top windscreen sunstrip and a single endurance wiper.
     panel('Accent sunstrip',[(-.346,.009,.668),(.346,.009,.668),(.360,.059,.624),(-.360,.059,.624)],m['accent'],root)
-    text('Windscreen banner','OMARCHY',(0,.087,.622),.037,m['black'],root,right=(-1,0,0),up=(0,-.67,.74))
+    text('Windscreen banner','OMARCHY',(0,.087,.622),.037,m['white'],root,right=(-1,0,0),up=(0,-.67,.74))
     tube('Windscreen wiper',[(.21,.247,.444),(.045,.151,.555),(-.115,.100,.597)],.004,m['carbon'],root)
     tube('Roof aerial',[(.045,-.345,.709),(.045,-.377,.950)],.0025,m['black'],root)
     mesh.add_box('Roof camera',(.039,.050,.022),(-.061,-.304,.708),m['carbon'],root,bevel=.005)
@@ -215,7 +216,7 @@ def nose_and_tail(root,m):
             panel('Front dive plane',[(side*.485,1.164,z),(side*.587,1.112,z+.018),(side*.548,.962,z-.018)],m['carbon'],root)
     # A plain roundel on the nose: the car's number, no maker's badge.
     disc('Nose roundel',(0,1.200,.372),.034,m['accent'],root,up=(0,-.35,.94))
-    text('Nose number','95',(0,1.200,.375),.030,m['black'],root,right=(-1,0,0),up=(0,-.35,.94))
+    text('Nose number','95',(0,1.200,.375),.030,m['white'],root,right=(-1,0,0),up=(0,-.35,.94))
 
     # A full-width light bar across the tail, the valance and the diffuser.
     tube('Tail light bar',[(-.47,-1.196,.352),(-.25,-1.214,.356),(.25,-1.214,.356),(.47,-1.196,.352)],.010,m['red'],root)
@@ -243,8 +244,8 @@ def nose_and_tail(root,m):
     faces=[tuple(range(5,-1,-1)),tuple(range(6,12))]+[(i,(i+1)%6,(i+1)%6+6,i+6) for i in range(6)]
     surface('Rear wing aerofoil',wing,faces,m['carbon'],root,True)
     for side in [-1,1]:
-        panel('Wing endplate',[(side*.636,-.960,.657),(side*.636,-.960,.785),(side*.636,-1.239,.785),(side*.636,-1.254,.658)],m['accent'],root)
-        text('Wing endplate name','TODORA',(side*.638,-1.101,.722),.030,m['black'],root,right=(0,side,0))
+        panel('Wing endplate',[(side*.636,-.960,.657),(side*.636,-.960,.785),(side*.636,-1.239,.785),(side*.636,-1.254,.658)],m['carbon'],root)
+        text('Wing endplate name','TODORA',(side*.638,-1.101,.722),.030,m['white'],root,right=(0,side,0))
     text('Wing top lettering','OMARCHY RACING',(0,-1.103,.753),.063,m['white'],root,right=(1,0,0),up=(0,1,0))
     text('Rear lettering','OMARCHY',(0,-1.214,.300),.034,m['silver'],root,right=(1,0,0))
 
@@ -280,17 +281,18 @@ def wheels(root,m):
 
 def livery(root,m):
     for side in [-1,1]:
-        # Number board: a lime field, a black header and a black 95.
+        # Number board: white, with an orange field, a navy header and a white 95.
         x=side*.540
-        panel('Number board',[(x,.242,.163),(x,-.015,.163),(x,-.015,.402),(x,.242,.402)],m['accent'],root)
-        panel('Number header',[(x+side*.002,.231,.350),(x+side*.002,-.002,.350),(x+side*.002,-.002,.376),(x+side*.002,.231,.376)],m['black'],root)
-        text('Door number','95',(x+side*.004,.114,.262),.176,m['black'],root,right=(0,side,0))
+        panel('Number board',[(x,.242,.163),(x,-.015,.163),(x,-.015,.402),(x,.242,.402)],m['white'],root)
+        panel('Number field',[(x+side*.001,.228,.182),(x+side*.001,.000,.182),(x+side*.001,.000,.347),(x+side*.001,.228,.347)],m['accent'],root)
+        panel('Number header',[(x+side*.002,.231,.350),(x+side*.002,-.002,.350),(x+side*.002,-.002,.376),(x+side*.002,.231,.376)],m['navy'],root)
+        text('Door number','95',(x+side*.004,.114,.262),.176,m['white'],root,right=(0,side,0))
         text('Number header text','TODORA',(x+side*.004,.114,.362),.018,m['white'],root,right=(0,side,0))
-        text('Door name','OMARCHY',(side*.550,-.250,.330),.060,m['white'],root,right=(0,side,0))
-        text('Door strapline','RACING',(side*.550,-.250,.270),.026,m['accent'],root,right=(0,side,0))
-        text('Sill lettering','TODORA',(side*.551,.364,.107),.024,m['white'],root,right=(0,side,0))
+        text('Door name','OMARCHY',(side*.550,-.215,.330),.052,m['navy'],root,right=(0,side,0))
+        text('Door strapline','RACING',(side*.550,-.215,.275),.026,m['accent'],root,right=(0,side,0))
+        text('Sill lettering','TODORA',(side*.551,.364,.107),.024,m['navy'],root,right=(0,side,0))
     text('Bonnet 95','95',(0,.464,.453),.118,m['white'],root,right=(-1,0,0),up=(0,-1,0))
-    text('Roof identity','95',(0,-.255,.714),.143,m['white'],root,up=(0,1,0))
+    text('Roof identity','95',(0,-.255,.714),.143,m['navy'],root,up=(0,1,0))
     # Small Danish flag at the roof's rear edge.
     panel('Danish flag',[(.13,-.41,.694),(.24,-.41,.694),(.24,-.46,.678),(.13,-.46,.678)],m['red'],root)
     panel('Danish cross vertical',[(.165,-.41,.695),(.174,-.41,.695),(.174,-.46,.679),(.165,-.46,.679)],m['white'],root)
@@ -330,11 +332,11 @@ def fit_details(root):
                 offset = .005
             elif name.startswith(('Bonnet 95', 'Nose number', 'Headlight')):
                 offset = .008
-        elif name.startswith(('Number board', 'Number header', 'Door number', 'Door name', 'Door strapline', 'Sill lettering')):
+        elif name.startswith(('Number board', 'Number field', 'Number header', 'Door number', 'Door name', 'Door strapline', 'Sill lettering')):
             target = body
             center = obj.matrix_world @ obj.data.vertices[0].co
             direction = Vector((-1 if center.x > 0 else 1, 0, 0))
-            if name.startswith('Number header') and not name.startswith('Number header text'):
+            if name.startswith('Number field') or (name.startswith('Number header') and not name.startswith('Number header text')):
                 offset = .005
             elif name.startswith(('Door number', 'Number header text', 'Door name', 'Door strapline', 'Sill lettering')):
                 offset = .007
@@ -342,7 +344,7 @@ def fit_details(root):
             continue
         # A decal must follow the surface between its corners too. Subdivide
         # broad patches before projection so the curved body cannot poke through.
-        if name.startswith(('Front windscreen', 'Rear windscreen', 'Side glazing', 'Accent bonnet stripe', 'Accent sunstrip', 'Number board', 'Number header', 'Nose roundel', 'Headlamp carbon')):
+        if name.startswith(('Front windscreen', 'Rear windscreen', 'Side glazing', 'Accent bonnet stripe', 'Accent sunstrip', 'Number board', 'Number field', 'Number header', 'Nose roundel', 'Headlamp carbon')):
             bm = bmesh.new()
             bm.from_mesh(obj.data)
             bmesh.ops.triangulate(bm, faces=list(bm.faces))
@@ -409,10 +411,10 @@ def main():
     root=bpy.data.objects.new('Omarchy GT 95',None)
     bpy.context.collection.objects.link(root)
     m={
-        # Charcoal. The game repaints the body per car; this is the studio's.
-        'paint':mesh.principled('Paint',base=(.010,.012,.015,1),metallic=.35,roughness=.30),
-        # Todora's HUD lime, in linear.
-        'accent':mesh.principled('Accent lime',base=(.555,.913,.107,1),roughness=.33),
+        # Pale blue. The game repaints the body per car; this is the studio's.
+        'paint':mesh.principled('Paint',base=(.448,.674,.750,1),metallic=.28,roughness=.26),
+        'accent':mesh.principled('Livery orange',base=(1,.135,.008,1),roughness=.33),
+        'navy':mesh.principled('Livery navy',base=(.008,.020,.055,1),roughness=.4),
         'white':mesh.principled('Lettering white',base=(.91,.94,.95,1),roughness=.4),
         'black':mesh.principled('Recess black',base=(.004,.006,.008,1),roughness=.65),
         'carbon':mesh.principled('Carbon aero',base=(.018,.024,.030,1),metallic=.20,roughness=.33),

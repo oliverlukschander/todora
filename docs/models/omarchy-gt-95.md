@@ -2,7 +2,7 @@
 
 Todora's default car is an invented front-engined endurance GT: the **OMARCHY GT #95**. It belongs to no maker and copies no real car. It has a wedge nose with twin hexagonal intakes and four round endurance lamps, slim blade headlamps, a flat waist, a squared-off tail with a full-width light bar, a cambered rear wing and a carbon diffuser.
 
-The livery is charcoal with Todora's HUD lime: a bonnet stripe, window surrounds, sill pinstripes, wing endplates and a lime number board with a black **95**. **OMARCHY RACING** runs across the wing, **OMARCHY** is on the doors and the tail, and the rear number plate reads **DHH**. A small Danish flag sits at the back of the roof. All other lettering is Todora's own; there are no real sponsors, makers or series on it.
+The livery is the pale blue and orange DHH raced in at Le Mans in 2014, so he can tell it is his: an orange bonnet stripe, sunstrip, window surrounds and sill pinstripes, and a white number board with an orange field and a white **95**. **OMARCHY RACING** runs across the wing, **OMARCHY** is on the doors, windscreen and tail, and the rear number plate reads **DHH**. A small Danish flag sits at the back of the roof. Only the colours carry over: no maker's, sponsor's or series' name, logo or roundel is on it, and all the lettering is Todora's own.
 
 Clubman and Express use the same model with their own handling and body colours. The accent, lettering, carbon parts and lights keep their authored materials when the body colour changes.
 

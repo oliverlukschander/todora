@@ -11,7 +11,7 @@ adds shared practice for two registered Apple Silicon Macs. It is separate from
 the stable release and requires each tester’s Mac in the development profile.
 [Setup and controls](docs/testing/multiplayer.md).
 
-The default garage choice is the **OMARCHY GT #95**, an invented endurance GT built in Blender: charcoal with Todora's lime, twin hexagonal intakes with yellow endurance lamps, a full-width tail light, animated race wheels, rear wing and diffuser, **OMARCHY RACING** on the wing and **DHH** on the plate. It is modelled on no real car and carries no real makers or sponsors. Clubman and Express remain handling and colour variants of the shared model. [Model and rebuild instructions](docs/models/omarchy-gt-95.md).
+The default garage choice is the **OMARCHY GT #95**, an invented endurance GT built in Blender, in the pale blue and orange DHH raced in: twin hexagonal intakes with yellow endurance lamps, a full-width tail light, animated race wheels, rear wing and diffuser, **OMARCHY RACING** on the wing and **DHH** on the plate. It is modelled on no real car and carries no real makers or sponsors. Clubman and Express remain handling and colour variants of the shared model. [Model and rebuild instructions](docs/models/omarchy-gt-95.md).
 
 The GT measures about **1.06 game units long and 0.45 across the body**, with matching wheel contacts and ghost models. Every road is **3.6 m wide** including kerbs (previously 3.3 m), with 2.94 m of asphalt. Its aerodynamic grip contribution is twice the earlier estate car's, with the garage variants retaining their different setups.
 

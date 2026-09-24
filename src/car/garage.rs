@@ -119,8 +119,8 @@ impl Spec {
             Spec::Tourer => Sheet {
                 name: "OMARCHY GT #95",
                 handling: TOURER,
-                // Charcoal, under Todora's lime.
-                paint: Color::srgb(0.10, 0.11, 0.12),
+                // The pale blue DHH raced in, under orange.
+                paint: Color::srgb(0.70, 0.84, 0.88),
                 stars: Stars {
                     handling: 3,
                     acceleration: 3,
