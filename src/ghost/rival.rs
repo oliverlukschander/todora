@@ -134,7 +134,7 @@ fn take(
         || run.mode != *mode
         || run.fingerprint != track.fingerprint()
     {
-        online.say("That ghost is for another circuit or mode; pick one on this board.");
+        online.say(crate::text::t("rival.other"));
         return;
     }
     let (name, rank) = online
@@ -176,19 +176,17 @@ fn build(
             rival.lap = Some(lap);
             rival.on = true;
             let who = if rival.name.is_empty() {
-                "the downloaded lap".to_string()
+                crate::text::t("rival.someone").to_string()
             } else {
                 rival.name.clone()
             };
             if let Some(online) = online.as_mut() {
-                online.say(format!(
-                    "Racing {who}'s ghost. G changes which ghosts show."
-                ));
+                online.say(crate::text::tf("rival.racing", &[&who]));
             }
         }
         None => {
             if let Some(online) = online.as_mut() {
-                online.say("That ghost did not replay to a lap here, so it is not raced.");
+                online.say(crate::text::t("rival.bad"));
             }
         }
     }

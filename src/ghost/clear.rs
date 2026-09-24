@@ -33,8 +33,11 @@ pub(super) fn handle_reset(
     if *halt != Halt::Pause {
         requests.clear();
         confirmation.0 = None;
+        let note = crate::text::t("pause.reset_note");
         for mut text in &mut notices {
-            text.0 = "Reset removes saved best times and restarts the lap.".into();
+            if text.0 != note {
+                text.0 = note.into();
+            }
         }
         return;
     }
@@ -42,19 +45,15 @@ pub(super) fn handle_reset(
         let Some(scope) = request.0 else {
             confirmation.0 = None;
             for mut text in &mut notices {
-                text.0 = "Reset removes saved best times and restarts the lap.".into();
+                text.0 = crate::text::t("pause.reset_note").into();
             }
             continue;
         };
         let message = if confirmation.0 != Some(scope) {
             confirmation.0 = Some(scope);
             match scope {
-                ResetGhosts::Current => {
-                    "Confirm again to erase this circuit/mode’s ghost and best time. Your lap will restart."
-                }
-                ResetGhosts::All => {
-                    "Confirm again to erase every circuit/mode’s ghost and best time. Your lap will restart."
-                }
+                ResetGhosts::Current => "clear.confirm_one",
+                ResetGhosts::All => "clear.confirm_all",
             }
         } else {
             confirmation.0 = None;
@@ -63,7 +62,7 @@ pub(super) fn handle_reset(
             match ghost.saved.as_ref().map_or(Ok(()), |saved| saved.remove()) {
                 Err(error) => {
                     warn!("Cannot reset this ghost: {error}");
-                    "Could not reset this ghost. Check save-folder permissions and try again."
+                    "clear.fail_one"
                 }
                 Ok(()) => {
                     ghost.best = None;
@@ -79,20 +78,20 @@ pub(super) fn handle_reset(
                     reset.write(Reset);
                     if scope == ResetGhosts::All {
                         match store::remove_all() {
-                            Ok(()) => "All ghosts and best times reset. Ready for a fresh lap.",
+                            Ok(()) => "clear.done_all",
                             Err(error) => {
                                 warn!("Cannot reset all ghosts: {error}");
-                                "This ghost was reset, but some saved ghosts could not be removed. Check save-folder permissions and retry."
+                                "clear.fail_all"
                             }
                         }
                     } else {
-                        "This ghost and best time reset. Ready for a fresh lap."
+                        "clear.done_one"
                     }
                 }
             }
         };
         for mut text in &mut notices {
-            text.0 = message.into();
+            text.0 = crate::text::t(message).into();
         }
     }
 }

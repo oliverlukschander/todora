@@ -373,7 +373,7 @@ fn draw_car(spec: Res<Spec>, mode: Res<Mode>, mut readout: Query<&mut Text, With
         return;
     }
     if let Ok(mut text) = readout.single_mut() {
-        text.0 = format!("{} / {}", spec.name(), mode.name().to_uppercase());
+        text.0 = format!("{} / {}", spec.name(), mode.shown().to_uppercase());
     }
 }
 

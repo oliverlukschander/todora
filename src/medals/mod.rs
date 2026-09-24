@@ -44,12 +44,12 @@ pub(crate) enum Medal {
 
 impl Medal {
     pub(crate) fn name(self) -> &'static str {
-        match self {
-            Self::Bronze => "bronze",
-            Self::Silver => "silver",
-            Self::Gold => "gold",
-            Self::Author => "author",
-        }
+        crate::text::t(match self {
+            Self::Bronze => "medal.bronze",
+            Self::Silver => "medal.silver",
+            Self::Gold => "medal.gold",
+            Self::Author => "medal.author",
+        })
     }
 
     /// The badge colour. The name is always written beside it, so a medal
@@ -150,18 +150,20 @@ pub(crate) fn standing(targets: &Targets, best: Option<f32>) -> String {
     let have = best.and_then(|t| targets.medal(t));
     let next = targets.next(best);
     match (have, next) {
-        (Some(medal), None) => format!("{} — author time beaten", medal.name().to_uppercase()),
-        (Some(medal), Some((want, gap))) => format!(
-            "{} — {:.2} to {}",
-            medal.name().to_uppercase(),
-            gap,
-            want.name()
+        (Some(medal), None) => crate::text::tf("medal.beaten", &[&medal.name().to_uppercase()]),
+        (Some(medal), Some((want, gap))) => crate::text::tf(
+            "medal.gap",
+            &[
+                &medal.name().to_uppercase(),
+                &format!("{gap:.2}"),
+                &want.name(),
+            ],
         ),
         (None, Some((want, gap))) if best.is_some() => {
-            format!("{:.2} to {}", gap, want.name())
+            crate::text::tf("medal.short", &[&format!("{gap:.2}"), &want.name()])
         }
         (None, Some((want, time))) => {
-            format!("{} in {}", want.name(), crate::lap::format_time(time))
+            crate::text::tf("medal.in", &[&want.name(), &crate::lap::format_time(time)])
         }
         (None, None) => String::new(),
     }

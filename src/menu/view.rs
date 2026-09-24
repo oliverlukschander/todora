@@ -56,8 +56,8 @@ pub(super) fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         ))
         .with_children(|row| {
             for (page, title) in [
-                (Page::Circuit, "T   Circuits"),
-                (Page::Car, "C   Garage & setup"),
+                (Page::Circuit, crate::text::t("menu.circuits_key")),
+                (Page::Car, crate::text::t("menu.garage_key")),
             ] {
                 row.spawn(button(Action::Open(page))).with_children(|b| {
                     b.spawn(label(title, 15.0, TEXT));
@@ -190,53 +190,169 @@ pub(super) fn draw(
     let selected = entries.contains(&menu.at);
     commands.entity(root).despawn_children();
     commands.entity(root).with_children(|root| {
-        root.spawn((Node {
-            width: px(1160), height: px(734), min_height: px(0), padding: UiRect::all(px(28)), border: UiRect::all(px(1)),
-            border_radius: BorderRadius::all(px(18)), row_gap: px(22), ..column()
-        }, BackgroundColor(Color::srgb(0.045, 0.06, 0.073)), BorderColor::all(LINE)))
+        root.spawn((
+            Node {
+                width: px(1160),
+                height: px(734),
+                min_height: px(0),
+                padding: UiRect::all(px(28)),
+                border: UiRect::all(px(1)),
+                border_radius: BorderRadius::all(px(18)),
+                row_gap: px(22),
+                ..column()
+            },
+            BackgroundColor(Color::srgb(0.045, 0.06, 0.073)),
+            BorderColor::all(LINE),
+        ))
         .with_children(|panel| {
-            panel.spawn(Node { align_items: AlignItems::Center, justify_content: JustifyContent::SpaceBetween, ..default() })
+            panel
+                .spawn(Node {
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::SpaceBetween,
+                    ..default()
+                })
                 .with_children(|header| {
-                    header.spawn(Node { column_gap: px(12), align_items: AlignItems::Center, ..default() }).with_children(|brand| {
-                        brand.spawn((Node { width: px(6), height: px(30), border_radius: BorderRadius::all(px(3)), ..default() }, BackgroundColor(ACCENT)));
-                        brand.spawn(label("TODORA", 24.0, TEXT));
-                        brand.spawn(label("/   FREE DRIVE", 12.0, MUTED));
-                    });
-                    header.spawn(Node { column_gap: px(8), align_items: AlignItems::Center, ..default() }).with_children(|tabs| {
-                        tabs.spawn(label("LB / RB  Tabs", 12.0, MUTED));
-                        for (tab, title) in [(Page::Circuit, "01   Circuits"), (Page::Car, "02   Garage & setup")] {
-                            let mut tab_button = tabs.spawn(button(Action::Open(tab)));
-                            if page == tab { tab_button.insert(Selected); }
-                            tab_button.with_children(|b| { b.spawn(label(title, 15.0, if page == tab { ACCENT } else { MUTED })); });
-                        }
-                        tabs.spawn(button(Action::Back)).with_children(|b| { b.spawn(label("Close  /  Esc", 15.0, MUTED)); });
-                    });
+                    header
+                        .spawn(Node {
+                            column_gap: px(12),
+                            align_items: AlignItems::Center,
+                            ..default()
+                        })
+                        .with_children(|brand| {
+                            brand.spawn((
+                                Node {
+                                    width: px(6),
+                                    height: px(30),
+                                    border_radius: BorderRadius::all(px(3)),
+                                    ..default()
+                                },
+                                BackgroundColor(ACCENT),
+                            ));
+                            brand.spawn(label("TODORA", 24.0, TEXT));
+                            brand.spawn(label(crate::text::t("menu.free_drive"), 12.0, MUTED));
+                        });
+                    header
+                        .spawn(Node {
+                            column_gap: px(8),
+                            align_items: AlignItems::Center,
+                            ..default()
+                        })
+                        .with_children(|tabs| {
+                            tabs.spawn(label(crate::text::t("menu.tabs"), 12.0, MUTED));
+                            for (tab, title) in [
+                                (Page::Circuit, crate::text::t("menu.tab_circuits")),
+                                (Page::Car, crate::text::t("menu.tab_garage")),
+                            ] {
+                                let mut tab_button = tabs.spawn(button(Action::Open(tab)));
+                                if page == tab {
+                                    tab_button.insert(Selected);
+                                }
+                                tab_button.with_children(|b| {
+                                    b.spawn(label(
+                                        title,
+                                        15.0,
+                                        if page == tab { ACCENT } else { MUTED },
+                                    ));
+                                });
+                            }
+                            tabs.spawn(button(Action::Back)).with_children(|b| {
+                                b.spawn(label(crate::text::t("menu.close"), 15.0, MUTED));
+                            });
+                        });
                 });
-            panel.spawn(Node { row_gap: px(5), ..column() }).with_children(|heading| {
-                heading.spawn(label(if page == Page::Circuit { "Find your next lap." } else { "Make it your drive." }, 38.0, TEXT));
-                heading.spawn(label(if page == Page::Circuit { "Pick a circuit. Learn the corners. Chase your best." }
-                    else { "Three different characters. One setup that feels right to you." }, 16.0, MUTED));
-            });
-            panel.spawn(Node { column_gap: px(24), height: px(428), min_height: px(0), flex_shrink: 0.0, ..default() }).with_children(|body| {
-                if page == Page::Circuit { circuits(body, &menu, previews, &entries, &track, mode, &best); }
-                else { garage(body, &menu, &spec); }
-            });
-            panel.spawn((Node {
-                padding: UiRect::top(px(18)), border: UiRect::top(px(1)),
-                align_items: AlignItems::Center, justify_content: JustifyContent::SpaceBetween, ..default()
-            }, BorderColor::all(LINE))).with_children(|footer| {
-                footer.spawn(Node { row_gap: px(4), ..column() }).with_children(|hint| {
-                    hint.spawn(label(if page == Page::Circuit { "Stick / D-pad / Arrows  Browse     PgUp / PgDn  Page     A / Enter  Drive" }
-                        else { "↑↓  Car     ←→  Setup     Y / M  Mode     A / Enter  Apply" }, 13.0, TEXT));
-                    hint.spawn(label(if page == Page::Circuit { "Changing circuit starts a new session. Start / B / Esc returns to your current lap." }
-                        else { "Apply restarts the lap. Best times and ghosts are saved separately for each mode." }, 12.0, MUTED));
+            panel
+                .spawn(Node {
+                    row_gap: px(5),
+                    ..column()
+                })
+                .with_children(|heading| {
+                    heading.spawn(label(
+                        if page == Page::Circuit {
+                            crate::text::t("menu.circuits_title")
+                        } else {
+                            crate::text::t("menu.garage_title")
+                        },
+                        38.0,
+                        TEXT,
+                    ));
+                    heading.spawn(label(
+                        if page == Page::Circuit {
+                            crate::text::t("menu.circuits_sub")
+                        } else {
+                            crate::text::t("menu.garage_sub")
+                        },
+                        16.0,
+                        MUTED,
+                    ));
                 });
-                if selected {
-                    footer.spawn((button(Action::Apply), Primary)).with_children(|b| {
-                        b.spawn(label(if page == Page::Circuit { "Drive this circuit  →" } else { "Apply & drive  →" }, 17.0, SURFACE));
-                    });
-                }
-            });
+            panel
+                .spawn(Node {
+                    column_gap: px(24),
+                    height: px(428),
+                    min_height: px(0),
+                    flex_shrink: 0.0,
+                    ..default()
+                })
+                .with_children(|body| {
+                    if page == Page::Circuit {
+                        circuits(body, &menu, previews, &entries, &track, mode, &best);
+                    } else {
+                        garage(body, &menu, &spec);
+                    }
+                });
+            panel
+                .spawn((
+                    Node {
+                        padding: UiRect::top(px(18)),
+                        border: UiRect::top(px(1)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::SpaceBetween,
+                        ..default()
+                    },
+                    BorderColor::all(LINE),
+                ))
+                .with_children(|footer| {
+                    footer
+                        .spawn(Node {
+                            row_gap: px(4),
+                            ..column()
+                        })
+                        .with_children(|hint| {
+                            hint.spawn(label(
+                                if page == Page::Circuit {
+                                    crate::text::t("menu.circuits_keys")
+                                } else {
+                                    crate::text::t("menu.garage_keys")
+                                },
+                                13.0,
+                                TEXT,
+                            ));
+                            hint.spawn(label(
+                                if page == Page::Circuit {
+                                    crate::text::t("menu.circuits_note")
+                                } else {
+                                    crate::text::t("menu.garage_note")
+                                },
+                                12.0,
+                                MUTED,
+                            ));
+                        });
+                    if selected {
+                        footer
+                            .spawn((button(Action::Apply), Primary))
+                            .with_children(|b| {
+                                b.spawn(label(
+                                    if page == Page::Circuit {
+                                        crate::text::t("menu.drive")
+                                    } else {
+                                        crate::text::t("menu.apply")
+                                    },
+                                    17.0,
+                                    SURFACE,
+                                ));
+                            });
+                    }
+                });
         });
     });
 }
@@ -299,9 +415,9 @@ fn circuits(
                             TextLayout::no_wrap(),
                             label(
                                 if menu.search.is_empty() {
-                                    "Search circuits… just start typing".into()
+                                    crate::text::t("menu.search_empty").into()
                                 } else {
-                                    format!("Search: {}", menu.search)
+                                    crate::text::tf("menu.search", &[&menu.search])
                                 },
                                 16.0,
                                 if menu.search.is_empty() { MUTED } else { TEXT },
@@ -309,7 +425,7 @@ fn circuits(
                         ));
                     });
                 search.spawn(button(Action::Clear)).with_children(|b| {
-                    b.spawn(label("Clear", 14.0, MUTED));
+                    b.spawn(label(crate::text::t("menu.clear"), 14.0, MUTED));
                 });
             });
         browser
@@ -328,12 +444,8 @@ fn circuits(
                         ..column()
                     })
                     .with_children(|empty| {
-                        empty.spawn(label("No circuits found", 24.0, TEXT));
-                        empty.spawn(label(
-                            "Try a shorter name or clear your search.",
-                            16.0,
-                            MUTED,
-                        ));
+                        empty.spawn(label(crate::text::t("menu.none_found"), 24.0, TEXT));
+                        empty.spawn(label(crate::text::t("menu.none_hint"), 16.0, MUTED));
                     });
                 }
                 for &at in entries.iter().skip(first).take(PAGE_SIZE) {
@@ -379,11 +491,11 @@ fn circuits(
                             ));
                             info.spawn(label(
                                 if circuit.id == track.circuit().id {
-                                    "CURRENT CIRCUIT"
+                                    crate::text::t("menu.current")
                                 } else if selected {
-                                    "SELECTED"
+                                    crate::text::t("menu.selected")
                                 } else {
-                                    "CIRCUIT"
+                                    crate::text::t("menu.circuit")
                                 },
                                 10.0,
                                 MUTED,
@@ -428,15 +540,17 @@ fn circuits(
             .with_children(|pagination| {
                 pagination.spawn(label(
                     if entries.is_empty() {
-                        "0 circuits".into()
+                        crate::text::t("menu.zero").into()
                     } else {
-                        format!(
-                            "{}–{} of {} circuits  /  Page {} of {}",
-                            first + 1,
-                            (first + PAGE_SIZE).min(entries.len()),
-                            entries.len(),
-                            first / PAGE_SIZE + 1,
-                            entries.len().div_ceil(PAGE_SIZE)
+                        crate::text::tf(
+                            "menu.page",
+                            &[
+                                &(first + 1),
+                                &(first + PAGE_SIZE).min(entries.len()),
+                                &entries.len(),
+                                &(first / PAGE_SIZE + 1),
+                                &entries.len().div_ceil(PAGE_SIZE),
+                            ],
                         )
                     },
                     13.0,
@@ -448,9 +562,10 @@ fn circuits(
                         ..default()
                     })
                     .with_children(|buttons| {
-                        for (action, title) in
-                            [(Action::Previous, "← Previous"), (Action::Next, "Next →")]
-                        {
+                        for (action, title) in [
+                            (Action::Previous, crate::text::t("menu.previous")),
+                            (Action::Next, crate::text::t("menu.next")),
+                        ] {
                             buttons.spawn(button(action)).with_children(|b| {
                                 b.spawn(label(title, 13.0, TEXT));
                             });
@@ -469,14 +584,10 @@ fn circuits(
         BackgroundColor(SURFACE),
     ))
     .with_children(|detail| {
-        detail.spawn(label("CIRCUIT BRIEF", 11.0, ACCENT));
+        detail.spawn(label(crate::text::t("menu.brief"), 11.0, ACCENT));
         if !entries.contains(&menu.at) {
-            detail.spawn(label("A new favourite is out there.", 27.0, TEXT));
-            detail.spawn(label(
-                "Search the circuit library to find your next drive.",
-                16.0,
-                MUTED,
-            ));
+            detail.spawn(label(crate::text::t("menu.brief_empty"), 27.0, TEXT));
+            detail.spawn(label(crate::text::t("menu.brief_hint"), 16.0, MUTED));
             return;
         }
         let circuit = &all_circuits()[menu.at];
@@ -489,7 +600,7 @@ fn circuits(
                 ..default()
             },
         ));
-        detail.spawn(label("CIRCUIT OUTLINE   /   START IN LIME", 10.0, MUTED));
+        detail.spawn(label(crate::text::t("menu.outline"), 10.0, MUTED));
         detail
             .spawn(Node {
                 column_gap: px(28),
@@ -498,8 +609,11 @@ fn circuits(
             .with_children(|stats| {
                 let yours = best(menu.at).map_or("—".into(), crate::lap::format_time);
                 for (name, value) in [
-                    ("IN-GAME LAP", format!("{:.0} m", circuit.lap)),
-                    ("YOUR BEST", yours),
+                    (
+                        crate::text::t("menu.in_game_lap"),
+                        format!("{:.0} m", circuit.lap),
+                    ),
+                    (crate::text::t("menu.your_best"), yours),
                 ] {
                     stats
                         .spawn(Node {
@@ -548,7 +662,7 @@ fn circuits(
                     "{}{}",
                     crate::medals::standing(&targets, yours),
                     if targets.provisional {
-                        "  ·  provisional"
+                        crate::text::t("medal.provisional")
                     } else {
                         ""
                     }
@@ -563,16 +677,16 @@ fn circuits(
 fn character(spec: Spec) -> (&'static str, &'static str) {
     match spec {
         Spec::Tourer => (
-            "LE MANS 2014 · GTE AM",
-            "DHH’s class-winning Omarchy GT.",
+            crate::text::t("car.omarchy_tag"),
+            crate::text::t("car.omarchy_about"),
         ),
         Spec::Clubman => (
-            "THE CORNER CARVER",
-            "More grip. More confidence through every bend.",
+            crate::text::t("car.clubman_tag"),
+            crate::text::t("car.clubman_about"),
         ),
         Spec::Express => (
-            "THE STRAIGHT-LINE SPECIALIST",
-            "Long legs on the straights. A lighter hold in the corners.",
+            crate::text::t("car.express_tag"),
+            crate::text::t("car.express_about"),
         ),
     }
 }
@@ -638,7 +752,11 @@ fn garage(body: &mut ChildSpawnerCommands, menu: &Menu, current: &Spec) {
                             if selected { ACCENT } else { TEXT },
                         ));
                         title.spawn(label(
-                            if spec == *current { "DRIVING" } else { tag },
+                            if spec == *current {
+                                crate::text::t("menu.driving")
+                            } else {
+                                tag
+                            },
                             10.0,
                             MUTED,
                         ));
@@ -698,7 +816,7 @@ fn garage(body: &mut ChildSpawnerCommands, menu: &Menu, current: &Spec) {
         BackgroundColor(SURFACE),
     ))
     .with_children(|setup| {
-        setup.spawn(label("DRIVING MODE", 11.0, ACCENT));
+        setup.spawn(label(crate::text::t("menu.driving_mode"), 11.0, ACCENT));
         setup
             .spawn(Node {
                 column_gap: px(6),
@@ -726,15 +844,15 @@ fn garage(body: &mut ChildSpawnerCommands, menu: &Menu, current: &Spec) {
                     }
                     choice.with_children(|choice| {
                         choice.spawn(label(
-                            mode.name(),
+                            mode.shown(),
                             15.0,
                             if selected { ACCENT } else { TEXT },
                         ));
                         choice.spawn(label(
                             match mode {
-                                Mode::Beginner => "−20% speed",
-                                Mode::Regular => "100% speed",
-                                Mode::Pro => "+20% speed",
+                                Mode::Beginner => crate::text::t("mode.minus"),
+                                Mode::Regular => crate::text::t("mode.same"),
+                                Mode::Pro => crate::text::t("mode.plus"),
                             },
                             12.0,
                             MUTED,
@@ -742,12 +860,21 @@ fn garage(body: &mut ChildSpawnerCommands, menu: &Menu, current: &Spec) {
                     });
                 }
             });
-        setup.spawn(label("HANDLING SETUP", 11.0, ACCENT));
+        setup.spawn(label(crate::text::t("menu.handling_setup"), 11.0, ACCENT));
         for (at, wanted) in Setup::ALL.into_iter().enumerate() {
             let (title, hint) = match wanted {
-                Setup::Understeer => ("Stable", "Gentler rotation. Easier to catch."),
-                Setup::Balanced => ("Balanced", "The car’s natural handling."),
-                Setup::Oversteer => ("Loose", "Eager rotation. Holds a slide longer."),
+                Setup::Understeer => (
+                    crate::text::t("setup.stable"),
+                    crate::text::t("setup.stable_about"),
+                ),
+                Setup::Balanced => (
+                    crate::text::t("setup.balanced"),
+                    crate::text::t("setup.balanced_about"),
+                ),
+                Setup::Oversteer => (
+                    crate::text::t("setup.loose"),
+                    crate::text::t("setup.loose_about"),
+                ),
             };
             let selected = menu.setup == wanted;
             let mut preset = setup.spawn(card(
@@ -782,11 +909,7 @@ fn garage(body: &mut ChildSpawnerCommands, menu: &Menu, current: &Spec) {
                     });
             });
         }
-        setup.spawn(label(
-            "1 / 2 / 3 changes handling while driving.",
-            12.0,
-            MUTED,
-        ));
+        setup.spawn(label(crate::text::t("menu.setup_keys"), 12.0, MUTED));
     });
 }
 

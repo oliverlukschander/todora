@@ -113,7 +113,10 @@ pub(crate) fn all() -> Vec<(String, String, String)> {
         ("baku-clean", "Old town", "A lap of Baku that counts"),
     ]
     .into_iter()
-    .map(|(id, name, what)| (id.to_string(), name.to_string(), what.to_string()))
+    .map(|(id, name, what)| {
+        let (name, what) = crate::text::achievement(id).unwrap_or((name, what));
+        (id.to_string(), name.to_string(), what.to_string())
+    })
     .collect();
     for id in GOLD_AT {
         let name = all_circuits()
@@ -122,8 +125,8 @@ pub(crate) fn all() -> Vec<(String, String, String)> {
             .map_or(id, |c| c.name);
         out.push((
             format!("gold-{id}"),
-            format!("Gold at {name}"),
-            format!("Earn gold at {name}, in any mode"),
+            crate::text::tf("ach.gold_at", &[&name]),
+            crate::text::tf("ach.gold_at_what", &[&name]),
         ));
     }
     out
@@ -445,7 +448,7 @@ fn draw(
     };
     match &toast.showing {
         Some((name, _)) if !halt.stopped() => {
-            let wanted = format!("ACHIEVEMENT   ·   {name}");
+            let wanted = crate::text::tf("ach.toast", &[name]);
             if text.0 != wanted {
                 text.0 = wanted;
             }

@@ -171,9 +171,9 @@ impl Stars {
     /// Labelled, in the order the menu lists them.
     pub fn rows(self) -> [(&'static str, u8); 3] {
         [
-            ("HANDLING", self.handling),
-            ("ACCEL", self.acceleration),
-            ("TOP", self.top_speed),
+            (crate::text::t("car.handling"), self.handling),
+            (crate::text::t("car.accel"), self.acceleration),
+            (crate::text::t("car.top"), self.top_speed),
         ]
     }
 }

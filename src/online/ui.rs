@@ -123,7 +123,7 @@ fn listen(client: Option<Res<Client>>, mut online: ResMut<Online>, mut settings:
     for heard in client.heard() {
         match heard {
             Heard::Joined { name, .. } => {
-                settings.online_note = format!("On  ·  {name}");
+                settings.online_note = crate::text::tf("online.on", &[&name]);
                 online.confirmed = Some((name.clone(), settings.country.clone()));
                 if settings.name != name {
                     settings.name = name;
@@ -132,20 +132,24 @@ fn listen(client: Option<Res<Client>>, mut online: ResMut<Online>, mut settings:
             Heard::Sent(sent) => {
                 online.sent.push(sent.clone());
                 let place = match sent.rank {
-                    Some(rank) => format!("#{rank} of {}", sent.total),
-                    None => "on the board".into(),
+                    Some(rank) => crate::text::tf("board.place_of", &[&rank, &sent.total]),
+                    None => crate::text::t("online.on_board").into(),
                 };
                 let circuit = crate::track::all_circuits()
                     .iter()
                     .find(|c| c.id == sent.circuit)
                     .map_or(sent.circuit.as_str(), |c| c.name);
-                online.say(format!(
-                    "{circuit}: {} — world {place}",
-                    crate::lap::format_time(sent.seconds as f32)
+                online.say(crate::text::tf(
+                    "online.sent",
+                    &[
+                        &circuit,
+                        &crate::lap::format_time(sent.seconds as f32),
+                        &place,
+                    ],
                 ));
             }
             Heard::Refused { circuit, why } => {
-                online.say(format!("{circuit}: lap not accepted — {why}"));
+                online.say(crate::text::tf("online.refused", &[&circuit, &why]));
             }
             Heard::Waiting(n) => {
                 if settings.pending != n {
@@ -164,23 +168,23 @@ fn listen(client: Option<Res<Client>>, mut online: ResMut<Online>, mut settings:
                 online.ranks = ranks.into_iter().map(|(c, r, t)| (c, (r, t))).collect();
             }
             Heard::Ghost { run, bytes } => {
-                online.say(format!(
-                    "Ghost {} downloaded ({} KB)",
-                    &run[..6.min(run.len())],
-                    bytes.len() / 1024
+                online.say(crate::text::tf(
+                    "online.ghost",
+                    &[&&run[..6.min(run.len())], &(bytes.len() / 1024)],
                 ));
                 online.ghost = Some((run, bytes));
             }
             Heard::Trouble(why) => {
                 if settings.online {
-                    settings.bypass_change_detection().online_note = format!("Offline  ·  {why}");
+                    settings.bypass_change_detection().online_note =
+                        crate::text::tf("online.offline", &[&why]);
                 }
             }
             Heard::Forgotten => {
                 settings.online = false;
                 settings.online_note.clear();
                 online.confirmed = None;
-                online.say("Your online data has been deleted.");
+                online.say(crate::text::t("online.deleted"));
             }
         }
     }
@@ -269,22 +273,11 @@ fn setup(mut commands: Commands) {
                     BorderColor::all(LINE),
                 ))
                 .with_children(|panel| {
-                    panel.spawn(label("TODORA  /  WORLD LEADERBOARDS", 12.0, AMBER));
-                    panel.spawn(label("Put your laps on the world boards?", 30.0, TEXT));
-                    panel.spawn(label(
-                        "Your best laps go to todora.lukschander.com, hosted in the EU, and are \
-                         driven again there before they count. Stored: a random id, the name \
-                         below, a country if you pick one, and your laps. No email, no account, \
-                         no address. Settings → Online changes the name or deletes everything.",
-                        16.0,
-                        AMBER_DIM,
-                    ));
+                    panel.spawn(crate::text::label("online.label", 12.0, AMBER));
+                    panel.spawn(crate::text::label("online.ask", 30.0, TEXT));
+                    panel.spawn(crate::text::label("online.explain", 16.0, AMBER_DIM));
                     panel.spawn((OfferName, label("", 20.0, TEXT)));
-                    panel.spawn(label(
-                        "A / Enter  Go online        B / Esc  Not now",
-                        15.0,
-                        AMBER,
-                    ));
+                    panel.spawn(crate::text::label("online.choose", 15.0, AMBER));
                 });
         });
     commands.spawn((
@@ -323,7 +316,7 @@ fn draw(
         });
     }
     if offering && let Ok(mut text) = names.single_mut() {
-        let wanted = format!("You would appear as  {}", settings.name);
+        let wanted = crate::text::tf("online.appear", &[&settings.name]);
         if text.0 != wanted {
             text.0 = wanted;
         }

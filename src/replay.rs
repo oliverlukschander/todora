@@ -45,9 +45,9 @@ impl Source {
     const ALL: [Self; 3] = [Self::Best, Self::Last, Self::Downloaded];
     fn name(self) -> &'static str {
         match self {
-            Self::Best => "Your best",
-            Self::Last => "Your last lap",
-            Self::Downloaded => "Downloaded ghost",
+            Self::Best => crate::text::t("replay.best"),
+            Self::Last => crate::text::t("replay.last"),
+            Self::Downloaded => crate::text::t("replay.downloaded"),
         }
     }
 }
@@ -70,9 +70,9 @@ impl View {
     }
     fn name(self) -> &'static str {
         match self {
-            Self::Trackside => "Trackside",
-            Self::Chase => "Chase",
-            Self::Bonnet => "Bonnet",
+            Self::Trackside => crate::text::t("replay.trackside"),
+            Self::Chase => crate::text::t("camera.chase"),
+            Self::Bonnet => crate::text::t("camera.bonnet"),
         }
     }
 }
@@ -438,16 +438,20 @@ fn draw(
             format_time(lap.duration()),
             SPEEDS[replay.speed],
             replay.view.name(),
-            if replay.playing { "" } else { "    PAUSED" }
+            if replay.playing {
+                String::new()
+            } else {
+                format!("    {}", crate::text::t("replay.paused"))
+            }
         ),
-        None => format!("{}    — nothing to replay yet", replay.source.name()),
+        None => crate::text::tf("replay.nothing", &[&replay.source.name()]),
     };
     if let Ok(mut text) = statuses.single_mut()
         && text.0 != status
     {
         text.0 = status;
     }
-    let hint = "A / Enter  Play    ← →  Scrub    ↑ ↓  Speed    Q / E  Lap    Y  Camera    X / P  Photo    Esc / B  Back";
+    let hint = crate::text::t("replay.hint");
     if let Ok(mut text) = hints.single_mut()
         && text.0 != hint
     {

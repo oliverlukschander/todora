@@ -50,14 +50,14 @@ impl View {
         Self::Records,
         Self::Awards,
     ];
-    fn name(self) -> &'static str {
+    fn key(self) -> &'static str {
         match self {
-            Self::World => "World",
-            Self::Country => "Country",
-            Self::Rivals => "Rivals",
-            Self::Week => "This week",
-            Self::Records => "Records",
-            Self::Awards => "Awards",
+            Self::World => "view.world",
+            Self::Country => "view.country",
+            Self::Rivals => "view.rivals",
+            Self::Week => "view.week",
+            Self::Records => "view.records",
+            Self::Awards => "view.awards",
         }
     }
 }
@@ -74,7 +74,10 @@ pub(crate) fn record_line(
         name,
         best.map_or("—".into(), format_time),
         medal.map_or("", |m| m.name()).to_uppercase(),
-        rank.map_or(String::new(), |(r, t)| format!("#{r} of {t}")),
+        rank.map_or(String::new(), |(r, t)| crate::text::tf(
+            "board.place_of",
+            &[&r, &t]
+        )),
     )
 }
 
@@ -83,13 +86,15 @@ pub(crate) fn medal_totals(medals: &[Option<crate::medals::Medal>]) -> String {
     use crate::medals::Medal;
     let count = |m| medals.iter().filter(|x| **x == Some(m)).count();
     let none = medals.iter().filter(|x| x.is_none()).count();
-    format!(
-        "{} author  ·  {} gold  ·  {} silver  ·  {} bronze  ·  {} to go",
-        count(Medal::Author),
-        count(Medal::Gold),
-        count(Medal::Silver),
-        count(Medal::Bronze),
-        none
+    crate::text::tf(
+        "board.medal_totals",
+        &[
+            &count(Medal::Author),
+            &count(Medal::Gold),
+            &count(Medal::Silver),
+            &count(Medal::Bronze),
+            &none,
+        ],
     )
 }
 
@@ -165,22 +170,26 @@ pub(crate) fn lines(standing: &Standing, view: View) -> Vec<Line> {
 pub(crate) fn footer(standing: &Standing) -> String {
     let record = standing.top.first();
     match (&standing.you, record) {
-        (Some(you), Some(record)) => format!(
-            "You #{} of {}  ·  {}  ·  record {} by {}  ·  {:+.2}",
-            you.rank,
-            standing.total,
-            format_time(you.seconds as f32),
-            format_time(record.seconds as f32),
-            record.name,
-            you.seconds - record.seconds
+        (Some(you), Some(record)) => crate::text::tf(
+            "board.you",
+            &[
+                &you.rank,
+                &standing.total,
+                &format_time(you.seconds as f32),
+                &format_time(record.seconds as f32),
+                &record.name,
+                &format!("{:+.2}", you.seconds - record.seconds),
+            ],
         ),
-        (None, Some(record)) => format!(
-            "{} on the board  ·  record {} by {}",
-            standing.total,
-            format_time(record.seconds as f32),
-            record.name
+        (None, Some(record)) => crate::text::tf(
+            "board.total",
+            &[
+                &standing.total,
+                &format_time(record.seconds as f32),
+                &record.name,
+            ],
         ),
-        _ => "Nobody has set a time here yet.".into(),
+        _ => crate::text::t("board.empty").into(),
     }
 }
 
@@ -238,7 +247,7 @@ fn setup(mut commands: Commands) {
                     BorderColor::all(LINE),
                 ))
                 .with_children(|panel| {
-                    panel.spawn(label("TODORA  /  WORLD LEADERBOARD", 12.0, AMBER));
+                    panel.spawn(crate::text::label("board.label", 12.0, AMBER));
                     panel
                         .spawn(Node {
                             justify_content: JustifyContent::SpaceBetween,
@@ -264,9 +273,15 @@ fn setup(mut commands: Commands) {
                                             },
                                             BackgroundColor(SURFACE),
                                         ))
-                                        .with_children(|tab| {
-                                            tab.spawn(label(view.name(), 15.0, TEXT));
-                                        });
+                                        .with_children(
+                                            |tab| {
+                                                tab.spawn(crate::text::label(
+                                                    view.key(),
+                                                    15.0,
+                                                    TEXT,
+                                                ));
+                                            },
+                                        );
                                     }
                                 });
                         });
@@ -282,16 +297,16 @@ fn setup(mut commands: Commands) {
                                 BackgroundColor(Color::NONE),
                             ))
                             .with_children(|row| {
-                                row.spawn((RowText(i), TextLayout::no_wrap(), label("", 17.0, TEXT)));
+                                row.spawn((
+                                    RowText(i),
+                                    TextLayout::no_wrap(),
+                                    label("", 17.0, TEXT),
+                                ));
                             });
                     }
                     panel.spawn((Note, label("", 15.0, MUTED)));
                     panel.spawn((Footer, label("", 15.0, AMBER_DIM)));
-                    panel.spawn(label(
-                        "← →  Circuit    ↑ ↓  Row    Q / E  or  LB / RB  View    A / Enter  Race ghost    X / P  Pin rival    Esc / B  Back",
-                        12.0,
-                        AMBER_DIM,
-                    ));
+                    panel.spawn(crate::text::label("board.hint", 12.0, AMBER_DIM));
                 });
         });
 }
@@ -424,7 +439,7 @@ fn drive(
     {
         let place = place.clone();
         client.ask(Ask::Ghost(place.run.clone()));
-        online.say(format!("Downloading {}'s lap…", place.name));
+        online.say(crate::text::tf("board.downloading", &[&place.name]));
         online.wanted = Some((place.run, place.name, place.rank));
     }
 }
@@ -546,7 +561,7 @@ fn draw(
         let got = |id: &str| earned.as_ref().and_then(|e| e.earned.get(id).copied());
         if let Ok(mut text) = titles.single_mut() {
             let n = all.iter().filter(|(id, _, _)| got(id).is_some()).count();
-            let wanted = format!("Awards   ·   {n} of {}", all.len());
+            let wanted = crate::text::tf("board.awards_title", &[&n, &all.len()]);
             if text.0 != wanted {
                 text.0 = wanted;
             }
@@ -567,7 +582,7 @@ fn draw(
         }
         if let Ok(mut text) = footers.single_mut() {
             let km = earned.as_ref().map_or(0.0, |e| e.metres / 1000.0);
-            let wanted = format!("{km:.1} km driven  ·  earned ones are lit");
+            let wanted = crate::text::tf("board.km", &[&format!("{km:.1}")]);
             if text.0 != wanted {
                 text.0 = wanted;
             }
@@ -593,7 +608,7 @@ fn draw(
             .saturating_sub(ROWS / 2)
             .min(all_circuits().len() - ROWS);
         if let Ok(mut text) = titles.single_mut() {
-            let wanted = format!("Records   ·   {}", mode.name());
+            let wanted = crate::text::tf("board.records_title", &[&mode.shown()]);
             if text.0 != wanted {
                 text.0 = wanted;
             }
@@ -630,13 +645,12 @@ fn draw(
     let circuit = &all_circuits()[browse.circuit];
     if let Ok(mut text) = titles.single_mut() {
         let wanted = if browse.view == View::Week {
-            format!(
-                "This week   ·   {}   ·   Regular   ·   {} left",
-                circuit.name,
-                challenge.left(super::client::unix_now())
+            crate::text::tf(
+                "board.week_title",
+                &[&circuit.name, &challenge.left(super::client::unix_now())],
             )
         } else {
-            format!("{}   ·   {}", circuit.name, mode.name())
+            format!("{}   ·   {}", circuit.name, mode.shown())
         };
         if text.0 != wanted {
             text.0 = wanted;
@@ -687,27 +701,24 @@ fn draw(
         .flatten();
     let note = if browse.view == View::Week && (!settings.online || standing.is_none()) {
         match weekly_best {
-            Some(best) => format!(
-                "Your best this week: {}    ·    D / Y  Drive it",
-                format_time(best)
-            ),
-            None => "No lap this week yet.    ·    D / Y  Drive it".into(),
+            Some(best) => crate::text::tf("board.week_best", &[&format_time(best)]),
+            None => crate::text::t("board.week_none").into(),
         }
     } else if !settings.online {
-        "Go online in Settings → Online to see the world boards.".to_string()
+        crate::text::t("board.offline_hint").to_string()
     } else if browse.view == View::Country && settings.country.is_empty() {
-        "Pick your country in Settings → Online.".into()
+        crate::text::t("board.pick_country").into()
     } else if browse.view == View::Rivals && settings.rivals.is_empty() {
-        "Pin up to five rivals with X / P on any board.".into()
+        crate::text::t("board.pin_hint").into()
     } else if let Some(b) = standing {
         let age = super::client::unix_now() - b.fetched_at;
         if age > 120 {
-            format!("Offline: as it stood {} ago.", ago(age))
+            crate::text::tf("board.offline", &[&ago(age)])
         } else {
             String::new()
         }
     } else {
-        "Loading…".into()
+        crate::text::t("board.loading").into()
     };
     if let Ok(mut text) = notes.single_mut()
         && text.0 != note
@@ -724,9 +735,9 @@ fn draw(
 
 fn ago(seconds: i64) -> String {
     match seconds {
-        s if s < 3600 => format!("{} min", s / 60),
-        s if s < 86_400 => format!("{} h", s / 3600),
-        s => format!("{} days", s / 86_400),
+        s if s < 3600 => crate::text::tf("time.minutes", &[&(s / 60)]),
+        s if s < 86_400 => crate::text::tf("time.hours", &[&(s / 3600)]),
+        s => crate::text::tf("time.days", &[&(s / 86_400)]),
     }
 }
 

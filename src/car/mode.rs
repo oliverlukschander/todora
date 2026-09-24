@@ -22,6 +22,15 @@ impl Mode {
         }
     }
 
+    /// The name shown, in the language in force.
+    pub fn shown(self) -> &'static str {
+        crate::text::t(match self {
+            Self::Beginner => "mode.beginner",
+            Self::Regular => "mode.regular",
+            Self::Pro => "mode.pro",
+        })
+    }
+
     pub fn next(self) -> Self {
         match self {
             Self::Beginner => Self::Regular,

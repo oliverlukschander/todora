@@ -44,7 +44,8 @@ The approved plan, decisions and build order are in the
 - [x] Control remapping for keyboard and pad, settings version 2 (2026-09-24).
 - [x] Title screen with an orbit of the last circuit, and a fade on circuit changes (2026-09-24).
 - [x] Translations, part 1: German, French, Spanish and Italian for the pause, title, settings, countdown, HUD, first-drive cards and lap card (2026-09-24).
-- [ ] Translations, part 2: leaderboard, replay, online, achievements, medals, circuit menu and garage.
+- [x] Translations, part 2: leaderboard, replay, online, achievements, medals, circuit menu and garage (2026-09-24).
+- [ ] Capture the German leaderboard, garage and circuit menu to check the longest strings fit (the screen was locked).
 - [ ] Have native speakers read the German, French, Spanish and Italian.
 - [ ] Online leaderboards at todora.lukschander.com.
 
