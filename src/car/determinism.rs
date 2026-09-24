@@ -109,7 +109,11 @@ fn header() -> String {
 #[test]
 fn every_lap_replays_from_its_inputs_to_the_bit_and_agrees_with_the_blessed_machine() {
     let mut rows = header();
-    for circuit in all_circuits() {
+    // In id order, so renaming a circuit (which re-sorts the menu) leaves the
+    // blessed file alone.
+    let mut circuits: Vec<_> = all_circuits().iter().collect();
+    circuits.sort_by_key(|circuit| circuit.id);
+    for circuit in circuits {
         let track = Track::new(circuit);
         let (asked, driven) = drive(&track);
         assert_eq!(

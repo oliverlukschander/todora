@@ -9,7 +9,7 @@ use super::Circuit;
 
 pub(super) const CIRCUIT: Circuit = Circuit {
     id: "spa-francorchamps",
-    name: "Spa-Francorchamps",
+    name: "Ardennes Loop",
     // As surveyed, where it used to be pushed twice away from its own mean line
     // to keep its corners from being driven straight through. See `monza`: the
     // narrower road gave every circuit its corners back.

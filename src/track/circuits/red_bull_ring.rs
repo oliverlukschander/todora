@@ -9,7 +9,7 @@ use super::Circuit;
 
 pub(super) const CIRCUIT: Circuit = Circuit {
     id: "red-bull-ring",
-    name: "Red Bull Ring",
+    name: "Styrian Bowl",
     corners: 1.0,
     lap: 502.0,
     plan_scale: 1.0,

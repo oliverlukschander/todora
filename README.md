@@ -1,6 +1,8 @@
 # Todora
 
-A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy.org/). Drive an Omarchy GT around forty scaled real circuits, with **T** for the list of them.
+A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy.org/). Drive an Omarchy GT around forty scaled circuits, with **T** for the list of them.
+
+The circuits are laid out from public GPS traces of real circuits, and each carries a name of its own that nods to where it is — Parco Reale, Ardennes Loop, Figure-Eight Hills, Styrian Bowl. Todora is not affiliated with any circuit, series or team, and uses none of their names or marks. Internally a circuit keeps the id it has always had (`monza`, `spa-francorchamps`), which boards, saved laps and the weekly challenge are keyed to, so renaming one never touches a time; the circuit search finds a circuit by either.
 
 [Download Todora 0.10.0 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.10.0/Todora.dmg) · [Release notes](docs/releases/v0.10.0.md)
 

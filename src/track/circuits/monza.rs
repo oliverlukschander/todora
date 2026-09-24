@@ -9,7 +9,7 @@ use super::Circuit;
 
 pub(super) const CIRCUIT: Circuit = Circuit {
     id: "monza",
-    name: "Monza",
+    name: "Parco Reale",
     // As surveyed. It used to be pushed three and a half times away from its own
     // mean line, because an 8 m road on a plan shrunk seven and a half times was
     // five times too wide for the land and the whole of the Rettifilo displaced

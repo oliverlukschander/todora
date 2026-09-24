@@ -180,8 +180,14 @@ pub fn week_bounds(year: i32, week: u32) -> (i64, i64) {
 /// Which circuit a week's challenge is on, as an index into [`circuits`]:
 /// a fixed shuffle of all of them, walked one a week, so no circuit comes back
 /// within as many weeks as there are circuits and every copy of the game agrees.
+///
+/// The shuffle runs over the circuits in the order of their ids, not the
+/// menu's, so renaming a circuit (which re-sorts the menu) never changes a
+/// week's challenge, and an older server still agrees with a newer game.
 pub fn challenge_circuit(year: i32, week: u32) -> usize {
     let n = all_circuits().len();
+    let mut by_id: Vec<usize> = (0..n).collect();
+    by_id.sort_by_key(|&at| all_circuits()[at].id);
     let mut order: Vec<usize> = (0..n).collect();
     let mut seed = 0x9e37_79b9_7f4a_7c15u64;
     for i in (1..n).rev() {
@@ -192,7 +198,7 @@ pub fn challenge_circuit(year: i32, week: u32) -> usize {
     }
     let (start, _) = week_bounds(year, week);
     let weeks = start.div_euclid(7 * 86_400);
-    order[weeks.rem_euclid(n as i64) as usize]
+    by_id[order[weeks.rem_euclid(n as i64) as usize]]
 }
 
 fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
@@ -371,6 +377,13 @@ mod tests {
             at += 7 * 86_400;
         }
         assert_eq!(challenge_circuit(2026, 39), challenge_circuit(2026, 39));
+        // What the game and the server have always picked, whatever the menu
+        // calls these circuits or however it sorts them.
+        let id = |week| all_circuits()[challenge_circuit(2026, week)].id;
+        assert_eq!(
+            [id(39), id(40), id(41), id(42)],
+            ["paul-ricard", "bahrain", "marina-bay", "imola"]
+        );
     }
 
     #[test]

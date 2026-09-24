@@ -103,14 +103,18 @@ pub(crate) fn all() -> Vec<(String, String, String)> {
         (
             "monaco-clean",
             "Harbour master",
-            "A lap of Monaco that counts",
+            "A lap of Harbour Streets that counts",
         ),
         (
             "suzuka-clean",
             "Figure of eight",
-            "A lap of Suzuka that counts",
+            "A lap of Figure-Eight Hills that counts",
         ),
-        ("baku-clean", "Old town", "A lap of Baku that counts"),
+        (
+            "baku-clean",
+            "Old town",
+            "A lap of Caspian Old Town that counts",
+        ),
     ]
     .into_iter()
     .map(|(id, name, what)| {

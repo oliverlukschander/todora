@@ -15,7 +15,7 @@ use super::Circuit;
 
 pub(super) const CIRCUIT: Circuit = Circuit {
     id: "silverstone",
-    name: "Silverstone",
+    name: "Airfield Classic",
     // As surveyed, and it needs nothing. Silverstone is a modern circuit laid
     // out over an airfield — medium-speed corners with room around them rather
     // than chicanes squeezed between grandstands — so shrinking it does not

@@ -61,7 +61,12 @@ impl Menu {
                 all_circuits()
                     .iter()
                     .enumerate()
-                    .filter(|(_, c)| searchable(c.name).contains(&needle))
+                    // The id too, so a circuit can be found by the place
+                    // it is modelled on as well as by the name shown.
+                    .filter(|(_, c)| {
+                        searchable(c.name).contains(&needle)
+                            || searchable(&c.id.replace('-', " ")).contains(&needle)
+                    })
                     .map(|(i, _)| i)
                     .collect()
             }
@@ -754,7 +759,11 @@ mod tests {
         let first = menu.at;
         menu.move_by(PAGE_SIZE as i32);
         assert_eq!(menu.at, first);
-        assert!(all_circuits()[first].name.to_lowercase().contains("spa"));
+        assert_eq!(
+            all_circuits()[first].id,
+            "spa-francorchamps",
+            "found by its id"
+        );
     }
 
     #[test]

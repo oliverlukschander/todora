@@ -9,7 +9,7 @@ use super::Circuit;
 
 pub(super) const CIRCUIT: Circuit = Circuit {
     id: "losail",
-    name: "Losail",
+    name: "Pearl Dunes",
     // The trace as surveyed. Turn this up until `corners_are_corners` is happy
     // and `every_circuit_carries_a_road` is not yet unhappy: the road is five
     // times too wide for the shrunk land, so a corner needs exaggerating before
