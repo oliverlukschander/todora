@@ -53,7 +53,7 @@ cat > "$OUT/$BIN.desktop" <<DESKTOP
 Type=Application
 Version=1.5
 Name=$NAME
-Comment=A 3rd-person arcade racer around forty scaled real circuits
+Comment=A 3rd-person arcade racer around forty scaled circuits
 Exec="$PWD/$OUT/$BIN"
 Path=$PWD/$OUT
 Icon=$PWD/$ICON_PNG
@@ -81,7 +81,7 @@ if [[ "$INSTALL" -eq 1 ]]; then
 Type=Application
 Version=1.5
 Name=$NAME
-Comment=A 3rd-person arcade racer around forty scaled real circuits
+Comment=A 3rd-person arcade racer around forty scaled circuits
 Exec="$APPDIR/$BIN"
 Path=$APPDIR
 Icon=todora
