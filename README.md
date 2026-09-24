@@ -1,6 +1,6 @@
 # Todora
 
-A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy.org/). Drive an Omarchy GT around forty scaled circuits, with **T** for the list of them.
+A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy.org/). Drive the Omarchy GT #95 around forty scaled circuits, with **T** for the list of them.
 
 The circuits are laid out from public GPS traces of real circuits, and each carries a name of its own that nods to where it is — Parco Reale, Ardennes Loop, Figure-Eight Hills, Styrian Bowl. Todora is not affiliated with any circuit, series or team, and uses none of their names or marks. Internally a circuit keeps the id it has always had (`monza`, `spa-francorchamps`), which boards, saved laps and the weekly challenge are keyed to, so renaming one never touches a time; the circuit search finds a circuit by either.
 
@@ -11,7 +11,7 @@ adds shared practice for two registered Apple Silicon Macs. It is separate from
 the stable release and requires each tester’s Mac in the development profile.
 [Setup and controls](docs/testing/multiplayer.md).
 
-The default garage choice is **OMARCHY GT #95**, a Blender-built recreation of the car David Heinemeier Hansson and his co-drivers drove to the **2014 Le Mans GTE Am class win**. It has the pale-blue and orange livery, yellow endurance lights, animated race wheels, rear wing and diffuser. Clubman and Express remain handling and colour variants of the shared model. [Model, reference sources and rebuild instructions](docs/models/omarchy-gt-95.md).
+The default garage choice is the **OMARCHY GT #95**, an invented endurance GT built in Blender: charcoal with Todora's lime, twin hexagonal intakes with yellow endurance lamps, a full-width tail light, animated race wheels, rear wing and diffuser, **OMARCHY RACING** on the wing and **DHH** on the plate. It is modelled on no real car and carries no real makers or sponsors. Clubman and Express remain handling and colour variants of the shared model. [Model and rebuild instructions](docs/models/omarchy-gt-95.md).
 
 The GT measures about **1.06 game units long and 0.45 across the body**, with matching wheel contacts and ghost models. Every road is **3.6 m wide** including kerbs (previously 3.3 m), with 2.94 m of asphalt. Its aerodynamic grip contribution is twice the earlier estate car's, with the garage variants retaining their different setups.
 

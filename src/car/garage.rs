@@ -119,8 +119,8 @@ impl Spec {
             Spec::Tourer => Sheet {
                 name: "OMARCHY GT #95",
                 handling: TOURER,
-                // The pale blue of the 2014 Le Mans GTE Am winner.
-                paint: Color::srgb(0.70, 0.84, 0.88),
+                // Charcoal, under Todora's lime.
+                paint: Color::srgb(0.10, 0.11, 0.12),
                 stars: Stars {
                     handling: 3,
                     acceleration: 3,
