@@ -4,7 +4,7 @@ A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy
 
 The circuits are laid out from public GPS traces of real circuits, and each carries a name of its own that nods to where it is — Parco Reale, Ardennes Loop, Figure-Eight Hills, Styrian Bowl. Todora is not affiliated with any circuit, series or team, and uses none of their names or marks. Internally a circuit keeps the id it has always had (`monza`, `spa-francorchamps`), which boards, saved laps and the weekly challenge are keyed to, so renaming one never touches a time; the circuit search finds a circuit by either.
 
-[Download Todora 0.11.0 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.11.0/Todora.dmg) · [for Linux x86-64](https://github.com/oliverlukschander/todora/releases/download/v0.11.0/Todora-linux-x86_64.tar.gz) · [Release notes](docs/releases/v0.11.0.md)
+[Download Todora 0.11.1 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.11.1/Todora.dmg) · [for Linux x86-64](https://github.com/oliverlukschander/todora/releases/download/v0.11.1/Todora-linux-x86_64.tar.gz) · [Release notes](docs/releases/v0.11.1.md)
 
 The separate **Todora-Multiplayer.dmg** in the same release adds Game Center
 shared practice for two registered Apple Silicon Macs. It requires each
