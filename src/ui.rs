@@ -120,6 +120,10 @@ pub(crate) fn label(value: impl Into<String>, size: f32, color: Color) -> impl B
 pub(crate) struct Navigation {
     direction: IVec2,
     repeat_at: f64,
+    /// Which keys were pressed while this was being read. A key still held
+    /// from driving (W for the throttle, an arrow to steer) moves nothing
+    /// until it is let go and pressed again.
+    armed: u8,
 }
 
 impl Navigation {
@@ -197,9 +201,24 @@ impl Navigation {
         ];
         let mut digital = Vec2::ZERO;
         let mut tapped = false;
-        for (arrow, letter, button, direction) in directions {
-            let held = keys.pressed(arrow) || (letters && keys.pressed(letter));
-            let fresh = keys.just_pressed(arrow) || (letters && keys.just_pressed(letter));
+        let mut armed = |key: KeyCode, bit: u8| {
+            if keys.just_pressed(key) {
+                self.armed |= 1 << bit;
+            } else if !keys.pressed(key) {
+                self.armed &= !(1 << bit);
+            }
+            keys.pressed(key) && self.armed & (1 << bit) != 0
+        };
+        let mut keyed = [(false, false); 4];
+        for (i, (arrow, letter, _, _)) in directions.iter().enumerate() {
+            let bit = i as u8 * 2;
+            let letter_held = armed(*letter, bit + 1);
+            keyed[i] = (
+                armed(*arrow, bit) || (letters && letter_held),
+                keys.just_pressed(*arrow) || (letters && keys.just_pressed(*letter)),
+            );
+        }
+        for ((_, _, button, direction), (held, fresh)) in directions.into_iter().zip(keyed) {
             if held || pads.iter().any(|pad| pad.pressed(button)) {
                 digital += direction;
             }
