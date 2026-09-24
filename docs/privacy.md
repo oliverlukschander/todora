@@ -4,8 +4,8 @@ Todora works offline and sends nothing anywhere until you choose to put your
 laps on the world boards. This page says what happens once you do.
 
 **Who.** The boards are run by the maker of Todora on a server in the EU
-(Hetzner, Germany or Finland), at `todora.lukschander.com`. Contact:
-[contact address — fill in before going live].
+(Hetzner, Falkenstein, Germany), at `todora.lukschander.com`. Responsible for
+the data: Oliver Lukschander, [oliver@lukschander.com](mailto:oliver@lukschander.com).
 
 **What is stored, and why.**
 

@@ -27,10 +27,9 @@ The approved plan, decisions and build order are in the
 - [x] Race a downloaded ghost beside your own, with its delta and world-record purple (2026-09-24).
 - [x] Deploy script (tested against local Docker, amd64 and arm64), reverse-proxy
   examples and a privacy note (2026-09-24).
-- [ ] Before going live: fill in the contact address in `docs/privacy.md`, point
-  DNS for todora.lukschander.com at the Hetzner host, add the Caddy or nginx site,
-  run `server/deploy/deploy.sh root@host` (ARCH=arm64 on CAX), and check
-  `/v1/health` over HTTPS.
+- [x] Go live: contact in `docs/privacy.md`, DNS for todora.lukschander.com,
+  deployed behind the host's Traefik, `/v1/health` answering over HTTPS
+  (2026-09-24).
 - [x] Records view: every circuit's best, medal and world place, with medal totals (2026-09-24).
 - [x] Synthesised engine note with its own volume (2026-09-24). Listen to `dist/engine.wav` and tune.
 - [x] Accessibility: colour-blind palette with words, high contrast, reduced motion, tap-to-hold pedals, Beginner assists (2026-09-24).
@@ -47,7 +46,7 @@ The approved plan, decisions and build order are in the
 - [x] Translations, part 2: leaderboard, replay, online, achievements, medals, circuit menu and garage (2026-09-24).
 - [x] Capture the German leaderboard, garage and circuit menu to check the longest strings fit (2026-09-24).
 - [ ] Have native speakers read the German, French, Spanish and Italian.
-- [ ] Online leaderboards at todora.lukschander.com.
+- [x] Online leaderboards at todora.lukschander.com (live 2026-09-24).
 
 ## Game Center multiplayer
 
