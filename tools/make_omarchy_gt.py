@@ -24,6 +24,13 @@ ROOT = Path(__file__).resolve().parents[1]
 GLB = ROOT / 'assets/models/omarchy_gt_95.glb'
 BLEND = ROOT / 'art/models/omarchy_gt_95.blend'
 PREVIEW = ROOT / 'art/models/omarchy_gt_95.png'
+COCKPIT_GLB = ROOT / 'assets/models/omarchy_gt_95_cockpit.glb'
+
+# The glasshouse, kept as a mesh of its own so the cockpit view can hide it
+# and look out past the bonnet from inside.
+CABIN_PARTS = ('Fastback cabin', 'Front windscreen', 'Rear windscreen', 'Window seal', 'Side glazing',
+               'Accent window surround', 'Window black seal', 'B pillar', 'Accent sunstrip',
+               'Windscreen banner', 'Windscreen wiper', 'Roof identity', 'Danish', 'Roof aerial', 'Roof camera')
 
 
 def surface(name, vertices, faces, material, parent, smooth=False):
@@ -362,22 +369,101 @@ def fit_details(root):
         obj.data.update()
 
 
+def join(parts, name):
+    """Join `parts` into one mesh called `name`, its transform baked in."""
+    bpy.ops.object.select_all(action='DESELECT')
+    for obj in parts:
+        obj.select_set(True)
+    bpy.context.view_layer.objects.active = parts[0]
+    bpy.ops.object.join()
+    obj = bpy.context.object
+    obj.name = name
+    obj.data.name = name
+    # Joining retains the active object's transform; bake it into the mesh,
+    # leaving all four wheel origins exactly at the physics contact points.
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    return obj
+
+
 def join_render_parts(root):
-    """One multi-material mesh for the body and one per rotating wheel."""
+    """One mesh for the body, one for the glasshouse, one per rotating wheel."""
     hubs = [obj for obj in root.children if obj.name in ['WheelFL', 'WheelFR', 'WheelRL', 'WheelRR']]
-    for parent in [root, *hubs]:
-        parts = [obj for obj in parent.children if obj.type == 'MESH']
-        bpy.ops.object.select_all(action='DESELECT')
-        for obj in parts:
-            obj.select_set(True)
-        bpy.context.view_layer.objects.active = parts[0]
-        bpy.ops.object.join()
-        obj = bpy.context.object
-        obj.name = 'GT bodywork' if parent == root else 'Racing slick and rim ' + parent.name[-2:]
-        obj.data.name = obj.name
-        # Joining retains the active object's transform; bake it into the mesh,
-        # leaving all four wheel origins exactly at the physics contact points.
-        bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    parts = [obj for obj in root.children if obj.type == 'MESH']
+    join([obj for obj in parts if obj.name.startswith(CABIN_PARTS)], 'GT cabin')
+    join([obj for obj in root.children if obj.type == 'MESH' and obj.name != 'GT cabin'], 'GT bodywork')
+    for hub in hubs:
+        join([obj for obj in hub.children if obj.type == 'MESH'], 'Racing slick and rim ' + hub.name[-2:])
+
+
+def cockpit(m):
+    """The inside, seen from the driver's seat on the left: a carbon tub and
+    dashboard with a display and shift lights, the steering wheel (turned by
+    the game about its column, the empty's local Z in glTF), A-pillars, a roof
+    liner and a roll cage. Only the cockpit camera shows it."""
+    root = bpy.data.objects.new('Omarchy GT 95 cockpit', None)
+    bpy.context.collection.objects.link(root)
+    x = -.19  # the driver's centre line
+    panel('Tub floor', [(-.40, .27, .432), (.40, .27, .432), (.40, -.62, .432), (-.40, -.62, .432)], m['inside'], root)
+    for side in [-1, 1]:
+        mesh.add_box('Door sill', (.035, .86, .05), (side*.385, -.17, .455), m['inside'], root, bevel=.008)
+        panel('Door card', [(side*.402, .24, .432), (side*.402, -.50, .432), (side*.402, -.50, .478), (side*.402, .24, .478)], m['alcantara'], root)
+    # Dashboard, the cowl over the display, and the display with its shift lights.
+    mesh.add_box('Dashboard', (.80, .13, .07), (0, .205, .447), m['inside'], root, bevel=.02)
+    mesh.add_box('Instrument cowl', (.24, .09, .035), (x, .16, .497), m['inside'], root, bevel=.012)
+    mesh.add_box('Dash display', (.15, .006, .052), (x, .118, .478), m['screen'], root, bevel=.004)
+    for k, colour in enumerate(['accent', 'accent', 'accent', 'shift_red', 'shift_red']):
+        mesh.add_box('Shift light', (.014, .006, .009), (x - .05 + k*.025, .117, .509), m[colour], root, bevel=.002)
+    mesh.add_box('Centre console', (.12, .30, .05), (0, .05, .455), m['inside'], root, bevel=.015)
+    for k in range(4):
+        mesh.add_box('Console switch', (.016, .016, .006), (-.03 + (k % 2)*.06, .12 - (k // 2)*.05, .482), m['accent' if k == 0 else 'black'], root, bevel=.003)
+    tube('Steering column', [(x, .16, .468), (x, .085, .488)], .010, m['black'], root)
+    # A-pillars along the windscreen's edges, the header over it, a mirror.
+    for side in [-1, 1]:
+        tube('A pillar', [(side*.392, .262, .423), (side*.378, .150, .530), (side*.357, .030, .640), (side*.346, -.017, .668)], .018, m['black'], root)
+    mesh.add_box('Windscreen header', (.72, .06, .03), (0, -.035, .676), m['inside'], root, bevel=.01)
+    panel('Roof liner', [(-.36, -.04, .694), (.36, -.04, .694), (.36, -.48, .694), (-.36, -.48, .694)], m['alcantara'], root)
+    tube('Mirror stem', [(0, -.035, .662), (0, -.02, .640)], .004, m['black'], root)
+    mesh.add_box('Rear-view mirror', (.11, .012, .032), (0, -.012, .628), m['black'], root, bevel=.008)
+    mesh.add_box('Mirror glass', (.098, .002, .024), (0, -.005, .628), m['glass'], root, bevel=.004)
+    # The roll cage: along the A-pillars and the roof, the main hoop behind the
+    # seats, a bar across the dash and door bars.
+    for side in [-1, 1]:
+        tube('Cage A bar', [(side*.36, .22, .438), (side*.345, .10, .56), (side*.325, -.02, .652), (side*.32, -.46, .668)], .007, m['cage'], root)
+        tube('Cage hoop leg', [(side*.345, -.46, .438), (side*.32, -.46, .668)], .012, m['cage'], root)
+        tube('Cage door bar', [(side*.375, .20, .452), (side*.365, -.44, .47)], .010, m['cage'], root)
+    tube('Cage hoop top', [(-.32, -.46, .668), (.32, -.46, .668)], .012, m['cage'], root)
+    tube('Cage dash bar', [(-.36, .22, .438), (.36, .22, .438)], .010, m['cage'], root)
+    tube('Cage diagonal', [(-.32, -.46, .668), (.345, -.46, .438)], .010, m['cage'], root)
+    tube('Cage roof bar', [(-.325, -.02, .652), (.32, -.46, .668)], .009, m['cage'], root)
+    # The steering wheel: a flat-bottomed rim, three spokes and a hub with a
+    # small screen, all in the empty's XZ plane facing the driver.
+    wheel = bpy.data.objects.new('SteeringWheel', None)
+    bpy.context.collection.objects.link(wheel)
+    wheel.parent = root
+    wheel.location = (x, .085, .488)
+    rim = []
+    for k in range(41):
+        a = math.tau * k / 40
+        rx, rz = .062 * math.cos(a), .058 * math.sin(a)
+        rim.append((rx, 0, max(rz, -.042)))
+    tube('Wheel rim', rim, .009, m['alcantara'], wheel)
+    for end in [(-.060, 0, .0), (.060, 0, .0), (0, 0, -.042)]:
+        tube('Wheel spoke', [(0, 0, 0), end], .008, m['inside'], wheel)
+    mesh.add_box('Wheel hub', (.062, .02, .042), (0, .004, -.004), m['inside'], wheel, bevel=.008)
+    mesh.add_box('Wheel screen', (.045, .003, .022), (0, -.007, .004), m['screen'], wheel, bevel=.002)
+    for k in range(3):
+        mesh.add_box('Wheel light', (.008, .003, .005), (-.012 + k*.012, -.007, .021), m['accent'], wheel, bevel=.001)
+    for side in [-1, 1]:
+        mesh.add_box('Wheel button', (.010, .004, .010), (side*.024, -.012, -.015), m['accent' if side < 0 else 'shift_red'], wheel, bevel=.003)
+        mesh.add_box('Shift paddle', (.026, .006, .040), (side*.052, .016, .010), m['inside'], wheel, bevel=.004)
+    for obj in root.children_recursive:
+        if obj.type == 'MESH':
+            for mat in obj.data.materials:
+                if mat is not None:
+                    mat.use_backface_culling = False
+    join([obj for obj in root.children if obj.type == 'MESH'], 'Cockpit')
+    join([obj for obj in wheel.children if obj.type == 'MESH'], 'Steering wheel')
+    return root
 
 
 def studio():
@@ -444,6 +530,17 @@ def main():
     GLB.parent.mkdir(parents=True,exist_ok=True)
     mesh.GLB=GLB
     mesh.export_car(root)
+    m['alcantara']=mesh.principled('Alcantara',base=(.003,.003,.004,1),roughness=.95)
+    m['cage']=mesh.principled('Roll cage',base=(.10,.11,.12,1),metallic=.5,roughness=.4)
+    m['inside']=mesh.principled('Cockpit carbon',base=(.004,.005,.006,1),metallic=.2,roughness=.45)
+    m['screen']=mesh.principled('Dash screen',base=(.004,.006,.008,1),roughness=.2,emission=(.02,.05,.03,1),emission_strength=1)
+    m['shift_red']=mesh.principled('Shift red',base=(.8,.02,.02,1),roughness=.3,emission=(1,.02,.02,1),emission_strength=1)
+    inside=cockpit(m)
+    mesh.GLB=COCKPIT_GLB
+    mesh.export_car(inside)
+    # The studio renders are of the outside.
+    for obj in [inside,*inside.children_recursive]:
+        obj.hide_render=True
     studio()
     bpy.context.preferences.filepaths.save_version=0
     bpy.ops.wm.save_as_mainfile(filepath=str(BLEND))
@@ -451,7 +548,7 @@ def main():
         bpy.context.scene.camera=bpy.data.objects[name]
         bpy.context.scene.render.filepath=str(path)
         bpy.ops.render.render(write_still=True)
-    print(f'Wrote {BLEND}, {GLB} and {PREVIEW}')
+    print(f'Wrote {BLEND}, {GLB}, {COCKPIT_GLB} and {PREVIEW}')
 
 
 if __name__=='__main__':

@@ -87,13 +87,22 @@ fn zoom(scroll: Res<AccumulatedMouseScroll>, mut cameras: Query<&mut FollowCam>)
     }
 }
 
-/// The close chase camera's boom, as a share of the far one's.
-const NEAR: f32 = 0.68;
-/// The bonnet camera: forward of the car's centre, above it, and how far
-/// down the road it looks.
-const BONNET_FORWARD: f32 = 0.22;
-const BONNET_UP: f32 = 0.34;
-const BONNET_LOOK: f32 = 12.0;
+/// The driver's eye in the car model's own coordinates (glTF: +Y up, −Z
+/// forward), from `tools/make_omarchy_gt.py`: the left seat, just under the
+/// roof liner, behind the steering wheel.
+const COCKPIT_EYE: Vec3 = Vec3::new(-0.19, 0.60, 0.22);
+/// Where the driver looks, in the same coordinates: down the road, a touch
+/// below level, which puts the wheel and the dash in the bottom of the frame.
+const COCKPIT_LOOK: Vec3 = Vec3::new(0.0, -0.10, -1.0);
+/// The near plane in the cockpit, where the wheel is 10 cm from the eye, and
+/// on the bonnet, which is closer still; the chase view keeps Bevy's 10 cm.
+const COCKPIT_NEAR: f32 = 0.01;
+const USUAL_NEAR: f32 = 0.1;
+/// The bonnet camera, in the car model's own coordinates like the cockpit's:
+/// just above the bonnet between the front wheels, where a real car's is
+/// about a metre off the road, looking down it so the nose is in frame.
+const BONNET_EYE: Vec3 = Vec3::new(0.0, 0.56, -0.50);
+const BONNET_LOOK: Vec3 = Vec3::new(0.0, -0.05, -1.0);
 
 /// V, or the pad's D-pad up, steps through the camera views.
 fn switch_view(
@@ -111,11 +120,22 @@ fn switch_view(
     }
 }
 
+/// The driver's eye, the way they look and which way is up, for a car at `car`.
+fn cockpit(car: &Transform) -> (Vec3, Vec3, Vec3) {
+    (
+        car.transform_point(COCKPIT_EYE),
+        car.rotation * COCKPIT_LOOK.normalize(),
+        car.rotation * Vec3::Y,
+    )
+}
+
 /// Where the bonnet camera is and what it looks at, for a car at `car`.
-fn bonnet(car: &Transform) -> (Vec3, Vec3) {
-    let ahead = level(*car.forward());
-    let eye = car.translation + ahead * BONNET_FORWARD + Vec3::Y * BONNET_UP;
-    (eye, eye + ahead * BONNET_LOOK - Vec3::Y * 0.4)
+fn bonnet(car: &Transform) -> (Vec3, Vec3, Vec3) {
+    (
+        car.transform_point(BONNET_EYE),
+        car.rotation * BONNET_LOOK.normalize(),
+        car.rotation * Vec3::Y,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -126,7 +146,7 @@ fn follow(
     track: Res<Track>,
     settings: Option<Res<crate::settings::Settings>>,
     cars: Query<(&Car, &Transform), Without<FollowCam>>,
-    mut cameras: Query<(&FollowCam, &mut Transform), Without<Car>>,
+    mut cameras: Query<(&FollowCam, &mut Transform, &mut Projection), Without<Car>>,
 ) {
     // The car has been put back on the grid, which is somewhere else — and on a
     // switch, somewhere else entirely. Chasing it there means a second of flying
@@ -139,23 +159,37 @@ fn follow(
     let Ok((state, car)) = cars.single() else {
         return;
     };
-    let Ok((follow, mut camera)) = cameras.single_mut() else {
+    let Ok((follow, mut camera, mut projection)) = cameras.single_mut() else {
         return;
     };
     let dt = time.delta_secs();
     let view = settings.map_or(crate::settings::CameraView::Far, |s| s.camera);
-    if view == crate::settings::CameraView::Bonnet {
-        // Rigid on the car, level with the road ahead; nothing to lag or clear.
-        let (eye, look) = bonnet(car);
+    let near = if view != crate::settings::CameraView::Far {
+        COCKPIT_NEAR
+    } else {
+        USUAL_NEAR
+    };
+    if let Projection::Perspective(perspective) = projection.as_mut()
+        && perspective.near != near
+    {
+        perspective.near = near;
+    }
+    if view == crate::settings::CameraView::Cockpit {
+        // In the seat: the car's pitch and roll are the driver's.
+        let (eye, look, up) = cockpit(car);
         camera.translation = eye;
-        camera.look_at(look, Vec3::Y);
+        camera.look_to(look, up);
         return;
     }
-    let zoom = if view == crate::settings::CameraView::Near {
-        follow.zoom * NEAR
-    } else {
-        follow.zoom
-    };
+    if view == crate::settings::CameraView::Bonnet {
+        // Rigid on the car, pitching and rolling with it so the bonnet stays
+        // where it is in the frame; nothing to lag or clear.
+        let (eye, look, up) = bonnet(car);
+        camera.translation = eye;
+        camera.look_to(look, up);
+        return;
+    }
+    let zoom = follow.zoom;
     // The car lies along the slope; the camera must not. Hanging the boom off
     // the pitched nose lifts it a metre and tilts it ten degrees steeper on a
     // descent, which leaves the driver looking at the roof with the corner
@@ -224,6 +258,22 @@ fn clearance(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Both on-board cameras ride inside the car's own length and above its
+    /// wheels, and look down the road it is pointing along.
+    #[test]
+    fn the_on_board_cameras_sit_in_the_car_and_look_ahead() {
+        let car = Transform::from_translation(Vec3::new(3.0, 1.0, -2.0))
+            .with_rotation(Quat::from_rotation_y(0.7))
+            .with_scale(Vec3::splat(crate::car::SCALE));
+        for (eye, look, up) in [cockpit(&car), bonnet(&car)] {
+            let local = car.compute_affine().inverse().transform_point3(eye);
+            assert!(local.z.abs() < 1.25 && local.x.abs() < 0.5, "{local}");
+            assert!((0.45..0.72).contains(&local.y), "{local}");
+            assert!(look.dot(*car.forward()) > 0.9);
+            assert!(up.dot(Vec3::Y) > 0.99);
+        }
+    }
 
     /// Where the camera ends up with the car at station `i`, facing down the
     /// road, with the boom `stretch` times its resting length the way speed

@@ -6,10 +6,12 @@ The livery is the pale blue and orange DHH raced in at Le Mans in 2014, so he ca
 
 Clubman and Express use the same model with their own handling and body colours. The accent, lettering, carbon parts and lights keep their authored materials when the body colour changes.
 
+The **cockpit** is a second model, `assets/models/omarchy_gt_95_cockpit.glb`, from the same generator: a carbon tub and dashboard with a display, shift lights and switches, a flat-bottomed steering wheel with its own screen and paddles on the `SteeringWheel` node (the game turns it about its local Z, 4.8 times the front wheels' angle), A-pillars, a roof liner, a mirror and a roll cage, with the driver on the left. The car's glasshouse is exported as a mesh of its own, `GT cabin`, which the game hides in the cockpit view so the driver sees out over the bonnet.
+
 ## Assets and rebuilding
 
 - Editable scene: `art/models/omarchy_gt_95.blend`
-- Game asset: `assets/models/omarchy_gt_95.glb`
+- Game asset: `assets/models/omarchy_gt_95.glb`, and the cockpit `assets/models/omarchy_gt_95_cockpit.glb`
 - Studio preview: `art/models/omarchy_gt_95.png`
 - Generator: `tools/make_omarchy_gt.py`
 

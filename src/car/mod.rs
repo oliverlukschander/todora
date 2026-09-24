@@ -32,6 +32,11 @@ pub(crate) use physics::{
 pub(crate) use setup::Setup;
 
 pub(crate) const MODEL: &str = "models/omarchy_gt_95.glb";
+/// The inside of the car, seen only from the cockpit camera.
+const COCKPIT_MODEL: &str = "models/omarchy_gt_95_cockpit.glb";
+/// Turns of the steering wheel per turn of the front wheels: a race car's
+/// quick rack, about 110° of wheel at full lock.
+const STEERING_RATIO: f32 = 4.8;
 /// The engine steps at this rate whatever the frame rate, so the car handles
 /// the same at 30 frames a second as at 144. Bevy carries leftover frame time
 /// into the next frame instead of using a shorter final step.
@@ -108,7 +113,16 @@ impl Plugin for CarPlugin {
                     .after(TrackSet),
             )
             .add_systems(FixedUpdate, drive.in_set(DriveSet))
-            .add_systems(Update, (turn_wheels, lean_body, repaint));
+            .add_systems(
+                Update,
+                (
+                    turn_wheels,
+                    lean_body,
+                    repaint,
+                    cockpit_view,
+                    turn_steering_wheel,
+                ),
+            );
     }
 }
 
@@ -143,8 +157,118 @@ fn setup(
                 WorldAssetRoot(asset_server.load(GltfAssetLabel::Scene(0).from_asset(MODEL))),
             ))
             .observe(attach_wheels)
-            .observe(find_the_bodywork);
+            .observe(find_the_bodywork)
+            .observe(find_the_cabin);
+            // On the car rather than the body, so it stays still in front of
+            // the cockpit camera while the body leans on its springs.
+            car.spawn((
+                Cockpit,
+                Transform::IDENTITY,
+                Visibility::Hidden,
+                WorldAssetRoot(
+                    asset_server.load(GltfAssetLabel::Scene(0).from_asset(COCKPIT_MODEL)),
+                ),
+            ))
+            .observe(find_the_steering_wheel);
         });
+}
+
+/// The inside of the player's car.
+#[derive(Component)]
+struct Cockpit;
+
+/// The player's glasshouse, hidden from the cockpit so the driver looks out
+/// through the windscreen's opening at the bonnet.
+#[derive(Component)]
+struct Cabin;
+
+/// The steering wheel, turned about its column.
+#[derive(Component)]
+struct SteeringWheel;
+
+fn find_the_cabin(
+    ready: On<WorldInstanceReady>,
+    mut commands: Commands,
+    children: Query<&Children>,
+    names: Query<&Name>,
+) {
+    for entity in children.iter_descendants(ready.entity) {
+        if names
+            .get(entity)
+            .is_ok_and(|name| name.as_str() == "GT cabin")
+        {
+            commands.entity(entity).insert(Cabin);
+        }
+    }
+}
+
+/// Find the wheel, and make the inside matte: with no shadows the sun reaches
+/// under the roof, and the sheen it puts on dark carbon turns it grey.
+fn find_the_steering_wheel(
+    ready: On<WorldInstanceReady>,
+    mut commands: Commands,
+    children: Query<&Children>,
+    names: Query<&Name>,
+    surfaces: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for entity in children.iter_descendants(ready.entity) {
+        if names
+            .get(entity)
+            .is_ok_and(|name| name.as_str() == "SteeringWheel")
+        {
+            commands.entity(entity).insert(SteeringWheel);
+        }
+        if let Ok(surface) = surfaces.get(entity)
+            && let Some(mut material) = materials.get_mut(&surface.0)
+        {
+            material.metallic = 0.0;
+            material.perceptual_roughness = 1.0;
+            material.reflectance = 0.0;
+        }
+    }
+}
+
+/// The cockpit shows, and the glasshouse hides, only while the cockpit camera
+/// is riding in the car: not on the title's orbit or in a replay.
+fn cockpit_view(
+    settings: Option<Res<crate::settings::Settings>>,
+    halt: Option<Res<crate::pause::Halt>>,
+    mut cockpits: Query<&mut Visibility, (With<Cockpit>, Without<Cabin>)>,
+    mut cabins: Query<&mut Visibility, (With<Cabin>, Without<Cockpit>)>,
+) {
+    let inside = settings.is_some_and(|s| s.camera == crate::settings::CameraView::Cockpit)
+        && !halt
+            .is_some_and(|h| matches!(*h, crate::pause::Halt::Replay | crate::pause::Halt::Title));
+    let (cockpit, cabin) = if inside {
+        (Visibility::Inherited, Visibility::Hidden)
+    } else {
+        (Visibility::Hidden, Visibility::Inherited)
+    };
+    for mut visibility in &mut cockpits {
+        visibility.set_if_neq(cockpit);
+    }
+    for mut visibility in &mut cabins {
+        visibility.set_if_neq(cabin);
+    }
+}
+
+/// The wheel in the driver's hands follows the front wheels, about the column
+/// (the node's own Z, pointing back at the driver): left lock turns it
+/// anticlockwise as the driver sees it.
+fn turn_steering_wheel(
+    cars: Query<&Car, With<Player>>,
+    mut wheels: Query<&mut Transform, With<SteeringWheel>>,
+) {
+    let Ok(car) = cars.single() else {
+        return;
+    };
+    let turned = Quat::from_rotation_z(car.steer_angle * STEERING_RATIO);
+    for mut transform in &mut wheels {
+        if transform.rotation != turned {
+            transform.rotation = turned;
+        }
+    }
 }
 
 fn attach_wheels(

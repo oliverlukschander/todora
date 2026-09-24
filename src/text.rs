@@ -359,7 +359,7 @@ pub(crate) const TABLE: &[Entry] = &[
     ("value.waiting", ["Press a key or button…  (Esc cancels)", "Taste drücken…  (Esc bricht ab)", "Appuyez sur une touche…  (Échap annule)", "Pulsa una tecla o botón…  (Esc cancela)", "Premi un tasto…  (Esc annulla)"]),
     ("value.automatic", ["Automatic", "Automatisch", "Automatique", "Automático", "Automatico"]),
     ("camera.chase", ["Chase", "Verfolger", "Poursuite", "Persecución", "Inseguimento"]),
-    ("camera.near", ["Chase, close", "Verfolger, nah", "Poursuite, proche", "Persecución, cerca", "Inseguimento, vicino"]),
+    ("camera.cockpit", ["Cockpit", "Cockpit", "Habitacle", "Cabina", "Abitacolo"]),
     ("camera.bonnet", ["Bonnet", "Motorhaube", "Capot", "Capó", "Cofano"]),
     ("act.throttle", ["Throttle", "Gas", "Accélérateur", "Acelerador", "Acceleratore"]),
     ("act.brake", ["Brake / reverse", "Bremse / rückwärts", "Frein / marche arrière", "Freno / marcha atrás", "Freno / retromarcia"]),

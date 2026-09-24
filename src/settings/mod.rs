@@ -44,23 +44,25 @@ pub(crate) enum Units {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum CameraView {
-    /// The chase camera as it has always been.
+    /// The chase camera, zoomed with the scroll wheel. A settings file from
+    /// before the close chase was folded into the zoom reads as this.
     #[default]
+    #[serde(alias = "near")]
     Far,
-    /// The chase camera, closer and lower.
-    Near,
     /// On the bonnet, looking down the road.
     Bonnet,
+    /// From the driver's seat, with the dashboard, wheel and cage around it.
+    Cockpit,
 }
 
 impl CameraView {
-    pub(crate) const ALL: [Self; 3] = [Self::Far, Self::Near, Self::Bonnet];
+    pub(crate) const ALL: [Self; 3] = [Self::Far, Self::Bonnet, Self::Cockpit];
 
     pub(crate) fn name(self) -> &'static str {
         crate::text::t(match self {
             Self::Far => "camera.chase",
-            Self::Near => "camera.near",
             Self::Bonnet => "camera.bonnet",
+            Self::Cockpit => "camera.cockpit",
         })
     }
 
@@ -524,6 +526,16 @@ fn write(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_old_close_chase_reads_as_the_chase() {
+        let old = Settings::parse(r#"{"version":2,"camera":"near"}"#);
+        assert_eq!(old.camera, CameraView::Far);
+        assert_eq!(
+            Settings::parse(r#"{"version":2,"camera":"cockpit"}"#).camera,
+            CameraView::Cockpit
+        );
+    }
 
     #[test]
     fn settings_round_trip() {
