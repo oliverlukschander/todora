@@ -390,7 +390,7 @@ fn draw(
     mut details: Query<(&mut Text, &mut TextColor), (With<Detail>, Without<Headline>)>,
     mut spans: Query<
         (&SectorSpan, &mut TextSpan, &mut TextColor),
-        (Without<Headline>, Without<Detail>),
+        (Without<Headline>, Without<Detail>, Without<MedalLine>),
     >,
     mut medals: Query<
         (&mut Text, &mut TextColor),

@@ -143,6 +143,39 @@ fn quit(keys: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppExit>) {
 mod tests {
     use super::*;
 
+    /// Two queries in one system that could reach the same component panic
+    /// when the system is first set up, which is at the game's first frame, so
+    /// every system of the whole game is set up here without running any.
+    #[test]
+    fn no_system_asks_for_the_same_component_twice() {
+        let mut app = App::new();
+        app.add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: None,
+                    exit_condition: bevy::window::ExitCondition::DontExit,
+                    ..default()
+                })
+                .set(bevy::render::RenderPlugin {
+                    render_creation: bevy::render::settings::WgpuSettings {
+                        backends: None,
+                        ..default()
+                    }
+                    .into(),
+                    ..default()
+                })
+                .disable::<bevy::winit::WinitPlugin>(),
+        )
+        .add_plugins(GamePlugin);
+        let world = app.world_mut();
+        let mut schedules = world
+            .remove_resource::<bevy::ecs::schedule::Schedules>()
+            .expect("the schedules");
+        for (_, schedule) in schedules.iter_mut() {
+            schedule.initialize(world).expect("the schedule builds");
+        }
+    }
+
     #[test]
     fn quit_shortcut_requires_the_modifier() {
         let mut app = App::new();
