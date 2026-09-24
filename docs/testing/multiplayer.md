@@ -106,7 +106,9 @@ interactive Terminal, with the login keychain unlocked, succeeded.
 
 ## Multiplayer beta on 2026-09-22
 
-The test release is `v0.11.0-beta.1`, with app version `0.11.0`.
+The test release was `v0.11.0-beta.1`; since 24 September 2026 the multiplayer
+build ships as **Todora-Multiplayer.dmg** in the [0.11.0 release](https://github.com/oliverlukschander/todora/releases/tag/v0.11.0),
+and the beta release has been removed. The app version is `0.11.0`.
 Both players must install this version because the protocol includes the app
 version. Multiplayer uses **M** and music uses **N**; **M** still changes driving
 mode inside the garage.
@@ -120,9 +122,9 @@ A public download link does not let an unregistered Mac run this build.
 
 [Apple’s registered-Mac distribution instructions](https://help.apple.com/xcode/mac/current/en.lproj/dev295cc0fae.html)
 and [device registration guidance](https://developer.apple.com/help/account/devices/register-a-single-device)
-were checked on 2026-09-22. The GitHub prerelease is separate from stable 0.10.0. See the [beta release notes](../releases/v0.11.0-beta.1.md).
+were checked on 2026-09-22. The [beta release notes](../releases/v0.11.0-beta.1.md) are kept for reference.
 
-The published beta is built from commit `9198a925ae2a35566fb41dabb026f522d524b906`.
+The multiplayer build in 0.11.0 is made from the `v0.11.0` tag.
 [Linux CI passed](https://github.com/oliverlukschander/todora/actions/runs/35701143956),
 including tests, three circuit renders, installation and package startup. Mac
 checks passed for the app and DMG signatures, embedded three-device profile,
