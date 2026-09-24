@@ -39,4 +39,4 @@ The capture harness places a stationary car at a specified lap fraction. `TODORA
 
 Visual review covers Monza’s first chicane, Spa’s climb, Suzuka’s upper deck and underpass, and Red Bull Ring at 800×600. Captures are in `dist/visual-check/`. These screenshots and deterministic physics checks do not replace a hands-on keyboard/gamepad session for judging feel.
 
-The local app is `dist/Todora.app`; the packaging script also creates `dist/Todora.dmg` and signs the app ad hoc. The DMG and checksum are available in the [0.10.0 release](https://github.com/oliverlukschander/todora/releases/tag/v0.10.0).
+The local app is `dist/Todora.app`; the packaging script also creates `dist/Todora.dmg` and signs the app ad hoc. The 0.10.0 DMG was withdrawn with the renaming of the circuits and the car; build one locally as above.
