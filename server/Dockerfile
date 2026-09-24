@@ -22,5 +22,6 @@ USER todora
 ENV TODORA_DB=/data/todora.db TODORA_LISTEN=0.0.0.0:8787
 EXPOSE 8787
 VOLUME /data
-HEALTHCHECK --interval=30s --timeout=3s CMD ["/bin/sh", "-c", "exec 3<>/dev/tcp/127.0.0.1/8787"]
+# /dev/tcp is bash's, not dash's, so the check runs in bash.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s CMD ["/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8787"]
 CMD ["todora-server"]
