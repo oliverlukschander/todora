@@ -223,9 +223,15 @@ impl Worker {
         let Some(path) = self.identity_path() else {
             return;
         };
-        let Ok(text) = std::fs::read_to_string(path) else {
+        let Ok(text) = std::fs::read_to_string(&path) else {
             return;
         };
+        // One written before it was kept private is made private now.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
         let Ok(identity) = serde_json::from_str::<Identity>(&text) else {
             warn!("identity.json could not be read; a new one is made on going online");
             return;
@@ -249,9 +255,9 @@ impl Worker {
         let beside = path.with_extension("writing");
         let written = std::fs::create_dir_all(path.parent().unwrap_or(&path))
             .and_then(|()| {
-                std::fs::write(
+                write_private(
                     &beside,
-                    serde_json::to_vec_pretty(&identity).unwrap_or_default(),
+                    &serde_json::to_vec_pretty(&identity).unwrap_or_default(),
                 )
             })
             .and_then(|()| std::fs::rename(&beside, &path));
@@ -646,6 +652,27 @@ impl Worker {
     }
 }
 
+/// Write a file only its owner can read: it holds the key that signs laps.
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    // A leftover from an earlier failed write keeps its old mode; fix it.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -665,6 +692,29 @@ mod tests {
             std::thread::sleep(Duration::from_millis(50));
         }
         panic!("timed out; heard {heard:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_key_is_kept_where_only_its_owner_can_read_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let folder = std::env::temp_dir().join(format!("todora-key-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        let (tell, _heard) = channel();
+        let mut worker = Worker::new(String::new(), Some(folder.clone()), tell);
+        worker.key();
+        worker.save();
+        let path = folder.join("identity.json");
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600);
+        // One left readable by an older version is closed up on load.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let (tell, _heard) = channel();
+        let mut again = Worker::new(String::new(), Some(folder.clone()), tell);
+        again.load();
+        assert_eq!(mode(&path), 0o600);
+        assert!(again.key.is_some());
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     /// The whole round trip against a running server:
