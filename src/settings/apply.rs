@@ -16,7 +16,7 @@ use bevy::{
 };
 
 use super::Settings;
-use crate::ui::{MUTED, label};
+use crate::ui::{TEXT, label};
 
 pub(super) fn plugin(app: &mut App) {
     if !app.is_plugin_added::<FrameTimeDiagnosticsPlugin>() {
@@ -182,19 +182,30 @@ fn limit(settings: Res<Settings>, mut last: Local<Option<Instant>>) {
 
 #[derive(Component)]
 struct Readout;
+#[derive(Component)]
+struct ReadoutPanel;
 
+/// A HUD panel of its own under the circuit's name: bare text over the sky
+/// was too faint to find.
 fn spawn_readout(mut commands: Commands) {
-    commands.spawn((
-        Readout,
-        label("", 13.0, MUTED),
-        Node {
-            position_type: PositionType::Absolute,
-            top: px(6),
-            left: percent(50),
-            ..default()
-        },
-        Visibility::Hidden,
-    ));
+    commands
+        .spawn((
+            ReadoutPanel,
+            crate::hud::Instrument,
+            Node {
+                position_type: PositionType::Absolute,
+                top: px(112),
+                left: px(24),
+                padding: UiRect::axes(px(12), px(6)),
+                border_radius: BorderRadius::all(px(8)),
+                ..default()
+            },
+            BackgroundColor(crate::hud::PANEL),
+            Visibility::Hidden,
+        ))
+        .with_children(|panel| {
+            panel.spawn((Readout, label("— fps", 16.0, TEXT)));
+        });
 }
 
 /// Frames a second, smoothed, while the setting is on.
@@ -203,14 +214,17 @@ fn readout(
     diagnostics: Res<DiagnosticsStore>,
     time: Res<Time<Real>>,
     mut next: Local<f64>,
-    mut texts: Query<(&mut Text, &mut Visibility), With<Readout>>,
+    mut panels: Query<&mut Visibility, With<ReadoutPanel>>,
+    mut texts: Query<&mut Text, With<Readout>>,
 ) {
-    for (mut text, mut visibility) in &mut texts {
+    for mut visibility in &mut panels {
         visibility.set_if_neq(if settings.show_fps {
             Visibility::Visible
         } else {
             Visibility::Hidden
         });
+    }
+    for mut text in &mut texts {
         let now = time.elapsed_secs_f64();
         if !settings.show_fps || now < *next {
             continue;
