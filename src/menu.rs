@@ -50,6 +50,9 @@ pub(crate) struct Menu {
     setup: Setup,
     mode: Mode,
     search: String,
+    /// Typing into the search: set by `/` or Tab, or by any letter that is
+    /// not one of W, A, S and D, which browse while the search is empty.
+    typing: bool,
 }
 
 impl Menu {
@@ -212,6 +215,7 @@ fn enter(
     menu.setup = *setup;
     menu.mode = *mode;
     menu.search.clear();
+    menu.typing = false;
     menu.page = Some(page);
     *halt = Halt::Menu;
 }
@@ -234,11 +238,23 @@ fn search(
             continue;
         }
         if event.key_code == KeyCode::Backspace {
-            menu.search.pop();
+            if menu.search.pop().is_none() {
+                menu.typing = false;
+            }
             menu.filter();
+        } else if matches!(event.key_code, KeyCode::Slash | KeyCode::Tab) && !menu.typing {
+            menu.typing = true;
+        } else if !menu.typing
+            && matches!(
+                event.key_code,
+                KeyCode::KeyW | KeyCode::KeyA | KeyCode::KeyS | KeyCode::KeyD
+            )
+        {
+            // Browsing, as the arrows do; see `walk`.
         } else if let Some(text) = &event.text {
             let text: String = text.chars().filter(|c| !c.is_control()).collect();
             if !text.is_empty() && menu.search.chars().count() < 60 {
+                menu.typing = true;
                 menu.search.push_str(&text);
                 menu.filter();
             }
@@ -274,7 +290,8 @@ fn walk(
         *navigation = Navigation::default();
         return;
     };
-    let nudge = navigation.read(&keys, &pads, time.elapsed_secs_f64());
+    let letters = menu.page != Some(Page::Circuit) || !menu.typing;
+    let nudge = navigation.read_keys(&keys, &pads, time.elapsed_secs_f64(), letters);
     let step = nudge.y;
     let horizontal = nudge.x;
     if step != 0 {
@@ -365,6 +382,7 @@ fn clicks(
             Action::Next => menu.move_by(PAGE_SIZE as i32),
             Action::Clear => {
                 menu.search.clear();
+                menu.typing = false;
                 menu.filter();
             }
             Action::Apply => apply(
@@ -717,6 +735,46 @@ mod tests {
         pad_press(&mut app, controller, GamepadButton::Start);
         pad_press(&mut app, controller, GamepadButton::RightTrigger);
         assert_eq!(app.world().resource::<Messages<Reset>>().len(), 1);
+    }
+
+    /// A key as the keyboard sends it: the press and the character it types.
+    fn type_key(app: &mut App, key: KeyCode, text: &str) {
+        app.world_mut().write_message(KeyboardInput {
+            key_code: key,
+            logical_key: bevy::input::keyboard::Key::Character(text.into()),
+            state: ButtonState::Pressed,
+            text: Some(text.into()),
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+        press(app, key);
+    }
+
+    #[test]
+    fn wasd_browse_until_a_search_is_typed() {
+        let mut app = game();
+        app.update();
+        press(&mut app, KeyCode::KeyT);
+        let start = app.world().resource::<Menu>().at;
+        type_key(&mut app, KeyCode::KeyD, "d");
+        let menu = app.world().resource::<Menu>();
+        assert!(menu.search.is_empty(), "D browses, it does not type");
+        assert_ne!(menu.at, start, "D moved the cursor as → does");
+        // Any other letter starts a search, and then W, A, S and D are letters.
+        type_key(&mut app, KeyCode::KeyL, "l");
+        type_key(&mut app, KeyCode::KeyA, "a");
+        assert_eq!(app.world().resource::<Menu>().search, "la");
+        // Emptied, the search gives the letters back to browsing.
+        type_key(&mut app, KeyCode::Backspace, "");
+        type_key(&mut app, KeyCode::Backspace, "");
+        type_key(&mut app, KeyCode::Backspace, "");
+        type_key(&mut app, KeyCode::KeyS, "s");
+        assert!(app.world().resource::<Menu>().search.is_empty());
+        // `/` first, and a search can start with one of them.
+        type_key(&mut app, KeyCode::Slash, "/");
+        type_key(&mut app, KeyCode::KeyA, "a");
+        type_key(&mut app, KeyCode::KeyR, "r");
+        assert_eq!(app.world().resource::<Menu>().search, "ar");
     }
 
     #[test]

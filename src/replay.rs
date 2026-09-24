@@ -290,17 +290,18 @@ fn drive(
     if step(KeyCode::KeyY, GamepadButton::North) {
         replay.view = replay.view.next();
     }
-    if step(KeyCode::ArrowUp, GamepadButton::DPadUp) {
+    if step(KeyCode::ArrowUp, GamepadButton::DPadUp) || keys.just_pressed(KeyCode::KeyW) {
         replay.speed = (replay.speed + 1).min(SPEEDS.len() - 1);
     }
-    if step(KeyCode::ArrowDown, GamepadButton::DPadDown) {
+    if step(KeyCode::ArrowDown, GamepadButton::DPadDown) || keys.just_pressed(KeyCode::KeyS) {
         replay.speed = replay.speed.saturating_sub(1);
     }
     let scrub = f32::from(u8::from(
-        keys.pressed(KeyCode::ArrowRight)
+        keys.any_pressed([KeyCode::ArrowRight, KeyCode::KeyD])
             || pads.iter().any(|p| p.pressed(GamepadButton::DPadRight)),
     )) - f32::from(u8::from(
-        keys.pressed(KeyCode::ArrowLeft) || pads.iter().any(|p| p.pressed(GamepadButton::DPadLeft)),
+        keys.any_pressed([KeyCode::ArrowLeft, KeyCode::KeyA])
+            || pads.iter().any(|p| p.pressed(GamepadButton::DPadLeft)),
     ));
     replay.clock += scrub * 4.0 * dt;
     if step(KeyCode::KeyX, GamepadButton::West) || keys.just_pressed(KeyCode::KeyP) {

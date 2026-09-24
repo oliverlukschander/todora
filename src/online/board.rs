@@ -424,8 +424,9 @@ fn drive(
         .read(&keys, &pads, time.elapsed_secs_f64());
     if browse.view == View::Week {
         browse.circuit = challenge.at;
-        // D, or the pad's north button: drive this week's circuit, in Regular.
-        if keys.just_pressed(KeyCode::KeyD) || pad(GamepadButton::North) {
+        // F, or the pad's north button: drive this week's circuit, in Regular.
+        // (D is right, as the arrows are.)
+        if keys.just_pressed(KeyCode::KeyF) || pad(GamepadButton::North) {
             go.write(crate::track::GoTo(challenge.circuit()));
             mode.set_if_neq(Mode::Regular);
             *halt = Halt::Nothing;

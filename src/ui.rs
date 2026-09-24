@@ -150,25 +150,60 @@ impl Navigation {
 }
 
 impl Navigation {
+    /// The arrows, WASD, the D-pad and the left stick.
     pub(crate) fn read(
         &mut self,
         keys: &ButtonInput<KeyCode>,
         pads: &Query<&Gamepad>,
         now: f64,
     ) -> IVec2 {
+        self.read_keys(keys, pads, now, true)
+    }
+
+    /// As [`Self::read`], leaving W, A, S and D out when `letters` is false:
+    /// on a field that is being typed into they are letters.
+    pub(crate) fn read_keys(
+        &mut self,
+        keys: &ButtonInput<KeyCode>,
+        pads: &Query<&Gamepad>,
+        now: f64,
+        letters: bool,
+    ) -> IVec2 {
         let directions = [
-            (KeyCode::ArrowLeft, GamepadButton::DPadLeft, Vec2::NEG_X),
-            (KeyCode::ArrowRight, GamepadButton::DPadRight, Vec2::X),
-            (KeyCode::ArrowUp, GamepadButton::DPadUp, Vec2::Y),
-            (KeyCode::ArrowDown, GamepadButton::DPadDown, Vec2::NEG_Y),
+            (
+                KeyCode::ArrowLeft,
+                KeyCode::KeyA,
+                GamepadButton::DPadLeft,
+                Vec2::NEG_X,
+            ),
+            (
+                KeyCode::ArrowRight,
+                KeyCode::KeyD,
+                GamepadButton::DPadRight,
+                Vec2::X,
+            ),
+            (
+                KeyCode::ArrowUp,
+                KeyCode::KeyW,
+                GamepadButton::DPadUp,
+                Vec2::Y,
+            ),
+            (
+                KeyCode::ArrowDown,
+                KeyCode::KeyS,
+                GamepadButton::DPadDown,
+                Vec2::NEG_Y,
+            ),
         ];
         let mut digital = Vec2::ZERO;
         let mut tapped = false;
-        for (key, button, direction) in directions {
-            if keys.pressed(key) || pads.iter().any(|pad| pad.pressed(button)) {
+        for (arrow, letter, button, direction) in directions {
+            let held = keys.pressed(arrow) || (letters && keys.pressed(letter));
+            let fresh = keys.just_pressed(arrow) || (letters && keys.just_pressed(letter));
+            if held || pads.iter().any(|pad| pad.pressed(button)) {
                 digital += direction;
             }
-            tapped |= keys.just_pressed(key) || pads.iter().any(|pad| pad.just_pressed(button));
+            tapped |= fresh || pads.iter().any(|pad| pad.just_pressed(button));
         }
         let stick = pads
             .iter()

@@ -560,7 +560,7 @@ fn drive(
             clicked = true;
         }
     }
-    let step = page.navigation.read(&keys, &pads, now);
+    let step = page.navigation.read_keys(&keys, &pads, now, !naming);
     if step.y != 0 {
         page.row = (page.row as i32 + step.y).clamp(0, count as i32 - 1) as usize;
     }
@@ -770,6 +770,31 @@ mod tests {
         tap(&mut app, KeyCode::ArrowRight);
         tap(&mut app, KeyCode::Escape);
         assert_eq!(*app.world().resource::<Halt>(), Halt::Pause);
+    }
+
+    #[test]
+    fn wasd_move_like_the_arrows_except_on_the_name_row() {
+        let mut app = app();
+        *app.world_mut().resource_mut::<Halt>() = Halt::Settings;
+        app.update();
+        let first = app.world().resource::<Page>().row();
+        tap(&mut app, KeyCode::KeyS);
+        assert_ne!(app.world().resource::<Page>().row(), first, "S is down");
+        tap(&mut app, KeyCode::KeyW);
+        assert_eq!(app.world().resource::<Page>().row(), first, "W is up");
+        // Find the name row; there S is a letter and the row stays.
+        let tab = Tab::ALL
+            .into_iter()
+            .find(|tab| tab.rows().contains(&Row::Name))
+            .expect("a tab has the name row");
+        while app.world().resource::<Page>().tab() != tab {
+            tap(&mut app, KeyCode::KeyE);
+        }
+        while app.world().resource::<Page>().row() != Row::Name {
+            tap(&mut app, KeyCode::ArrowDown);
+        }
+        tap(&mut app, KeyCode::KeyS);
+        assert_eq!(app.world().resource::<Page>().row(), Row::Name);
     }
 
     #[test]
