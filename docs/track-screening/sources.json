@@ -279,6 +279,20 @@
     ],
     "direction": "anticlockwise"
   },
+  "laguna_seca": {
+    "source_id": "docs/track-screening/traces/laguna-seca.geojson",
+    "name": "Corkscrew Coast",
+    "source": "tobi/track-atlas (OpenStreetMap contributors; ODbL 1.0)",
+    "revision": "c783def5a24df8ce8f034262e8228c262b854e0e",
+    "heights": "Open-Meteo DEM",
+    "fixes": 592,
+    "lap_km": 3.606,
+    "line": [
+      36.58647,
+      -121.75666
+    ],
+    "direction": "anticlockwise"
+  },
   "las_vegas": {
     "source_id": "us-2023",
     "name": "Las Vegas",
@@ -304,6 +318,34 @@
     "line": [
       47.95091,
       0.20759
+    ],
+    "direction": "clockwise"
+  },
+  "lime_rock": {
+    "source_id": "docs/track-screening/traces/lime-rock.geojson",
+    "name": "Connecticut Valley",
+    "source": "tobi/track-atlas (OpenStreetMap contributors; ODbL 1.0)",
+    "revision": "c783def5a24df8ce8f034262e8228c262b854e0e",
+    "heights": "Open-Meteo DEM",
+    "fixes": 97,
+    "lap_km": 2.367,
+    "line": [
+      41.9285,
+      -73.38069
+    ],
+    "direction": "clockwise"
+  },
+  "long_beach": {
+    "source_id": "docs/track-screening/traces/long-beach.geojson",
+    "name": "Pacific Harbour",
+    "source": "tobi/track-atlas (OpenStreetMap contributors; ODbL 1.0)",
+    "revision": "c783def5a24df8ce8f034262e8228c262b854e0e",
+    "heights": "Open-Meteo DEM",
+    "fixes": 628,
+    "lap_km": 3.224,
+    "line": [
+      33.76219,
+      -118.18735
     ],
     "direction": "clockwise"
   },
@@ -377,6 +419,20 @@
     ],
     "direction": "anticlockwise"
   },
+  "mid_ohio": {
+    "source_id": "docs/track-screening/traces/mid-ohio.geojson",
+    "name": "Lexington Hills",
+    "source": "OpenStreetMap contributors (ODbL 1.0)",
+    "revision": "5adb13159b1d453e6e81ba7c6aaa46d2e5ee534c",
+    "heights": "Open-Meteo DEM",
+    "fixes": 269,
+    "lap_km": 3.62,
+    "line": [
+      40.68955,
+      -82.63715
+    ],
+    "direction": "clockwise"
+  },
   "monaco": {
     "source_id": "mc-1929",
     "name": "Monaco",
@@ -402,6 +458,20 @@
     "line": [
       45.61897,
       9.28122
+    ],
+    "direction": "clockwise"
+  },
+  "mosport": {
+    "source_id": "docs/track-screening/traces/mosport.geojson",
+    "name": "Maple Forest",
+    "source": "tobi/track-atlas (OpenStreetMap contributors; ODbL 1.0)",
+    "revision": "c783def5a24df8ce8f034262e8228c262b854e0e",
+    "heights": "Open-Meteo DEM",
+    "fixes": 174,
+    "lap_km": 3.948,
+    "line": [
+      44.05277,
+      -78.67178
     ],
     "direction": "clockwise"
   },
@@ -458,6 +528,34 @@
     "line": [
       47.22002,
       14.76512
+    ],
+    "direction": "clockwise"
+  },
+  "road_america": {
+    "source_id": "docs/track-screening/traces/road-america.geojson",
+    "name": "Elkhart Lakes",
+    "source": "tobi/track-atlas (OpenStreetMap contributors; ODbL 1.0)",
+    "revision": "c783def5a24df8ce8f034262e8228c262b854e0e",
+    "heights": "Open-Meteo DEM",
+    "fixes": 347,
+    "lap_km": 6.445,
+    "line": [
+      43.79773,
+      -87.98962
+    ],
+    "direction": "clockwise"
+  },
+  "road_atlanta": {
+    "source_id": "docs/track-screening/traces/road-atlanta.geojson",
+    "name": "Peachtree Run",
+    "source": "tobi/track-atlas (OpenStreetMap contributors; ODbL 1.0)",
+    "revision": "c783def5a24df8ce8f034262e8228c262b854e0e",
+    "heights": "Open-Meteo DEM",
+    "fixes": 563,
+    "lap_km": 4.093,
+    "line": [
+      34.15,
+      -83.81352
     ],
     "direction": "clockwise"
   },
@@ -556,6 +654,20 @@
     "line": [
       34.84334,
       136.54028
+    ],
+    "direction": "clockwise"
+  },
+  "virginia_international_raceway": {
+    "source_id": "docs/track-screening/traces/virginia-international-raceway.geojson",
+    "name": "Oak Tree Valley",
+    "source": "tobi/track-atlas (OpenStreetMap contributors; ODbL 1.0)",
+    "revision": "c783def5a24df8ce8f034262e8228c262b854e0e",
+    "heights": "Open-Meteo DEM",
+    "fixes": 730,
+    "lap_km": 5.268,
+    "line": [
+      36.5688,
+      -79.2063
     ],
     "direction": "clockwise"
   },

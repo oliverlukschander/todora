@@ -1,7 +1,9 @@
 //! Circuit browsing and a garage with draft car/setup choices.
 //! Browsing pauses the game; only Apply commits a selection.
+mod collection;
 mod view;
 use crate::ui::Navigation;
+use collection::Collection;
 
 use crate::{
     Reset,
@@ -50,28 +52,44 @@ pub(crate) struct Menu {
     setup: Setup,
     mode: Mode,
     search: String,
+    collection: Collection,
     /// Typing into the search: set by `/` or Tab, or by any letter that is
     /// not one of W, A, S and D, which browse while the search is empty.
     typing: bool,
 }
 
 impl Menu {
+    #[cfg(feature = "visual-check")]
+    pub(crate) fn preview_collection(&mut self, at: usize) {
+        self.choose_collection(Collection::ALL[at]);
+    }
+
     fn entries(&self) -> Vec<usize> {
         match self.page {
             Some(Page::Car) => (0..Spec::ALL.len()).collect(),
             _ => {
                 let needle = searchable(&self.search);
-                all_circuits()
+                let mut entries: Vec<_> = all_circuits()
                     .iter()
                     .enumerate()
                     // The id too, so a circuit can be found by the place
                     // it is modelled on as well as by the name shown.
+                    .filter(|(_, c)| self.collection.contains(c.id))
                     .filter(|(_, c)| {
                         searchable(c.name).contains(&needle)
                             || searchable(&c.id.replace('-', " ")).contains(&needle)
+                            || aliases(c.id).contains(&needle)
                     })
                     .map(|(i, _)| i)
-                    .collect()
+                    .collect();
+                if self.collection == Collection::Dhh2014 {
+                    entries.sort_by_key(|&i| {
+                        collection::DHH_2014
+                            .iter()
+                            .position(|id| *id == all_circuits()[i].id)
+                    });
+                }
+                entries
             }
         }
     }
@@ -91,11 +109,33 @@ impl Menu {
         }
     }
 
+    fn choose_collection(&mut self, collection: Collection) {
+        self.collection = collection;
+        self.filter();
+    }
+
     fn filter(&mut self) {
         let entries = self.entries();
         if !entries.contains(&self.at) {
             self.at = entries.first().copied().unwrap_or(0);
         }
+    }
+}
+
+// Common venue abbreviations remain useful when the displayed name is Todora's.
+fn aliases(id: &str) -> &'static str {
+    match id {
+        "americas" => "cota austin circuit of the americas",
+        "le-mans" => "lemans circuit de la sarthe 24h",
+        "algarve" => "portimao",
+        "interlagos" => "sao paulo",
+        "hermanos-rodriguez" => "mexico city",
+        "mosport" => "canadian tire motorsport park ctmp bowmanville",
+        "virginia-international-raceway" => "vir",
+        "laguna-seca" => "monterey",
+        "lime-rock" => "limerock",
+        "mid-ohio" => "midohio lexington",
+        _ => "",
     }
 }
 
@@ -127,6 +167,7 @@ enum Action {
     Previous,
     Next,
     Clear,
+    Collection(Collection),
     Apply,
     Back,
 }
@@ -217,6 +258,9 @@ fn enter(
     menu.search.clear();
     menu.typing = false;
     menu.page = Some(page);
+    if page == Page::Circuit && !menu.collection.contains(track.circuit().id) {
+        menu.collection = Collection::All;
+    }
     *halt = Halt::Menu;
 }
 
@@ -235,6 +279,9 @@ fn search(
                 KeyCode::SuperRight,
             ])
         {
+            continue;
+        }
+        if matches!(event.key_code, KeyCode::BracketLeft | KeyCode::BracketRight) {
             continue;
         }
         if event.key_code == KeyCode::Backspace {
@@ -305,6 +352,21 @@ fn walk(
         }
     }
     if page == Page::Circuit {
+        let collection_step = i32::from(pressed(
+            &keys,
+            &pads,
+            KeyCode::BracketRight,
+            GamepadButton::RightTrigger2,
+        )) - i32::from(pressed(
+            &keys,
+            &pads,
+            KeyCode::BracketLeft,
+            GamepadButton::LeftTrigger2,
+        ));
+        if collection_step != 0 {
+            let next = menu.collection.step(collection_step);
+            menu.choose_collection(next);
+        }
         let page_step = i32::from(keys.just_pressed(KeyCode::PageDown))
             - i32::from(keys.just_pressed(KeyCode::PageUp));
         if page_step != 0 {
@@ -376,6 +438,7 @@ fn clicks(
         }
         match action {
             Action::Select(at) => menu.at = *at,
+            Action::Collection(collection) => menu.choose_collection(*collection),
             Action::Tune(wanted) => menu.setup = *wanted,
             Action::Mode(wanted) => menu.mode = *wanted,
             Action::Previous => menu.move_by(-(PAGE_SIZE as i32)),
@@ -453,6 +516,14 @@ mod tests {
             ("le-mans", "Sarthe Run"),
             ("fuji", "Volcano Straight"),
             ("sebring", "Orange Grove Airfield"),
+            ("laguna-seca", "Corkscrew Coast"),
+            ("lime-rock", "Connecticut Valley"),
+            ("long-beach", "Pacific Harbour"),
+            ("mid-ohio", "Lexington Hills"),
+            ("mosport", "Maple Forest"),
+            ("road-america", "Elkhart Lakes"),
+            ("road-atlanta", "Peachtree Run"),
+            ("virginia-international-raceway", "Oak Tree Valley"),
         ] {
             for search in [id.replace('-', " "), name.to_string()] {
                 let menu = Menu {
@@ -464,6 +535,80 @@ mod tests {
                 assert_eq!(entries.len(), 1);
                 assert_eq!(all_circuits()[entries[0]].id, id);
             }
+        }
+    }
+
+    #[test]
+    fn familiar_venue_abbreviations_are_searchable() {
+        for (search, id) in [
+            ("COTA", "americas"),
+            ("CTMP", "mosport"),
+            ("VIR", "virginia-international-raceway"),
+            ("Portimão", "algarve"),
+        ] {
+            let menu = Menu {
+                page: Some(Page::Circuit),
+                search: search.into(),
+                ..default()
+            };
+            assert!(menu.entries().iter().any(|&at| all_circuits()[at].id == id));
+        }
+    }
+
+    #[test]
+    fn collections_keep_race_order_and_combine_with_search_without_changing_track_ids() {
+        let mut menu = Menu {
+            page: Some(Page::Circuit),
+            ..default()
+        };
+        menu.choose_collection(Collection::Dhh2014);
+        let ids: Vec<_> = menu
+            .entries()
+            .iter()
+            .map(|&at| all_circuits()[at].id)
+            .collect();
+        assert_eq!(ids, collection::DHH_2014);
+        menu.search = "fuji".into();
+        menu.filter();
+        assert_eq!(all_circuits()[menu.at].id, "fuji");
+        let selected = menu.at;
+        menu.choose_collection(Collection::GrandPrix);
+        assert_eq!(menu.at, selected);
+        menu.choose_collection(Collection::Heritage);
+        assert!(menu.entries().is_empty());
+        menu.search.clear();
+        menu.filter();
+        assert!(Collection::Heritage.contains(all_circuits()[menu.at].id));
+        menu.move_by(1000);
+        assert_eq!(Some(&menu.at), menu.entries().last());
+    }
+
+    #[test]
+    fn keyboard_and_controller_cycle_collections_and_only_apply_starts_loading() {
+        for controller in [false, true] {
+            let mut app = game();
+            let pad = app.world_mut().spawn(Gamepad::default()).id();
+            press(&mut app, KeyCode::KeyT);
+            for expected in Collection::ALL.into_iter().skip(1).chain([Collection::All]) {
+                if controller {
+                    pad_press(&mut app, pad, GamepadButton::RightTrigger2);
+                } else {
+                    press(&mut app, KeyCode::BracketRight);
+                }
+                assert_eq!(app.world().resource::<Menu>().collection, expected);
+                assert_eq!(app.world().resource::<Menu>().page, Some(Page::Circuit));
+                assert!(app.world().resource::<Messages<GoTo>>().is_empty());
+            }
+            press(&mut app, KeyCode::BracketRight);
+            let chosen = app.world().resource::<Menu>().at;
+            press(&mut app, KeyCode::Enter);
+            let selected = app
+                .world_mut()
+                .resource_mut::<Messages<GoTo>>()
+                .drain()
+                .next()
+                .unwrap();
+            assert_eq!(selected.0.id, all_circuits()[chosen].id);
         }
     }
 

@@ -169,10 +169,8 @@ impl<'a> Site<'a> {
         ((p.x / CELL).floor() as i32, (p.y / CELL).floor() as i32)
     }
 
-    /// Whether a circle of `radius` at `point` is on the terrain, at least
-    /// `gap` outside the kerb of every road, off any bridge, and clear of
-    /// everything claimed so far.
-    fn fits(&self, point: Vec3, radius: f32, gap: f32) -> bool {
+    /// Whether a circle has ground beneath it and clears every road and bridge.
+    fn ground_fits(&self, point: Vec3, radius: f32, gap: f32) -> bool {
         let p = point.xz();
         if !self.track.terrain().contains(p)
             || p.cmplt(self.min + radius).any()
@@ -186,6 +184,15 @@ impl<'a> Site<'a> {
         {
             return false;
         }
+        true
+    }
+
+    /// Ground clearance plus room among everything claimed so far.
+    fn fits(&self, point: Vec3, radius: f32, gap: f32) -> bool {
+        if !self.ground_fits(point, radius, gap) {
+            return false;
+        }
+        let p = point.xz();
         let (cx, cy) = Self::cell(p);
         (cx - 1..=cx + 1).all(|x| {
             (cy - 1..=cy + 1).all(|y| {

@@ -1001,7 +1001,11 @@ fn every_circuit_came_from_the_source_once() {
         let text = std::fs::read_to_string(&path).unwrap();
         let source = provenance["source_id"].as_str().unwrap();
         let revision = provenance["revision"].as_str().unwrap();
-        assert_eq!(revision.len(), 40, "{module}: pin a complete commit");
+        assert_eq!(
+            revision.len(),
+            40,
+            "{module}: pin a complete source revision"
+        );
         assert!(
             text.contains(&revision[..12]),
             "{module}: revision mismatch"
@@ -1044,7 +1048,7 @@ fn every_circuit_came_from_the_source_once() {
     }
     assert_eq!(modules, recorded.len());
     assert_eq!(modules, circuits::all().len());
-    assert_eq!(modules, 43);
+    assert_eq!(modules, 51);
 }
 
 /// A bridge says where it came from, and says which half of it is which.

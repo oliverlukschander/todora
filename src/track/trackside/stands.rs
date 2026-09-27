@@ -73,7 +73,7 @@ pub(super) fn build(track: &Track, site: &mut Site, out: &mut Builder) {
         let floor = floors(track, site, at, pits, PIT_WALL.0, GARAGE.1);
         pit(track, site, out, at, pits, floor, TEAMS[k % TEAMS.len()]);
     }
-    let depth = ROWS as f32 * ROW_DEPTH + 0.3;
+    let depth = ROWS as f32 * ROW_DEPTH + 0.35;
     let (near, far) = (STAND_FRONT - 0.3, STAND_FRONT + depth);
     let placed: Vec<i64> = modules(STAND)
         .filter(|&at| site_take(site, track, at, -pits, near, far))
@@ -94,10 +94,10 @@ fn modules((from, to): (i64, i64)) -> impl Iterator<Item = i64> {
 fn outline(track: &Track, at: i64, side: f32, near: f32, far: f32) -> Vec<Vec3> {
     let mut points = Vec::new();
     let steps = ((far - near) / 0.6).ceil() as usize;
-    for s in [at, at + MODULE / 2, at + MODULE - 2] {
+    for u in [0.0, 0.25, 0.5, 0.75] {
         for d in 0..=steps {
             let out = near + (far - near) * d as f32 / steps as f32;
-            points.push(beside(track, s, side, out));
+            points.push(point(track, at, side, u, out));
         }
     }
     points
@@ -108,17 +108,29 @@ const MODULE_RADIUS: f32 = 0.3;
 const MODULE_GAP: f32 = 0.4;
 
 fn site_fits(site: &Site, track: &Track, at: i64, side: f32, near: f32, far: f32) -> bool {
-    outline(track, at, side, near, far)
-        .iter()
-        .all(|&p| site.fits(p, MODULE_RADIUS, MODULE_GAP))
+    end_fits(site, track, at, side, near, far)
+        && outline(track, at, side, near, far)
+            .iter()
+            .all(|&p| site.fits(p, MODULE_RADIUS, MODULE_GAP))
 }
 
 fn site_take(site: &mut Site, track: &Track, at: i64, side: f32, near: f32, far: f32) -> bool {
-    site.take(
-        &outline(track, at, side, near, far),
-        MODULE_RADIUS,
-        MODULE_GAP,
-    )
+    end_fits(site, track, at, side, near, far)
+        && site.take(
+            &outline(track, at, side, near, far),
+            MODULE_RADIUS,
+            MODULE_GAP,
+        )
+}
+
+/// The shared end is not claimed twice, but its full footprint must still
+/// clear the road. Use the building's straight plan, not the curved road offset.
+fn end_fits(site: &Site, track: &Track, at: i64, side: f32, near: f32, far: f32) -> bool {
+    let steps = ((far - near) / 0.6).ceil() as usize;
+    (0..=steps).all(|d| {
+        let out = near + (far - near) * d as f32 / steps as f32;
+        site.ground_fits(point(track, at, side, 1.0, out), MODULE_RADIUS, MODULE_GAP)
+    })
 }
 
 /// The floor at each end of a module: the lowest ground across the building

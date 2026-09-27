@@ -1,8 +1,12 @@
 # Todora
 
-A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy.org/). Drive the Omarchy GT #95 around **43 scaled circuits**, with **T** for the list of them.
+A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy.org/). Drive the Omarchy GT #95 around **51 scaled circuits**, with **T** for the list of them.
 
 **Three endurance additions:** Sarthe Run (Le Mans’ full 24-hour course), Volcano Straight (Fuji Grand Prix, including the Dunlop chicane), and Orange Grove Airfield (Sebring International). Press **T** and search for either the Todora name or the real venue. These join the existing circuit browser, with ghosts, sectors and medal targets in every driving mode. [Geometry sources and validation](docs/track-screening/endurance.md).
+
+**Eight North American additions:** Laguna Seca, Lime Rock, Long Beach, Mid-Ohio, Mosport, Road America, Road Atlanta and VIR inspire another set of Todora circuits. [Names, layouts and sources](docs/track-screening/north-america.md).
+
+**Find your next circuit:** the browser now has **All**, **DHH ’14**, **Endurance**, **Grand Prix** and **Heritage** collections. DHH ’14 follows the eight-race 2014 WEC season in order. Click a collection or use **[ / ]** or **LT / RT**; search within it by Todora name, venue or abbreviations such as **COTA**, **CTMP** and **VIR**.
 
 The weekly challenge keeps its original 40-circuit rotation so older clients and historical results still agree. The 40-circuit achievements retain their thresholds and earned progress.
 
@@ -10,7 +14,7 @@ The circuits are laid out from public GPS traces of real circuits, and each carr
 
 Selecting a circuit shows its name and animated loading lights while it prepares. Driving stays paused until the circuit is ready. Reduced Motion keeps the lights still.
 
-The three new tracks and loading screen are in the development build on `main`; the v0.11.1 downloads below still contain 40 circuits.
+The 51-circuit catalogue, collections and loading screen are in the development build on `main`; the v0.11.1 downloads below still contain 40 circuits.
 
 [Download Todora 0.11.1 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.11.1/Todora.dmg) · [for Linux x86-64](https://github.com/oliverlukschander/todora/releases/download/v0.11.1/Todora-linux-x86_64.tar.gz) · [Release notes](docs/releases/v0.11.1.md)
 
@@ -283,7 +287,7 @@ Rebuild the Omarchy GT from Blender:
 
 ## Circuit data and thanks
 
-The three endurance layouts use © OpenStreetMap contributors’ geometry via [tobi/track-atlas](https://github.com/tobi/track-atlas), with Open-Meteo elevation samples. [Data attribution, licenses and source offer](assets/tracks/CREDITS.md).
+The endurance additions use © OpenStreetMap contributors’ geometry via [tobi/track-atlas](https://github.com/tobi/track-atlas), with Open-Meteo elevation samples. [Data attribution, licenses and source offer](assets/tracks/CREDITS.md).
 
 Todora's circuit layouts are based on data from [bacinger/f1-circuits](https://github.com/bacinger/f1-circuits). We're hugely grateful to Tomislav Bacinger and the project's contributors for collecting and sharing these circuits. Thank you for giving Todora its tracks and making projects like this possible!
 

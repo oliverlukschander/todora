@@ -193,12 +193,12 @@ pub(super) fn draw(
         root.spawn((
             Node {
                 width: px(1160),
-                height: px(734),
+                height: px(774),
                 min_height: px(0),
-                padding: UiRect::all(px(28)),
+                padding: UiRect::all(px(24)),
                 border: UiRect::all(px(1)),
                 border_radius: BorderRadius::all(px(18)),
-                row_gap: px(22),
+                row_gap: px(16),
                 ..column()
             },
             BackgroundColor(Color::srgb(0.045, 0.06, 0.073)),
@@ -277,7 +277,7 @@ pub(super) fn draw(
                     ));
                     heading.spawn(label(
                         if page == Page::Circuit {
-                            crate::text::t("menu.circuits_sub")
+                            menu.collection.description()
                         } else {
                             crate::text::t("menu.garage_sub")
                         },
@@ -288,7 +288,7 @@ pub(super) fn draw(
             panel
                 .spawn(Node {
                     column_gap: px(24),
-                    height: px(428),
+                    height: px(470),
                     min_height: px(0),
                     flex_shrink: 0.0,
                     ..default()
@@ -329,7 +329,7 @@ pub(super) fn draw(
                             ));
                             hint.spawn(label(
                                 if page == Page::Circuit {
-                                    crate::text::t("menu.circuits_note")
+                                    crate::text::t("menu.collections_keys")
                                 } else {
                                     crate::text::t("menu.garage_note")
                                 },
@@ -387,6 +387,49 @@ fn circuits(
         ..column()
     })
     .with_children(|browser| {
+        browser
+            .spawn(Node {
+                height: px(32),
+                column_gap: px(6),
+                ..default()
+            })
+            .with_children(|tabs| {
+                for collection in Collection::ALL {
+                    let active = menu.collection == collection;
+                    let count = all_circuits()
+                        .iter()
+                        .filter(|c| collection.contains(c.id))
+                        .count();
+                    let mut tab = tabs.spawn(card(
+                        Action::Collection(collection),
+                        active,
+                        Node {
+                            flex_grow: 1.0,
+                            flex_basis: px(0),
+                            min_width: px(0),
+                            padding: UiRect::axes(px(6), px(6)),
+                            border: UiRect::all(px(1)),
+                            border_radius: BorderRadius::all(px(6)),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        },
+                    ));
+                    if active {
+                        tab.insert(Selected);
+                    }
+                    tab.with_children(|b| {
+                        b.spawn((
+                            TextLayout::no_wrap(),
+                            label(
+                                format!("{} · {count}", collection.name()),
+                                13.0,
+                                if active { ACCENT } else { MUTED },
+                            ),
+                        ));
+                    });
+                }
+            });
         browser
             .spawn(Node {
                 height: px(44),

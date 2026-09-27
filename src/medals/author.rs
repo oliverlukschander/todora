@@ -125,6 +125,12 @@ pub(super) const AUTHOR: &[Entry] = &[
         provisional: [true, true, true],
     },
     Entry {
+        circuit: "laguna-seca",
+        fingerprint: 0xcfab188177ac4984,
+        times: [28.91, 28.06, 27.93],
+        provisional: [true, true, true],
+    },
+    Entry {
         circuit: "las-vegas",
         fingerprint: 0x2f9ce4c791c61270,
         times: [48.94, 46.25, 45.00],
@@ -134,6 +140,18 @@ pub(super) const AUTHOR: &[Entry] = &[
         circuit: "le-mans",
         fingerprint: 0x7ad9bcf05e39e869,
         times: [102.06, 95.33, 92.05],
+        provisional: [true, true, true],
+    },
+    Entry {
+        circuit: "lime-rock",
+        fingerprint: 0x24f726e1ce24a9b1,
+        times: [22.81, 22.22, 21.92],
+        provisional: [true, true, true],
+    },
+    Entry {
+        circuit: "long-beach",
+        fingerprint: 0x8d51cc1f5c673e99,
+        times: [53.33, 50.63, 49.32],
         provisional: [true, true, true],
     },
     Entry {
@@ -167,6 +185,12 @@ pub(super) const AUTHOR: &[Entry] = &[
         provisional: [true, true, true],
     },
     Entry {
+        circuit: "mid-ohio",
+        fingerprint: 0xcb9ac4df2702263f,
+        times: [34.89, 33.89, 33.39],
+        provisional: [true, true, true],
+    },
+    Entry {
         circuit: "monaco",
         fingerprint: 0xc2b84fef338b78f1,
         times: [44.88, 43.42, 43.06],
@@ -176,6 +200,12 @@ pub(super) const AUTHOR: &[Entry] = &[
         circuit: "monza",
         fingerprint: 0xadacb200c8cae423,
         times: [45.41, 43.01, 41.89],
+        provisional: [true, true, true],
+    },
+    Entry {
+        circuit: "mosport",
+        fingerprint: 0x830838256245cedb,
+        times: [35.55, 34.40, 33.86],
         provisional: [true, true, true],
     },
     Entry {
@@ -201,6 +231,18 @@ pub(super) const AUTHOR: &[Entry] = &[
         fingerprint: 0x2fe0c25bcb58d969,
         times: [35.03, 33.62, 33.94],
         provisional: [false, false, true],
+    },
+    Entry {
+        circuit: "road-america",
+        fingerprint: 0x79cf7650cfe5465a,
+        times: [54.04, 51.47, 50.24],
+        provisional: [true, true, true],
+    },
+    Entry {
+        circuit: "road-atlanta",
+        fingerprint: 0xdbf57b0cf9492d5a,
+        times: [34.92, 33.42, 32.68],
+        provisional: [true, true, true],
     },
     Entry {
         circuit: "sebring",
@@ -242,6 +284,12 @@ pub(super) const AUTHOR: &[Entry] = &[
         circuit: "suzuka",
         fingerprint: 0x081b7db2147605e3,
         times: [54.22, 51.98, 51.01],
+        provisional: [true, true, true],
+    },
+    Entry {
+        circuit: "virginia-international-raceway",
+        fingerprint: 0x791ef6846ebe4031,
+        times: [45.18, 43.27, 42.32],
         provisional: [true, true, true],
     },
     Entry {

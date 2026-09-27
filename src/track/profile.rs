@@ -1333,12 +1333,12 @@ mod tests {
             let track = Track::new(circuit);
             let lap = track.ribbon.length();
             // A sanity range rather than a design target: the circuits are
-            // shrunk alike and come out the length they come out. The top of it
+            // shrunk alike; the short Lime Rock course sets the lower end. The top
             // is set by Baku, which is 6 km of city street built at two and a
             // half times the shared plan scale because nothing narrower fits
             // between its old-town walls — see `Circuit::plan_scale`.
             assert!(
-                (400.0..2100.0).contains(&lap),
+                (250.0..2100.0).contains(&lap),
                 "{} laps {lap} m",
                 circuit.name
             );

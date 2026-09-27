@@ -30,19 +30,26 @@ mod istanbul_park;
 mod jacarepagua;
 mod jeddah;
 mod kyalami;
+mod laguna_seca;
 mod las_vegas;
 mod le_mans;
+mod lime_rock;
+mod long_beach;
 mod losail;
 mod madring;
 mod magny_cours;
 mod marina_bay;
 mod miami;
+mod mid_ohio;
 mod monaco;
 mod monza;
+mod mosport;
 mod mugello;
 mod nurburgring;
 mod paul_ricard;
 mod red_bull_ring;
+mod road_america;
+mod road_atlanta;
 mod sebring;
 mod sepang;
 mod shanghai;
@@ -50,6 +57,7 @@ mod silverstone;
 mod sochi;
 mod spa_francorchamps;
 mod suzuka;
+mod virginia_international_raceway;
 mod watkins_glen;
 mod yas_marina;
 mod zandvoort;
@@ -182,9 +190,12 @@ const ALL: &[Circuit] = &[
     magny_cours::CIRCUIT,
     baku::CIRCUIT,
     barcelona_catalunya::CIRCUIT,
+    lime_rock::CIRCUIT,
+    laguna_seca::CIRCUIT,
     hungaroring::CIRCUIT,
     bahrain::CIRCUIT,
     nurburgring::CIRCUIT,
+    road_america::CIRCUIT,
     suzuka::CIRCUIT,
     watkins_glen::CIRCUIT,
     monaco::CIRCUIT,
@@ -192,16 +203,21 @@ const ALL: &[Circuit] = &[
     kyalami::CIRCUIT,
     indianapolis::CIRCUIT,
     yas_marina::CIRCUIT,
+    mid_ohio::CIRCUIT,
     marina_bay::CIRCUIT,
     estoril::CIRCUIT,
     americas::CIRCUIT,
+    mosport::CIRCUIT,
     madring::CIRCUIT,
     sepang::CIRCUIT,
     las_vegas::CIRCUIT,
     zandvoort::CIRCUIT,
+    virginia_international_raceway::CIRCUIT,
     sebring::CIRCUIT,
+    long_beach::CIRCUIT,
     buenos_aires::CIRCUIT,
     monza::CIRCUIT,
+    road_atlanta::CIRCUIT,
     losail::CIRCUIT,
     paul_ricard::CIRCUIT,
     jeddah::CIRCUIT,

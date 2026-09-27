@@ -337,13 +337,19 @@ mod tests {
     /// descents lift it for well under a sixth of the lap.
     #[test]
     fn the_level_boom_is_kept_almost_everywhere() {
-        const HILLY: [&str; 6] = [
+        const HILLY: [&str; 12] = [
             "fuji",
             "imola",
             "interlagos",
             "kyalami",
+            "laguna-seca",
+            "mid-ohio",
             "monaco",
+            "mosport",
+            "road-america",
+            "road-atlanta",
             "spa-francorchamps",
+            "virginia-international-raceway",
         ];
         for (track, points) in every_track() {
             let n = points.len();

@@ -8,6 +8,17 @@ Endurance additions checked 27 September 2026; see [import notes](endurance.md).
 | fuji | [Fuji Speedway](https://fsw.tv/guide/facility/racing.html) | Clockwise | Grand Prix with Dunlop chicane |
 | sebring | [Sebring operator map](https://www.sebringraceway.com/wp-content/uploads/sites/1019/2022/07/22/track-map.pdf) | Clockwise | Full International circuit |
 
+| laguna-seca | [Pinned layout metadata](https://github.com/tobi/track-atlas/blob/c783def5a24df8ce8f034262e8228c262b854e0e/tracks/laguna-seca/raw/track.json) | Anticlockwise | Full course |
+| lime-rock | [Pinned layout metadata](https://github.com/tobi/track-atlas/blob/c783def5a24df8ce8f034262e8228c262b854e0e/tracks/lime-rock/raw/track.json) | Clockwise | Full course |
+| long-beach | [Pinned layout metadata](https://github.com/tobi/track-atlas/blob/c783def5a24df8ce8f034262e8228c262b854e0e/tracks/long-beach/raw/track.json) | Clockwise | Full course |
+| mosport | [Pinned layout metadata](https://github.com/tobi/track-atlas/blob/c783def5a24df8ce8f034262e8228c262b854e0e/tracks/mosport/raw/track.json) | Clockwise | Full course |
+| road-america | [Pinned layout metadata](https://github.com/tobi/track-atlas/blob/c783def5a24df8ce8f034262e8228c262b854e0e/tracks/road-america/raw/track.json) | Clockwise | Full course |
+| road-atlanta | [Pinned layout metadata](https://github.com/tobi/track-atlas/blob/c783def5a24df8ce8f034262e8228c262b854e0e/tracks/road-atlanta/raw/track.json) | Clockwise | Full course |
+| virginia-international-raceway | [Pinned layout metadata](https://github.com/tobi/track-atlas/blob/c783def5a24df8ce8f034262e8228c262b854e0e/tracks/virginia-international-raceway/raw/track.json) | Clockwise | Full course |
+| mid-ohio | [Operator map](https://www.midohio.com/images/Files/midohio-20_v3.pdf) | Clockwise | 13-turn professional course |
+
+North American sources and processing are recorded in [the admission notes](north-america.md).
+
 All 40 shipped centrelines were compared with [F1DB circuit records](https://github.com/f1db/f1db/tree/1e0008211a84f94f14acc6eb1eb5d2694861867d/src/data/circuits), pinned to revision `1e0008211a84f94f14acc6eb1eb5d2694861867d`. **Paul Ricard and Marina Bay were reversed.** The other 38 already matched. Each row links its reference; directions describe the layouts represented by the game's pinned GPS traces.
 
 The importer had treated GeoJSON point order as racing order. It now normalizes that order against the verified `direction` in `sources.json`. Reversing keeps the first fix at the recorded start/finish line and keeps each elevation attached to its GPS fix. The grid, lap gates and progress follow that corrected traversal. Existing surface fingerprints reject ghosts from the two old reversed tracks without deleting other records.

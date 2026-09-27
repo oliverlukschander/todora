@@ -21,12 +21,16 @@ fi
 unset BEVY_ASSET_ROOT CARGO_MANIFEST_DIR
 cd /tmp
 
-for circuit in suzuka monza monaco le-mans fuji sebring loading; do
+for circuit in suzuka monza monaco le-mans fuji sebring laguna-seca lime-rock long-beach mid-ohio mosport road-america road-atlanta virginia-international-raceway loading circuits; do
   start="$circuit"
-  unset TODORA_LOAD
+  unset TODORA_LOAD TODORA_SCREEN TODORA_COLLECTION
   if [[ "$circuit" == loading ]]; then
     start=red-bull-ring
     export TODORA_LOAD=le-mans
+  fi
+  if [[ "$circuit" == circuits ]]; then
+    start=red-bull-ring
+    export TODORA_SCREEN=circuits TODORA_COLLECTION=2
   fi
   rm -f "$OUT/$circuit.png"
   TODORA_CAPTURE="$OUT/$circuit.png" TODORA_CIRCUIT="$start" TODORA_SMALL=1 \

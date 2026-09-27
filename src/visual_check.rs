@@ -18,6 +18,7 @@
 //! TODORA_ROW=n.
 //! TODORA_SCREEN=title|replay|offer|circuits|garage opens that screen, and
 //! TODORA_EXAMPLE=21 fills the leaderboard as if you were 21st of 300.
+//! TODORA_COLLECTION=0..4 chooses All, DHH ’14, Endurance, Grand Prix or Heritage.
 //! TODORA_COUNTDOWN=ready|3|2|1|go freezes the start lights at that moment and,
 //! unless TODORA_PROGRESS is also given, leaves the car on the grid.
 use crate::{
@@ -285,6 +286,7 @@ fn open_screen(
     track: Res<Track>,
     challenge: Res<crate::challenge::Challenge>,
     mut menus: MessageWriter<crate::menu::OpenMenu>,
+    mut menu: ResMut<crate::menu::Menu>,
     mut frames: Local<u32>,
 ) {
     let screen = std::env::var("TODORA_SCREEN").unwrap_or_default();
@@ -303,6 +305,14 @@ fn open_screen(
     }
     if screen == "circuits" || screen == "garage" {
         *frames += 1;
+        if *frames == 4
+            && screen == "circuits"
+            && let Ok(value) = std::env::var("TODORA_COLLECTION")
+        {
+            let at = value.parse::<usize>().expect("collection index 0..4");
+            assert!(at < 5, "collection index 0..4");
+            menu.preview_collection(at);
+        }
         if *frames == 2 {
             menus.write(crate::menu::OpenMenu(if screen == "circuits" {
                 crate::menu::Page::Circuit
