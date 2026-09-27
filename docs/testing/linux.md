@@ -68,3 +68,24 @@ The local Debian 12 x86-64 container on Apple Silicon passed all 206 tests on
 2026-09-21, but its Mesa 22.3.6 software renderer timed out on both X11 and
 Wayland. Treat the emulated container as a build/test environment; its graphics results do not
 establish Linux desktop performance or native Wayland compatibility.
+
+For visual review on Apple Silicon, prefer a native `linux/arm64` container.
+On 2026-09-27, Debian 12 with Mesa 22.3.6 captured the profile, leaderboard,
+local lobby and split-screen layouts with `TODORA_SETTINGS='{"antialiasing":false}'`.
+With anti-aliasing enabled, the leaderboard and lobby stalled inside llvmpipe;
+disabling it completed the same captures without changing the game code.
+This is a software-renderer workaround, not a recommended desktop setting.
+For example, after building with `--features visual-check`:
+
+```sh
+BEVY_ASSET_ROOT="$PWD" WGPU_BACKEND=vulkan \
+  TODORA_SETTINGS='{"antialiasing":false}' TODORA_SMALL=1 \
+  TODORA_SCREEN=local TODORA_PLAYERS=4 TODORA_CIRCUIT=road-atlanta \
+  TODORA_CAPTURE=/tmp/todora-local-4.png \
+  xvfb-run -a -s '-screen 0 800x600x24' "${CARGO_TARGET_DIR:-target}/debug/todora"
+```
+
+Use `TODORA_SCREEN=board`, `profile`, `local-lobby`, or `local-cycle` for the
+other screens. `TODORA_EXAMPLE=21` supplies leaderboard fixtures; `local-cycle`
+asserts that returning to solo play removes every local car and camera.
+Keep Cargo target directories or volumes separate between ARM and x86 builds.
