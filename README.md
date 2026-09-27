@@ -14,9 +14,9 @@ The circuits are laid out from public GPS traces of real circuits, and each carr
 
 Selecting a circuit shows its name and animated loading lights while it prepares. Driving stays paused until the circuit is ready. Reduced Motion keeps the lights still.
 
-The 51-circuit catalogue, collections, loading screen, driver profiles and local split-screen are in the development build on `main`; the v0.11.1 downloads below still contain 40 circuits.
+Version 0.11.2 includes all 51 circuits, collections, the loading screen, driver profiles, local split-screen and recorded engine audio.
 
-[Download Todora 0.11.1 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.11.1/Todora.dmg) · [for Linux x86-64](https://github.com/oliverlukschander/todora/releases/download/v0.11.1/Todora-linux-x86_64.tar.gz) · [Release notes](docs/releases/v0.11.1.md)
+[Download Todora 0.11.2 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.11.2/Todora.dmg) · [for Linux x86-64](https://github.com/oliverlukschander/todora/releases/download/v0.11.2/Todora-linux-x86_64.tar.gz) · [Release notes](docs/releases/v0.11.2.md)
 
 The separate **Todora-Multiplayer.dmg** in the same release adds Game Center
 shared practice for two registered Apple Silicon Macs. It requires each
