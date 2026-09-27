@@ -204,7 +204,7 @@ pub(crate) const TABLE: &[Entry] = &[
     ("word.off", ["Off", "Aus", "Non", "No", "No"]),
     ("word.none", ["None", "Keines", "Aucun", "Ninguno", "Nessuno"]),
     // The title.
-    ("title.subtitle", ["Forty circuits. One lap at a time.", "Vierzig Strecken. Eine Runde nach der anderen.", "Quarante circuits. Un tour à la fois.", "Cuarenta circuitos. Una vuelta cada vez.", "Quaranta circuiti. Un giro alla volta."]),
+    ("title.subtitle", ["{} circuits. One lap at a time.", "{} Strecken. Eine Runde nach der anderen.", "{} circuits. Un tour à la fois.", "{} circuitos. Una vuelta cada vez.", "{} circuiti. Un giro alla volta."]),
     ("title.drive", ["Drive", "Fahren", "Piloter", "Conducir", "Guida"]),
     ("title.circuits", ["Circuits", "Strecken", "Circuits", "Circuitos", "Circuiti"]),
     ("title.board", ["World leaderboard", "Weltrangliste", "Classement mondial", "Clasificación mundial", "Classifica mondiale"]),
@@ -388,6 +388,7 @@ pub(crate) fn achievement(id: &str) -> Option<(&'static str, &'static str)> {
 /// and garage.
 #[rustfmt::skip]
 pub(crate) const MORE: &[Entry] = &[
+    ("profile.name", ["PLAYER NAME", "SPIELERNAME", "NOM DU PILOTE", "NOMBRE DEL PILOTO", "NOME DEL PILOTA"]),
     ("ghost.first", ["Drive your first lap here", "Fahre hier deine erste Runde", "Faites votre premier tour ici", "Da tu primera vuelta aquí", "Fai il tuo primo giro qui"]),
     ("local.title", ["Split-screen", "Splitscreen", "Écran partagé", "Pantalla dividida", "Schermo condiviso"]),
     ("local.subtitle", ["2–4 players · One computer · Your own lap clocks", "2–4 Spieler · Ein Computer · Eigene Rundenzeiten", "2–4 joueurs · Un ordinateur · Chronos individuels", "2–4 jugadores · Un ordenador · Tiempos individuales", "2–4 giocatori · Un computer · Tempi individuali"]),

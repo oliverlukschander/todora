@@ -573,6 +573,7 @@ fn cameras(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn preview(
     mut commands: Commands,
+    track: Res<Track>,
     mut race: ResMut<LocalRace>,
     mut halt: ResMut<Halt>,
     mut actions: MessageWriter<Action>,
@@ -594,6 +595,7 @@ pub(crate) fn preview(
         .unwrap_or(2)
         .clamp(2, 4);
     if *frames == 2 {
+        race.circuit = crate::track::circuit_at(track.circuit());
         race.devices = vec![Device::Wasd, Device::Arrows];
         for _ in 2..count {
             race.devices

@@ -301,6 +301,7 @@ fn button(
     action: Action,
     active: bool,
 ) {
+    let filled = active && !matches!(action, Action::Field(0 | 1));
     parent
         .spawn((
             Button,
@@ -311,11 +312,11 @@ fn button(
                 border_radius: BorderRadius::all(px(8)),
                 ..default()
             },
-            BackgroundColor(if active { ACCENT } else { SURFACE }),
+            BackgroundColor(if filled { ACCENT } else { SURFACE }),
             BorderColor::all(if active { ACCENT } else { LINE }),
         ))
         .with_children(|b| {
-            b.spawn(label(text, 16.0, if active { FRONT } else { TEXT }));
+            b.spawn(label(text, 16.0, if filled { FRONT } else { TEXT }));
         });
 }
 
@@ -371,13 +372,13 @@ fn draw(
                         ..default()
                     })
                     .with_children(|form| {
-                        form.spawn(label(crate::text::t("row.name"), 13.0, MUTED));
+                        form.spawn(label(crate::text::t("profile.name"), 13.0, MUTED));
                         button(
                             form,
                             format!(
                                 "{}{}",
                                 profile.name,
-                                if profile.field == 0 { " ▏" } else { "" }
+                                if profile.field == 0 { " |" } else { "" }
                             ),
                             Action::Field(0),
                             profile.field == 0,
@@ -532,12 +533,7 @@ fn draw(
                                 Action::Cancel,
                                 profile.field == 4,
                             );
-                            button(
-                                actions,
-                                crate::text::t("profile.save"),
-                                Action::Save,
-                                profile.field == 3,
-                            );
+                            button(actions, crate::text::t("profile.save"), Action::Save, true);
                         });
                 });
         });

@@ -110,6 +110,8 @@ struct Panel;
 #[derive(Component)]
 struct Button(usize);
 #[derive(Component)]
+struct Subtitle;
+#[derive(Component)]
 struct Curtain;
 
 fn setup(mut commands: Commands) {
@@ -168,7 +170,8 @@ fn setup(mut commands: Commands) {
         .with_children(|panel| {
             panel.spawn(label("TODORA", 72.0, TEXT));
             panel.spawn((
-                crate::text::label("title.subtitle", 20.0, AMBER_DIM),
+                Subtitle,
+                label("", 20.0, AMBER_DIM),
                 Node {
                     margin: UiRect::bottom(px(24)),
                     ..default()
@@ -357,6 +360,7 @@ fn draw(
     title: Res<Title>,
     mut panels: Query<&mut Visibility, With<Panel>>,
     mut buttons: Query<(&Button, &mut BackgroundColor, &mut BorderColor)>,
+    mut subtitles: Query<&mut Text, With<Subtitle>>,
 ) {
     let open = *halt == Halt::Title;
     for mut visibility in &mut panels {
@@ -368,6 +372,12 @@ fn draw(
     }
     if !open {
         return;
+    }
+    for mut subtitle in &mut subtitles {
+        subtitle.set_if_neq(Text::new(crate::text::tf(
+            "title.subtitle",
+            &[&crate::track::all_circuits().len()],
+        )));
     }
     for (button, mut colour, mut border) in &mut buttons {
         let active = button.0 == title.at;
