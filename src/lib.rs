@@ -15,6 +15,7 @@ mod multiplayer;
 mod onboarding;
 mod online;
 mod pause;
+mod persistence;
 mod replay;
 mod settings;
 mod skid;

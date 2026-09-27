@@ -214,15 +214,19 @@ fn readout(
     diagnostics: Res<DiagnosticsStore>,
     time: Res<Time<Real>>,
     mut next: Local<f64>,
-    mut panels: Query<&mut Visibility, With<ReadoutPanel>>,
+    mut panels: Query<&mut Node, With<ReadoutPanel>>,
     mut texts: Query<&mut Text, With<Readout>>,
 ) {
-    for mut visibility in &mut panels {
-        visibility.set_if_neq(if settings.show_fps {
-            Visibility::Visible
+    // HUD visibility owns pause/title/replay; this switch only controls layout.
+    for mut node in &mut panels {
+        let display = if settings.show_fps {
+            Display::Flex
         } else {
-            Visibility::Hidden
-        });
+            Display::None
+        };
+        if node.display != display {
+            node.display = display;
+        }
     }
     for mut text in &mut texts {
         let now = time.elapsed_secs_f64();
@@ -242,6 +246,31 @@ fn readout(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_fps_toggle_never_overrides_hud_visibility() {
+        let mut app = App::new();
+        app.init_resource::<Settings>()
+            .init_resource::<DiagnosticsStore>()
+            .init_resource::<Time<Real>>()
+            .add_systems(Update, readout);
+        let panel = app
+            .world_mut()
+            .spawn((ReadoutPanel, Node::default(), Visibility::Hidden))
+            .id();
+        for show in [true, false, true] {
+            app.world_mut().resource_mut::<Settings>().show_fps = show;
+            app.update();
+            assert_eq!(
+                app.world().get::<Visibility>(panel),
+                Some(&Visibility::Hidden)
+            );
+            assert_eq!(
+                app.world().get::<Node>(panel).unwrap().display,
+                if show { Display::Flex } else { Display::None }
+            );
+        }
+    }
 
     #[test]
     fn render_scale_draws_fewer_pixels_and_full_scale_draws_to_the_window() {

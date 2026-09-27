@@ -4,8 +4,9 @@
 //! has a default, so a file from an older version fills in whatever it does
 //! not mention and a field this version does not know is ignored; a file that
 //! cannot be read at all means the defaults and one line in the log. It is
-//! written a second after the last change, off the main thread, beside the real
+//! written within a second of a change, off the main thread, beside the real
 //! file and then moved onto it, so a crash mid-write keeps the old settings.
+//! Normal exits flush the latest choices before the app stops.
 //!
 //! The circuit, car, setup and driving mode are remembered too, so the game
 //! opens where it was left. They are stored by name, so a circuit that has
@@ -29,8 +30,6 @@ pub(crate) use page::{Page, PageSet};
 /// to read the old one.
 pub(crate) const VERSION: u32 = 2;
 const FILE: &str = "settings.json";
-/// Seconds after the last change before it is written.
-const SETTLE: f64 = 1.0;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -340,30 +339,10 @@ fn load() -> Settings {
     }
 }
 
-/// Write beside the file and move it into place, on a thread of its own.
-fn save(text: String) {
-    let Some(dir) = data_dir() else {
-        return;
-    };
-    std::thread::spawn(move || {
-        let (path, beside) = (dir.join(FILE), dir.join("settings.writing"));
-        let written = std::fs::create_dir_all(&dir)
-            .and_then(|()| std::fs::write(&beside, text))
-            .and_then(|()| std::fs::rename(&beside, &path));
-        if let Err(trouble) = written {
-            warn!("cannot save settings to {}: {trouble}", path.display());
-        }
-    });
-}
-
 /// Present in runs that must not touch the player's saved settings: visual
 /// checks, which put the car wherever the capture wants it.
 #[derive(Resource)]
 pub(crate) struct ReadOnly;
-
-/// When the last change was, until it has been written.
-#[derive(Resource, Default)]
-struct Unsaved(Option<f64>);
 
 pub struct SettingsPlugin;
 
@@ -382,7 +361,6 @@ impl Plugin for SettingsPlugin {
             app.insert_resource(mode);
         }
         app.insert_resource(settings)
-            .init_resource::<Unsaved>()
             .init_resource::<Agreed>()
             .add_systems(PostStartup, apply_saved)
             .add_systems(Last, (share, remember, write).chain());
@@ -508,19 +486,22 @@ fn write(
     settings: Res<Settings>,
     time: Res<Time<Real>>,
     read_only: Option<Res<ReadOnly>>,
-    mut unsaved: ResMut<Unsaved>,
+    mut save: Local<crate::persistence::Save>,
+    mut exit: MessageReader<AppExit>,
 ) {
     if read_only.is_some() {
         return;
     }
-    let now = time.elapsed_secs_f64();
-    if settings.is_changed() {
-        unsaved.0 = Some(now);
-    }
-    if unsaved.0.is_some_and(|at| now - at >= SETTLE) {
-        unsaved.0 = None;
-        save(settings.text());
-    }
+    let Some(path) = data_dir().map(|dir| dir.join(FILE)) else {
+        return;
+    };
+    save.update(
+        &path,
+        time.elapsed_secs_f64(),
+        settings.is_changed(),
+        exit.read().next().is_some(),
+        || settings.text(),
+    );
 }
 
 #[cfg(test)]

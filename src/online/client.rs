@@ -438,9 +438,12 @@ impl Worker {
             let request = Self::agent().post(&self.url("/v1/runs"));
             let request = self.signed(request, "POST", "/v1/runs", &bytes);
             let circuit = path
-                .file_name()
+                .file_stem()
                 .and_then(|n| n.to_str())
-                .and_then(|n| n.split('-').next())
+                // Strip the hash and mode from the right; circuit ids can contain hyphens.
+                .and_then(|n| n.rsplit_once('-'))
+                .and_then(|(circuit_mode, _)| circuit_mode.rsplit_once('-'))
+                .map(|(circuit, _)| circuit)
                 .unwrap_or_default()
                 .to_string();
             match request

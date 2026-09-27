@@ -31,8 +31,10 @@ jobs:
           rustup default 1.97.1
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
-      - run: cargo test --locked --all-targets
+      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --locked --workspace --all-targets
+      - name: Python tooling tests
+        run: python3 -m unittest discover -s tools -p 'test_*.py'
       - name: Apple feature remains inert on Linux
         run: cargo test --locked --features game-center unsupported_platform_keeps_multiplayer_inert
       - name: Render circuits on Linux

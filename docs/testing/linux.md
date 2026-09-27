@@ -28,8 +28,9 @@ either rustup or distribution-provided Cargo, respects `CARGO_TARGET_DIR` and
 
 The [Linux workflow](../../.github/workflows/linux.yml) runs on Ubuntu 24.04
 x86-64 for pushes and pull requests. It checks formatting and all-feature
-Clippy, runs the full default test suite (including timing, track limits and
-ghost persistence), and tests that the Apple feature remains inert on Linux.
+Clippy across the workspace, runs the game and server test suites (including
+timing, track limits and ghost persistence), runs the Python tooling tests, and
+tests that the Apple feature remains inert on Linux.
 It also builds and installs the release package into a path containing spaces,
 validates desktop entries and shared libraries, and launches it outside the
 checkout to check asset loading.

@@ -374,7 +374,11 @@ fn play(
             replay.shoot = false;
             if let Some(folder) = pictures() {
                 let _ = std::fs::create_dir_all(&folder);
-                let name = format!("todora-{}.png", crate::online::client::unix_now());
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos();
+                let name = format!("todora-{stamp}.png");
                 commands
                     .spawn(Screenshot::primary_window())
                     .observe(save_to_disk(folder.join(name)));

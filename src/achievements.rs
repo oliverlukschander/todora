@@ -5,7 +5,7 @@
 //! frame, except the distance, which is a sum. Earned ones are kept in
 //! `achievements.json` beside the laps with the time they were earned, along
 //! with what they are counted from (circuits lapped, modes and cars used,
-//! distance), written off the main thread a second after anything changes. A
+//! distance), written off the main thread within a second of a change and flushed on exit. A
 //! toast says so when one is earned; the leaderboard's **Awards** view lists
 //! them all.
 
@@ -265,7 +265,8 @@ impl Plugin for AchievementsPlugin {
             .init_resource::<Toast>()
             .add_systems(Startup, setup)
             .add_systems(FixedUpdate, laps.after(LapSet))
-            .add_systems(Update, (sectors, distance, online, draw, save).chain());
+            .add_systems(Update, (sectors, distance, online, draw).chain())
+            .add_systems(Last, save);
     }
 }
 
@@ -359,7 +360,10 @@ fn laps(
 }
 
 fn sectors(timer: Res<LapTimer>, mut earned: ResMut<Earned>, mut toast: ResMut<Toast>) {
-    if timer.is_changed() && timer.splits.last() == Some(&Split::Purple) {
+    if timer.is_changed()
+        && timer.splits.last() == Some(&Split::Purple)
+        && !earned.earned.contains_key("purple")
+    {
         announce(&mut earned, &mut toast, &["purple"]);
     }
 }
@@ -464,40 +468,65 @@ fn draw(
     }
 }
 
-/// Written a second after the last change, off the main thread.
+/// Saved periodically while changing, and flushed before a normal exit.
 fn save(
     earned: Res<Earned>,
     time: Res<Time<Real>>,
     read_only: Option<Res<crate::settings::ReadOnly>>,
-    mut since: Local<Option<f64>>,
+    mut save: Local<crate::persistence::Save>,
+    mut exit: MessageReader<AppExit>,
 ) {
     if read_only.is_some() {
         return;
     }
-    let now = time.elapsed_secs_f64();
-    if earned.is_changed() && !earned.is_added() {
-        *since = Some(now);
-    }
-    if since.is_some_and(|at| now - at > 1.0) {
-        *since = None;
-        let (Some(path), Ok(text)) = (path(), serde_json::to_string_pretty(&*earned)) else {
-            return;
-        };
-        std::thread::spawn(move || {
-            let beside = path.with_extension("writing");
-            let written = std::fs::create_dir_all(path.parent().unwrap_or(&path))
-                .and_then(|()| std::fs::write(&beside, text))
-                .and_then(|()| std::fs::rename(&beside, &path));
-            if let Err(trouble) = written {
-                warn!("cannot save achievements: {trouble}");
-            }
-        });
-    }
+    let Some(path) = path() else {
+        return;
+    };
+    save.update(
+        &path,
+        time.elapsed_secs_f64(),
+        earned.is_changed() && !earned.is_added(),
+        exit.read().next().is_some(),
+        || serde_json::to_string_pretty(&*earned).expect("achievements serialise"),
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_purple_sector_only_changes_achievements_once() {
+        #[derive(Resource, Default)]
+        struct Changed(bool);
+        let mut app = App::new();
+        app.init_resource::<Changed>()
+            .init_resource::<LapTimer>()
+            .init_resource::<Earned>()
+            .init_resource::<Toast>()
+            .add_systems(
+                Update,
+                (
+                    sectors,
+                    |earned: Res<Earned>, mut changed: ResMut<Changed>| {
+                        changed.0 = earned.is_changed();
+                    },
+                )
+                    .chain(),
+            );
+        app.world_mut().resource_mut::<LapTimer>().splits = vec![Split::Purple];
+        app.update();
+        assert!(
+            app.world()
+                .resource::<Earned>()
+                .earned
+                .contains_key("purple")
+        );
+        app.world_mut().resource_mut::<LapTimer>().current += 0.01;
+        app.update();
+        assert!(!app.world().resource::<Changed>().0);
+        assert_eq!(app.world().resource::<Toast>().waiting.len(), 1);
+    }
 
     fn lap(valid: bool, best: bool) -> LapFinished {
         LapFinished {

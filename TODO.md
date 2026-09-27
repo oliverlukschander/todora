@@ -19,10 +19,7 @@ The approved plan, decisions and build order are in the
 - [x] First-run onboarding cards and the one-time Beginner hint (2026-09-23).
 - [x] Run format, replay check and outbox for valid new bests (2026-09-24).
 - [x] Leaderboard server: signed players, replay-verified runs, boards, ghosts, reports, delete-my-data (2026-09-24).
-- [ ] Add the server to Linux CI (the agent's GitHub token lacks the `workflow`
-  scope): after `cargo test --locked --all-targets` in `.github/workflows/linux.yml`,
-  run `cargo clippy --locked -p todora-server --all-targets -- -D warnings` and
-  `cargo test --locked -p todora-server`.
+- [x] Include the server in workspace-wide Linux CI tests and Clippy (2026-09-27).
 - [x] Game client: opt-in, signed uploads with backoff, Online settings tab, leaderboard overlay with world/country/rivals (2026-09-24).
 - [x] Race a downloaded ghost beside your own, with its delta and world-record purple (2026-09-24).
 - [x] Deploy script (tested against local Docker, amd64 and arm64), reverse-proxy
