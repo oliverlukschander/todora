@@ -1,5 +1,13 @@
 # Racing direction audit — 19 September 2026
 
+Endurance additions checked 27 September 2026; see [import notes](endurance.md).
+
+| Circuit ID | Reference | Racing direction | Result |
+| --- | --- | --- | --- |
+| le-mans | [ACO circuit map](https://www.24h-lemans.com/en/info/plan-circuit) | Clockwise | Full 24-hour course |
+| fuji | [Fuji Speedway](https://fsw.tv/guide/facility/racing.html) | Clockwise | Grand Prix with Dunlop chicane |
+| sebring | [Sebring operator map](https://www.sebringraceway.com/wp-content/uploads/sites/1019/2022/07/22/track-map.pdf) | Clockwise | Full International circuit |
+
 All 40 shipped centrelines were compared with [F1DB circuit records](https://github.com/f1db/f1db/tree/1e0008211a84f94f14acc6eb1eb5d2694861867d/src/data/circuits), pinned to revision `1e0008211a84f94f14acc6eb1eb5d2694861867d`. **Paul Ricard and Marina Bay were reversed.** The other 38 already matched. Each row links its reference; directions describe the layouts represented by the game's pinned GPS traces.
 
 The importer had treated GeoJSON point order as racing order. It now normalizes that order against the verified `direction` in `sources.json`. Reversing keeps the first fix at the recorded start/finish line and keeps each elevation attached to its GPS fix. The grid, lap gates and progress follow that corrected traversal. Existing surface fingerprints reject ghosts from the two old reversed tracks without deleting other records.

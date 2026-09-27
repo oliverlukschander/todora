@@ -2,7 +2,9 @@
 
 import json
 import re
+import tempfile
 import unittest
+from pathlib import Path
 
 import make_track
 
@@ -44,6 +46,50 @@ class RacingDirectionTests(unittest.TestCase):
                 self.assertNotEqual(area, 0)
                 self.assertEqual("clockwise" if area > 0 else "anticlockwise",
                                  source["direction"])
+
+    def test_local_traces_reproduce_baked_coordinates_and_heights_offline(self):
+        for module, recorded in make_track.sources().items():
+            if not recorded["source_id"].endswith(".geojson"):
+                continue
+            with self.subTest(circuit=module):
+                path = make_track.CIRCUITS.parents[2] / recorded["source_id"]
+                properties, fixes, elevations = make_track.local_trace(path)
+                self.assertEqual(properties["revision"], recorded["revision"])
+                fixes = make_track.orient(
+                    make_track.start_at(fixes, recorded["line"]), recorded["direction"])
+                low = min(elevations.values())
+                expected = [(round(x, 2), round(elevations[tuple(fix)] - low), round(z, 2))
+                            for fix, (x, z) in zip(fixes, make_track.plan(fixes))]
+                text = (make_track.CIRCUITS / f"{module}.rs").read_text()
+                actual = [tuple(map(float, row)) for row in re.findall(
+                    r"\[(-?\d+\.\d+), (-?\d+\.\d+), (-?\d+\.\d+)\]",
+                    text.split("const CENTRELINE:")[1])]
+                self.assertEqual(actual, expected)
+
+    def test_local_trace_rejects_missing_elevation_and_open_laps(self):
+        properties = dict(source="survey", source_id="track", revision="a" * 40,
+                          line=[50, 10], direction="clockwise")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "trace.geojson"
+            for coordinates in (
+                [[10, 50], [11, 50], [11, 49], [10, 50]],
+                [[10, 50, 2], [11, 50, 3], [11, 49, 4], [10, 49, 5]],
+                [[10, 50, 2], [11, 50, float("nan")], [11, 49, 4], [10, 50, 2]],
+            ):
+                path.write_text(json.dumps({"features": [{"properties": properties,
+                    "geometry": {"type": "LineString", "coordinates": coordinates}}]}))
+                with self.assertRaises(ValueError):
+                    make_track.local_trace(path)
+
+    def test_fuji_keeps_the_dunlop_chicane_instead_of_the_bypass(self):
+        path = make_track.CIRCUITS.parents[2] / "docs/track-screening/traces/fuji.geojson"
+        _, fixes, _ = make_track.local_trace(path)
+        # Surveyed northward leg of the chicane. The shortcut runs well west
+        # of this point; a similar total lap length alone cannot catch it.
+        lon, lat = 138.9238369, 35.365111
+        nearest = min(((x - lon) * 91000) ** 2 + ((y - lat) * 111000) ** 2
+                      for x, y in fixes)
+        self.assertLess(nearest, 5 ** 2)
 
 
 if __name__ == "__main__":

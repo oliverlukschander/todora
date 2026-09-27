@@ -111,6 +111,20 @@
     ],
     "direction": "clockwise"
   },
+  "fuji": {
+    "source_id": "docs/track-screening/traces/fuji.geojson",
+    "name": "Volcano Straight",
+    "source": "tobi/track-atlas (OpenStreetMap contributors; ODbL 1.0)",
+    "revision": "c783def5a24df8ce8f034262e8228c262b854e0e",
+    "heights": "Open-Meteo DEM",
+    "fixes": 315,
+    "lap_km": 4.559,
+    "line": [
+      35.37241,
+      138.92742
+    ],
+    "direction": "clockwise"
+  },
   "gilles_villeneuve": {
     "source_id": "ca-1978",
     "name": "Gilles-Villeneuve",
@@ -279,6 +293,20 @@
     ],
     "direction": "anticlockwise"
   },
+  "le_mans": {
+    "source_id": "docs/track-screening/traces/le-mans.geojson",
+    "name": "Sarthe Run",
+    "source": "tobi/track-atlas (OpenStreetMap contributors; ODbL 1.0)",
+    "revision": "c783def5a24df8ce8f034262e8228c262b854e0e",
+    "heights": "Open-Meteo DEM",
+    "fixes": 1200,
+    "lap_km": 13.627,
+    "line": [
+      47.95091,
+      0.20759
+    ],
+    "direction": "clockwise"
+  },
   "losail": {
     "source_id": "qa-2004",
     "name": "Losail",
@@ -430,6 +458,20 @@
     "line": [
       47.22002,
       14.76512
+    ],
+    "direction": "clockwise"
+  },
+  "sebring": {
+    "source_id": "docs/track-screening/traces/sebring.geojson",
+    "name": "Orange Grove Airfield",
+    "source": "tobi/track-atlas (OpenStreetMap contributors; ODbL 1.0)",
+    "revision": "c783def5a24df8ce8f034262e8228c262b854e0e",
+    "heights": "Open-Meteo DEM",
+    "fixes": 835,
+    "lap_km": 5.848,
+    "line": [
+      27.45023,
+      -81.35353
     ],
     "direction": "clockwise"
   },

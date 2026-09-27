@@ -1,8 +1,14 @@
 # Todora
 
-A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy.org/). Drive the Omarchy GT #95 around forty scaled circuits, with **T** for the list of them.
+A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy.org/). Drive the Omarchy GT #95 around **43 scaled circuits**, with **T** for the list of them.
+
+**Three endurance additions:** Sarthe Run (Le Mans’ full 24-hour course), Volcano Straight (Fuji Grand Prix, including the Dunlop chicane), and Orange Grove Airfield (Sebring International). Press **T** and search for either the Todora name or the real venue. These join the existing circuit browser, with ghosts, sectors and medal targets in every driving mode. [Geometry sources and validation](docs/track-screening/endurance.md).
+
+The weekly challenge keeps its original 40-circuit rotation so older clients and historical results still agree. The 40-circuit achievements retain their thresholds and earned progress.
 
 The circuits are laid out from public GPS traces of real circuits, and each carries a name of its own that nods to where it is — Parco Reale, Ardennes Loop, Figure-Eight Hills, Styrian Bowl. Todora is not affiliated with any circuit, series or team, and uses none of their names or marks. Internally a circuit keeps the id it has always had (`monza`, `spa-francorchamps`), which boards, saved laps and the weekly challenge are keyed to, so renaming one never touches a time; the circuit search finds a circuit by either.
+
+The three new tracks are in the development build on `main`; the v0.11.1 downloads below still contain 40 circuits.
 
 [Download Todora 0.11.1 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.11.1/Todora.dmg) · [for Linux x86-64](https://github.com/oliverlukschander/todora/releases/download/v0.11.1/Todora-linux-x86_64.tar.gz) · [Release notes](docs/releases/v0.11.1.md)
 
@@ -274,6 +280,8 @@ Rebuild the Omarchy GT from Blender:
 ```
 
 ## Circuit data and thanks
+
+The three endurance layouts use © OpenStreetMap contributors’ geometry via [tobi/track-atlas](https://github.com/tobi/track-atlas), with Open-Meteo elevation samples. [Data attribution, licenses and source offer](assets/tracks/CREDITS.md).
 
 Todora's circuit layouts are based on data from [bacinger/f1-circuits](https://github.com/bacinger/f1-circuits). We're hugely grateful to Tomislav Bacinger and the project's contributors for collecting and sharing these circuits. Thank you for giving Todora its tracks and making projects like this possible!
 

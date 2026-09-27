@@ -333,11 +333,12 @@ mod tests {
     }
 
     /// Flat and uphill road keeps the level boom. With the car at rest, only
-    /// the five hilliest circuits lift the camera at all, and even Monaco's
+    /// the hilly circuits below lift the camera at all, and even Monaco's
     /// descents lift it for well under a sixth of the lap.
     #[test]
     fn the_level_boom_is_kept_almost_everywhere() {
-        const HILLY: [&str; 5] = [
+        const HILLY: [&str; 6] = [
+            "fuji",
             "imola",
             "interlagos",
             "kyalami",

@@ -1,7 +1,7 @@
 //! The weekly challenge: one circuit a week, the same for everyone.
 //!
 //! Each ISO week, from Monday 00:00 UTC, picks a circuit from a fixed shuffle
-//! of all forty (see [`crate::verify::challenge_circuit`]), so every copy of
+//! of the original forty circuits (see [`crate::verify::challenge_circuit`]), so every copy of
 //! the game agrees without asking anyone and no circuit comes back within forty
 //! weeks. Any car and setup, in Regular mode. Your best lap there this week is
 //! kept in the settings; online, a lap that beats it is uploaded even when it is

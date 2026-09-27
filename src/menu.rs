@@ -447,6 +447,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn endurance_circuits_can_be_found_by_either_name() {
+        for (id, name) in [
+            ("le-mans", "Sarthe Run"),
+            ("fuji", "Volcano Straight"),
+            ("sebring", "Orange Grove Airfield"),
+        ] {
+            for search in [id.replace('-', " "), name.to_string()] {
+                let menu = Menu {
+                    page: Some(Page::Circuit),
+                    search,
+                    ..default()
+                };
+                let entries = menu.entries();
+                assert_eq!(entries.len(), 1);
+                assert_eq!(all_circuits()[entries[0]].id, id);
+            }
+        }
+    }
+
     fn game() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)

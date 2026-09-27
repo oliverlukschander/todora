@@ -938,100 +938,74 @@ fn a_bridge_has_the_air_under_it_that_was_asked_for() {
     }
 }
 
-/// Every circuit in the game came from one pinned revision of one source,
-/// exactly once, and says so in three places that agree.
-///
-/// The three are the module's own header, the provenance file beside the
-/// screening runs, and the list the menu is drawn from. They are written at
-/// different times by different things — the generator writes the first two
-/// and the third is edited by hand — so the way they go wrong is quietly:
-/// a circuit generated twice under two names, a circuit whose trace was
-/// refreshed from `master` while the rest came from a pinned commit, a
-/// provenance entry left behind by a module that was deleted, a trace
-/// turned to begin somewhere other than the line recorded for it.
-///
-/// That last one is why the line is checked here rather than in the game:
-/// the game cannot tell, because the first sample of the trace *is* the
-/// line as far as it is concerned, wherever it happens to be. Only the two
-/// files can disagree, so only the two files can be held together.
-///
-/// Reading the repository from a test is unusual and is the point. What is
-/// being checked is not what the code does with the data; it is that the
-/// data is what it says it is.
+/// Every admitted circuit has unique, pinned provenance and a matching start line.
 #[test]
 fn every_circuit_came_from_the_source_once() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let recorded = std::fs::read_to_string(root.join("docs/track-screening/sources.json"))
-        .expect("the provenance file is beside the screening runs");
-    let pinned = std::fs::read_to_string(root.join("tools/make_track.py"))
-        .expect("the generator")
-        .lines()
-        .find_map(|line| {
-            line.strip_prefix("REVISION = ")
-                .map(|r| r.trim_matches('"').to_string())
-        })
-        .expect("the generator pins a revision");
-
-    let mut sources: Vec<String> = Vec::new();
-    for entry in std::fs::read_dir(root.join("src/track/circuits")).expect("the circuits") {
-        let path = entry.expect("a directory entry").path();
-        if path.file_name().is_some_and(|name| name == "mod.rs") {
+    let recorded: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("docs/track-screening/sources.json")).unwrap(),
+    )
+    .unwrap();
+    let recorded = recorded.as_object().unwrap();
+    let mut sources = std::collections::HashSet::new();
+    let mut modules = 0;
+    for entry in std::fs::read_dir(root.join("src/track/circuits")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|ext| ext != "rs")
+            || path.file_name().is_some_and(|name| name == "mod.rs")
+        {
             continue;
         }
-        let module = path
-            .file_stem()
-            .expect("a module name")
-            .to_string_lossy()
-            .to_string();
-        let text = std::fs::read_to_string(&path).expect("a circuit module");
-        let source = text
-            .split("make_track.py ")
-            .nth(1)
-            .and_then(|rest| rest.split_whitespace().next())
-            .unwrap_or_else(|| panic!("{module} does not say what it was generated from"))
-            .to_string();
+        modules += 1;
+        let module = path.file_stem().unwrap().to_str().unwrap();
+        let provenance = &recorded[module];
+        let text = std::fs::read_to_string(&path).unwrap();
+        let source = provenance["source_id"].as_str().unwrap();
+        let revision = provenance["revision"].as_str().unwrap();
+        assert_eq!(revision.len(), 40, "{module}: pin a complete commit");
         assert!(
-            text.contains(&pinned[..12]),
-            "{module} does not name the pinned revision of the source"
+            text.contains(&revision[..12]),
+            "{module}: revision mismatch"
         );
         assert!(
-            recorded.contains(&format!("\"{module}\": {{")),
-            "{module} is not in the provenance file"
+            text.contains(&format!("make_track.py {source} ")),
+            "{module}: source mismatch"
         );
         assert!(
-            recorded.contains(&format!("\"source_id\": \"{source}\"")),
-            "{source} is not in the provenance file"
+            sources.insert((provenance["source"].as_str().unwrap(), source)),
+            "{module}: source admitted twice"
         );
-        let line = text
+        let line: Vec<f64> = text
             .split("start/finish line, ")
             .nth(1)
-            .and_then(|rest| rest.lines().next())
-            .unwrap_or_else(|| panic!("{module} does not say where its line is"))
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
             .trim_end_matches('.')
-            .replace(", ", ",\n      ");
-        assert!(
-            recorded.contains(&format!("\"line\": [\n      {line}\n    ]")),
-            "{module} begins at {line}, which is not the line recorded for it"
+            .split(", ")
+            .map(|n| n.parse().unwrap())
+            .collect();
+        assert_eq!(
+            line,
+            provenance["line"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n.as_f64().unwrap())
+                .collect::<Vec<_>>(),
+            "{module}: start line mismatch"
         );
-        sources.push(source);
+        let id = module.replace('_', "-");
+        let circuit = circuits::all().iter().find(|c| c.id == id).unwrap();
+        assert_eq!(
+            circuit.centreline.len(),
+            provenance["fixes"].as_u64().unwrap() as usize
+        );
     }
-
-    assert_eq!(
-        sources.len(),
-        circuits::all().len(),
-        "there are {} circuit modules and {} circuits in the list",
-        sources.len(),
-        circuits::all().len()
-    );
-    assert_eq!(sources.len(), 40, "the source has forty circuits in it");
-    sources.sort();
-    let listed = sources.len();
-    sources.dedup();
-    assert_eq!(
-        sources.len(),
-        listed,
-        "a circuit of the source was built twice under two names"
-    );
+    assert_eq!(modules, recorded.len());
+    assert_eq!(modules, circuits::all().len());
+    assert_eq!(modules, 43);
 }
 
 /// A bridge says where it came from, and says which half of it is which.

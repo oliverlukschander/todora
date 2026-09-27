@@ -53,6 +53,12 @@ pub(super) const AUTHOR: &[Entry] = &[
         provisional: [true, true, true],
     },
     Entry {
+        circuit: "fuji",
+        fingerprint: 0xaf2ce58efa956ff6,
+        times: [41.31, 40.11, 39.18],
+        provisional: [true, true, true],
+    },
+    Entry {
         circuit: "gilles-villeneuve",
         fingerprint: 0xa3bd064ef0139ec9,
         times: [33.55, 32.04, 31.31],
@@ -125,6 +131,12 @@ pub(super) const AUTHOR: &[Entry] = &[
         provisional: [true, true, true],
     },
     Entry {
+        circuit: "le-mans",
+        fingerprint: 0x7ad9bcf05e39e869,
+        times: [102.06, 95.33, 92.05],
+        provisional: [true, true, true],
+    },
+    Entry {
         circuit: "losail",
         fingerprint: 0xb816fa8b88f31d73,
         times: [48.71, 47.17, 46.36],
@@ -189,6 +201,12 @@ pub(super) const AUTHOR: &[Entry] = &[
         fingerprint: 0x2fe0c25bcb58d969,
         times: [35.03, 33.62, 33.94],
         provisional: [false, false, true],
+    },
+    Entry {
+        circuit: "sebring",
+        fingerprint: 0x85020114066375e6,
+        times: [48.72, 46.85, 45.87],
+        provisional: [true, true, true],
     },
     Entry {
         circuit: "sepang",

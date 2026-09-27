@@ -57,7 +57,7 @@ pub(crate) fn all() -> Vec<(String, String, String)> {
         (
             "circuits-40",
             "The whole calendar",
-            "Finish a lap on all 40 circuits",
+            "Finish a lap on 40 circuits",
         ),
         ("bronze", "On the podium", "Earn a bronze medal"),
         ("silver", "Silverware", "Earn a silver medal"),
@@ -65,7 +65,7 @@ pub(crate) fn all() -> Vec<(String, String, String)> {
         ("author", "Author, author", "Beat an author time"),
         ("gold-5", "Five golds", "Gold on 5 circuits in one mode"),
         ("gold-20", "Twenty golds", "Gold on 20 circuits in one mode"),
-        ("gold-40", "Midas", "Gold on every circuit in one mode"),
+        ("gold-40", "Midas", "Gold on 40 circuits in one mode"),
         ("author-5", "Ghost writer", "Beat 5 author times"),
         ("pro", "Pro", "Finish a lap that counts in Pro"),
         (

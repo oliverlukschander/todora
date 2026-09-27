@@ -177,17 +177,70 @@ pub fn week_bounds(year: i32, week: u32) -> (i64, i64) {
     (monday * 86_400, (monday + 7) * 86_400)
 }
 
+/// The original weekly roster. Freeze it so adding a circuit cannot change
+/// historical challenges or disagree with an older client/server. New tracks
+/// remain available in free drive and the ordinary circuit leaderboards.
+const CHALLENGE_ROSTER: &[&str] = &[
+    "albert-park",
+    "algarve",
+    "americas",
+    "bahrain",
+    "baku",
+    "barcelona-catalunya",
+    "buenos-aires",
+    "estoril",
+    "gilles-villeneuve",
+    "hermanos-rodriguez",
+    "hockenheim",
+    "hungaroring",
+    "imola",
+    "indianapolis",
+    "interlagos",
+    "istanbul-park",
+    "jacarepagua",
+    "jeddah",
+    "kyalami",
+    "las-vegas",
+    "losail",
+    "madring",
+    "magny-cours",
+    "marina-bay",
+    "miami",
+    "monaco",
+    "monza",
+    "mugello",
+    "nurburgring",
+    "paul-ricard",
+    "red-bull-ring",
+    "sepang",
+    "shanghai",
+    "silverstone",
+    "sochi",
+    "spa-francorchamps",
+    "suzuka",
+    "watkins-glen",
+    "yas-marina",
+    "zandvoort",
+];
+
 /// Which circuit a week's challenge is on, as an index into [`circuits`]:
-/// a fixed shuffle of all of them, walked one a week, so no circuit comes back
-/// within as many weeks as there are circuits and every copy of the game agrees.
+/// a fixed shuffle of the original forty, walked one a week. Every copy of the
+/// game agrees even when newer copies have more circuits.
 ///
 /// The shuffle runs over the circuits in the order of their ids, not the
 /// menu's, so renaming a circuit (which re-sorts the menu) never changes a
 /// week's challenge, and an older server still agrees with a newer game.
 pub fn challenge_circuit(year: i32, week: u32) -> usize {
-    let n = all_circuits().len();
-    let mut by_id: Vec<usize> = (0..n).collect();
-    by_id.sort_by_key(|&at| all_circuits()[at].id);
+    let by_id: Vec<usize> = CHALLENGE_ROSTER
+        .iter()
+        .map(|id| {
+            all_circuits()
+                .iter()
+                .position(|c| c.id == *id)
+                .expect("weekly circuit remains available")
+        })
+        .collect();
+    let n = by_id.len();
     let mut order: Vec<usize> = (0..n).collect();
     let mut seed = 0x9e37_79b9_7f4a_7c15u64;
     for i in (1..n).rev() {
@@ -368,7 +421,7 @@ mod tests {
         // Forty consecutive weeks visit forty different circuits.
         let mut seen = std::collections::HashSet::new();
         let mut at = start;
-        for _ in 0..circuits().len() {
+        for _ in 0..CHALLENGE_ROSTER.len() {
             let (y, w) = iso_week(at);
             assert!(
                 seen.insert(challenge_circuit(y, w)),
@@ -376,6 +429,8 @@ mod tests {
             );
             at += 7 * 86_400;
         }
+        assert_eq!(CHALLENGE_ROSTER.len(), 40);
+        assert!(CHALLENGE_ROSTER.windows(2).all(|pair| pair[0] < pair[1]));
         assert_eq!(challenge_circuit(2026, 39), challenge_circuit(2026, 39));
         // What the game and the server have always picked, whatever the menu
         // calls these circuits or however it sorts them.

@@ -21,7 +21,7 @@ fi
 unset BEVY_ASSET_ROOT CARGO_MANIFEST_DIR
 cd /tmp
 
-for circuit in suzuka monza monaco; do
+for circuit in suzuka monza monaco le-mans fuji sebring; do
   rm -f "$OUT/$circuit.png"
   TODORA_CAPTURE="$OUT/$circuit.png" TODORA_CIRCUIT="$circuit" TODORA_SMALL=1 \
     timeout 180 "$PACKAGE/todora" > "$OUT/$circuit.log" 2>&1

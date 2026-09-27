@@ -7,7 +7,8 @@
 //! settles for itself — see [`super::profile`].
 //!
 //! Adding one is a file and a line: run `tools/make_track.py` against an id from
-//! bacinger/f1-circuits and it writes the module and registers it here.
+//! bacinger/f1-circuits or a pinned local GeoJSON trace; it writes the module
+//! and registers it here.
 
 mod albert_park;
 mod algarve;
@@ -17,6 +18,7 @@ mod baku;
 mod barcelona_catalunya;
 mod buenos_aires;
 mod estoril;
+mod fuji;
 mod gilles_villeneuve;
 mod hermanos_rodriguez;
 mod hockenheim;
@@ -29,6 +31,7 @@ mod jacarepagua;
 mod jeddah;
 mod kyalami;
 mod las_vegas;
+mod le_mans;
 mod losail;
 mod madring;
 mod magny_cours;
@@ -40,6 +43,7 @@ mod mugello;
 mod nurburgring;
 mod paul_ricard;
 mod red_bull_ring;
+mod sebring;
 mod sepang;
 mod shanghai;
 mod silverstone;
@@ -195,6 +199,7 @@ const ALL: &[Circuit] = &[
     sepang::CIRCUIT,
     las_vegas::CIRCUIT,
     zandvoort::CIRCUIT,
+    sebring::CIRCUIT,
     buenos_aires::CIRCUIT,
     monza::CIRCUIT,
     losail::CIRCUIT,
@@ -203,10 +208,12 @@ const ALL: &[Circuit] = &[
     jacarepagua::CIRCUIT,
     algarve::CIRCUIT,
     imola::CIRCUIT,
+    le_mans::CIRCUIT,
     albert_park::CIRCUIT,
     gilles_villeneuve::CIRCUIT,
     red_bull_ring::CIRCUIT,
     mugello::CIRCUIT,
+    fuji::CIRCUIT,
     shanghai::CIRCUIT,
 ];
 
