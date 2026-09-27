@@ -27,6 +27,7 @@ rm -rf "$APP" dist/dmg "dist/$NAME.dmg" dist/AppIcon.iconset dist/todora.svg.png
 mkdir -p "$APP/Contents/MacOS" "$RES"
 cp "target/release/$BIN" "$APP/Contents/MacOS/$BIN"
 cp -R assets "$RES/assets"
+cp LICENSE LICENSES.md THIRD_PARTY_NOTICES.html "$RES/"
 
 # The icon. iconutil wants exactly these ten files.
 qlmanage -t -s 1024 -o dist art/icon/todora.svg >/dev/null 2>&1

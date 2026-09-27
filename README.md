@@ -2,6 +2,12 @@
 
 A 3rd-person racer in [Rust](https://www.rust-lang.org/) and [Bevy](https://bevy.org/). Drive the Omarchy GT #95 around **51 scaled circuits**, with **T** for the list of them.
 
+**License:** Todora's original code and artwork are [MIT licensed](LICENSE).
+Third-party audio, fonts, flags, circuit data and dependencies retain their own
+licenses; see [licensing and credits](LICENSES.md). Forks and modified builds are
+welcome. Access to the official leaderboard is governed separately by the
+[service's admission rules](docs/online-integrity.md).
+
 **Three endurance additions:** Sarthe Run (Le Mans’ full 24-hour course), Volcano Straight (Fuji Grand Prix, including the Dunlop chicane), and Orange Grove Airfield (Sebring International). Press **T** and search for either the Todora name or the real venue. These join the existing circuit browser, with ghosts, sectors and medal targets in every driving mode. [Geometry sources and validation](docs/track-screening/endurance.md).
 
 **Eight North American additions:** Laguna Seca, Lime Rock, Long Beach, Mid-Ohio, Mosport, Road America, Road Atlanta and VIR inspire another set of Todora circuits. [Names, layouts and sources](docs/track-screening/north-america.md).

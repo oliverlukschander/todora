@@ -46,6 +46,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 cp "${CARGO_TARGET_DIR:-target}/release/$BIN" "$OUT/$BIN"
 cp -R assets "$OUT/assets"
+cp LICENSE LICENSES.md THIRD_PARTY_NOTICES.html "$OUT/"
 rsvg-convert -w 512 -h 512 "$ICON_SRC" -o "$ICON_PNG"
 
 cat > "$OUT/$BIN.desktop" <<DESKTOP
@@ -75,6 +76,7 @@ if [[ "$INSTALL" -eq 1 ]]; then
   cp "$OUT/$BIN" "$APPDIR/$BIN"
   rm -rf "$APPDIR/assets"
   cp -R "$OUT/assets" "$APPDIR/assets"
+  cp "$OUT/LICENSE" "$OUT/LICENSES.md" "$OUT/THIRD_PARTY_NOTICES.html" "$APPDIR/"
   cp "$ICON_PNG" "$ICON_DIR/todora.png"
   cat > "$APP_DESKTOP" <<DESKTOP
 [Desktop Entry]

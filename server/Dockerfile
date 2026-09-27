@@ -18,6 +18,11 @@ RUN apt-get update \
  && useradd --system --home /data todora \
  && mkdir -p /data && chown todora /data
 COPY --from=build /todora-server /usr/local/bin/todora-server
+COPY LICENSE LICENSES.md THIRD_PARTY_NOTICES.html /usr/share/doc/todora/
+COPY assets/audio/CREDITS.md /usr/share/doc/todora/assets/audio/
+COPY assets/tracks/CREDITS.md /usr/share/doc/todora/assets/tracks/
+COPY assets/fonts/OFL.txt /usr/share/doc/todora/assets/fonts/
+COPY assets/ui/flags/LICENSE assets/ui/flags/CREDITS.md /usr/share/doc/todora/assets/ui/flags/
 USER todora
 ENV TODORA_DB=/data/todora.db TODORA_LISTEN=0.0.0.0:8787
 EXPOSE 8787

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Todora — dependency licenses</title>
+<style>
+body { font: 16px/1.5 system-ui, sans-serif; max-width: 70rem; margin: 2rem auto; padding: 0 1rem; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+section { border-top: 1px solid #aaa; margin-top: 2rem; }
+</style>
+<h1>Todora — dependency licenses</h1>
+<p>Generated with cargo-about 0.9.2 from the workspace's locked dependencies,
+including build dependencies and all supported Mac and Linux targets.
+Some entries may not be used by a particular binary.</p>
+<p>Todora's own license is in <a href="LICENSE">LICENSE</a>.
+Separate asset licenses and credits are listed in <a href="LICENSES.md">LICENSES.md</a>.</p>
+<p>Dependency source links below open the exact published crate version's source archive.
+The Symphonia crates are provided under MPL 2.0; their source is available through
+these links. Todora uses the published crates without local modifications.</p>
+{{#each licenses}}
+<section>
+<h2>{{name}}</h2>
+<ul>
+{{#each used_by}}
+<li>{{crate.name}} {{crate.version}} —
+{{#if crate.source}}
+<a href="https://crates.io/api/v1/crates/{{crate.name}}/{{crate.version}}/download">source archive</a>
+{{else}}
+<a href="https://github.com/oliverlukschander/todora">Todora source</a>
+{{/if}}
+{{#if crate.repository}} · <a href="{{crate.repository}}">upstream project</a>{{/if}}</li>
+{{/each}}
+</ul>
+<pre>{{text}}</pre>
+</section>
+{{/each}}
+</html>

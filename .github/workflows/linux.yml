@@ -30,6 +30,11 @@ jobs:
           rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
           rustup default 1.97.1
       - uses: Swatinem/rust-cache@v2
+      - name: Check dependency license notices
+        run: |
+          cargo install cargo-about --version 0.9.2 --locked --features cli
+          cargo about generate --locked --workspace --all-features --fail tools/licenses.hbs -o /tmp/THIRD_PARTY_NOTICES.html
+          cmp THIRD_PARTY_NOTICES.html /tmp/THIRD_PARTY_NOTICES.html
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --locked --workspace --all-targets
@@ -46,6 +51,10 @@ jobs:
           XDG_DATA_HOME: /tmp/Todora Install
         run: |
           tools/package_linux.sh --install
+          for notice in LICENSE LICENSES.md THIRD_PARTY_NOTICES.html; do
+            cmp "$notice" "dist/Todora/$notice"
+            cmp "$notice" "$XDG_DATA_HOME/todora/$notice"
+          done
           desktop-file-validate dist/Todora/todora.desktop "$XDG_DATA_HOME/applications/com.lukschander.todora.desktop"
           ldd "$XDG_DATA_HOME/todora/todora" | tee dist/linux-check/linked-libraries.log
           ! grep -q 'not found' dist/linux-check/linked-libraries.log
