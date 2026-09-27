@@ -138,7 +138,7 @@ impl Plugin for ReplayPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Replay>()
             .add_systems(Startup, setup)
-            .add_systems(PreUpdate, drive.after(HaltSet))
+            .add_systems(PreUpdate, drive.after(HaltSet).run_if(crate::local::solo))
             .add_systems(Update, (play, draw).chain().after(crate::ghost::GhostSet));
     }
 }

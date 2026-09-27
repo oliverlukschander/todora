@@ -488,6 +488,7 @@ fn drive(
     tabs: Query<(&TabLabel, Ref<Interaction>)>,
     mut typed: MessageReader<bevy::input::keyboard::KeyboardInput>,
     title: Option<Res<crate::title::Title>>,
+    mut profiles: MessageWriter<crate::online::profile::OpenProfile>,
 ) {
     if *halt != Halt::Settings {
         typed.clear();
@@ -528,8 +529,11 @@ fn drive(
     // On the name row the keyboard types; Q and E are letters there.
     let naming = page.row() == Row::Name;
     for key in typed.read() {
-        if naming && key.state.is_pressed() {
-            type_into(&mut settings.name, &key.logical_key);
+        if naming
+            && key.state.is_pressed()
+            && matches!(key.logical_key, bevy::input::keyboard::Key::Character(_))
+        {
+            profiles.write(crate::online::profile::OpenProfile(Halt::Settings));
         }
     }
     if keys.just_pressed(KeyCode::Escape) || pad(GamepadButton::East) || pad(GamepadButton::Start) {
@@ -572,12 +576,17 @@ fn drive(
     let dir = if forward { 1 } else { step.x };
     if dir != 0 {
         let row = page.row();
-        row.change(&mut settings, dir);
+        if matches!(row, Row::Name | Row::Country) || (row == Row::Online && !settings.online) {
+            profiles.write(crate::online::profile::OpenProfile(Halt::Settings));
+        } else {
+            row.change(&mut settings, dir);
+        }
     }
 }
 
 /// A key pressed on the name row: a letter, digit or allowed mark joins the
 /// name (up to 16), Backspace takes one off.
+#[cfg(test)]
 fn type_into(name: &mut String, key: &bevy::input::keyboard::Key) {
     use bevy::input::keyboard::Key;
     match key {
@@ -729,6 +738,7 @@ mod tests {
             .insert_resource(Halt::Pause)
             .init_resource::<Page>()
             .add_message::<bevy::input::keyboard::KeyboardInput>()
+            .add_message::<crate::online::profile::OpenProfile>()
             .add_systems(Update, drive);
         app.update();
         app

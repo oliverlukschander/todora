@@ -1,7 +1,7 @@
 //! Overlapping collections: a venue can belong to more than one racing story.
 //! Historical membership and layout caveats are recorded in the endurance notes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum Collection {
+pub(crate) enum Collection {
     #[default]
     All,
     Dhh2014,
@@ -11,7 +11,7 @@ pub(super) enum Collection {
 }
 
 impl Collection {
-    pub(super) const ALL: [Self; 5] = [
+    pub(crate) const ALL: [Self; 5] = [
         Self::All,
         Self::Dhh2014,
         Self::Endurance,
@@ -19,7 +19,7 @@ impl Collection {
         Self::Heritage,
     ];
 
-    pub(super) fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         crate::text::t(match self {
             Self::All => "collection.all",
             Self::Dhh2014 => "collection.dhh",
@@ -29,7 +29,7 @@ impl Collection {
         })
     }
 
-    pub(super) fn description(self) -> &'static str {
+    pub(crate) fn description(self) -> &'static str {
         crate::text::t(match self {
             Self::All => "menu.circuits_sub",
             Self::Dhh2014 => "collection.dhh_about",
@@ -39,7 +39,7 @@ impl Collection {
         })
     }
 
-    pub(super) fn contains(self, id: &str) -> bool {
+    pub(crate) fn contains(self, id: &str) -> bool {
         match self {
             Self::All => true,
             Self::Dhh2014 => DHH_2014.contains(&id),
@@ -49,7 +49,7 @@ impl Collection {
         }
     }
 
-    pub(super) fn step(self, by: i32) -> Self {
+    pub(crate) fn step(self, by: i32) -> Self {
         let at = Self::ALL.iter().position(|c| *c == self).unwrap() as i32;
         Self::ALL[(at + by).rem_euclid(Self::ALL.len() as i32) as usize]
     }
@@ -57,7 +57,7 @@ impl Collection {
 
 /// Final 2014 WEC calendar, in race order. The menu does not alter track IDs,
 /// saved times or the separately frozen weekly challenge roster.
-pub(super) const DHH_2014: &[&str] = &[
+pub(crate) const DHH_2014: &[&str] = &[
     "silverstone",
     "spa-francorchamps",
     "le-mans",

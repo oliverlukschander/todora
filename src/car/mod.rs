@@ -173,6 +173,43 @@ fn setup(
         });
 }
 
+/// The same sprung body and animated wheels, with a local player's paint.
+pub(crate) fn local_body(parent: &mut ChildSpawnerCommands, assets: &AssetServer, colour: Color) {
+    parent
+        .spawn((
+            Body::default(),
+            LocalPaint(colour),
+            Transform::IDENTITY,
+            Visibility::default(),
+            WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(MODEL))),
+        ))
+        .observe(attach_wheels)
+        .observe(paint_local);
+}
+#[derive(Component)]
+struct LocalPaint(Color);
+fn paint_local(
+    ready: On<WorldInstanceReady>,
+    colours: Query<&LocalPaint>,
+    children: Query<&Children>,
+    mut panels: Query<(&GltfMaterialName, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let Ok(colour) = colours.get(ready.entity) else {
+        return;
+    };
+    for entity in children.iter_descendants(ready.entity) {
+        if let Ok((name, mut handle)) = panels.get_mut(entity)
+            && name.0 == "Paint"
+            && let Some(original) = materials.get(&handle.0)
+        {
+            let mut material = original.clone();
+            material.base_color = colour.0;
+            handle.0 = materials.add(material);
+        }
+    }
+}
+
 /// The inside of the player's car.
 #[derive(Component)]
 struct Cockpit;
@@ -343,12 +380,16 @@ pub(crate) fn advance(
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn drive(
     time: Res<Time>,
     track: Res<Track>,
     mut cars: Query<
         (&mut Transform, &mut Car, &Handling, &Controls),
-        Without<crate::countdown::Held>,
+        (
+            Without<crate::countdown::Held>,
+            Without<crate::local::Parked>,
+        ),
     >,
 ) {
     for (mut transform, mut car, handling, controls) in &mut cars {

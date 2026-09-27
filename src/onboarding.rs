@@ -33,6 +33,10 @@ pub(crate) struct Guide {
 }
 
 impl Guide {
+    pub(crate) fn dismiss(&mut self) {
+        self.card = None;
+        self.hint_left = 0.0;
+    }
     /// Put a card up, for a visual check.
     #[cfg(feature = "visual-check")]
     pub(crate) fn show(&mut self, at: usize) {

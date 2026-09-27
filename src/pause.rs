@@ -42,6 +42,10 @@ pub(crate) enum Halt {
     Menu,
     /// The settings page, opened from the pause; it goes back to the pause.
     Settings,
+    /// Editing the player name, country and online preference.
+    Profile,
+    LocalLobby,
+    LocalPause,
     /// The how-to-drive cards, opened from the pause; they go back to it.
     Guide,
     /// The one-time offer to go online, shown while the car waits on the grid.
@@ -91,6 +95,7 @@ impl Plugin for PausePlugin {
                 PreUpdate,
                 (
                     watch
+                        .run_if(crate::local::solo)
                         .in_set(HaltSet)
                         .after(bevy::input::InputSystems)
                         .after(bevy::ui::UiSystems::Focus),

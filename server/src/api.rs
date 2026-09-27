@@ -176,6 +176,7 @@ pub struct Registration {
 pub struct Registered {
     pub id: String,
     pub name: String,
+    pub country: Option<String>,
 }
 
 /// A new player: a key, signed with itself, and a name. Registering the same
@@ -192,8 +193,6 @@ async fn register(
     let key = auth::key(&key_bytes).map_err(bad)?;
     auth::check(&key, &headers, "POST", "/v1/players", &body, db::now())
         .map_err(|why| Problem(StatusCode::UNAUTHORIZED, why.into()))?;
-    let name = verify::valid_name(&form.name).map_err(bad)?;
-    let country = form.country.as_deref().and_then(verify::valid_country);
     let db = state.db.lock().expect("the database");
     if let Some(id) = db::player_by_key(&db, &key_bytes).map_err(internal)? {
         let (player, _, _) = db::player_by_id(&db, &id)
@@ -202,11 +201,19 @@ async fn register(
         return Ok(Json(Registered {
             id,
             name: player.name,
+            country: player.country,
         }));
     }
+    let name = verify::valid_name(&form.name).map_err(bad)?;
+    let country = form
+        .country
+        .as_deref()
+        .filter(|c| !c.is_empty())
+        .map(|c| verify::valid_country(c).ok_or_else(|| bad("not a country code")))
+        .transpose()?;
     let id = auth::id();
     db::add_player(&db, &id, &key_bytes, &name, country.as_deref()).map_err(internal)?;
-    Ok(Json(Registered { id, name }))
+    Ok(Json(Registered { id, name, country }))
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -457,5 +464,33 @@ pub mod tests {
         assert!(!limits.allow("a", 2, 20));
         assert!(limits.allow("b", 2, 20), "someone else is not limited");
         assert!(limits.allow("a", 2, 3600), "an hour later");
+    }
+    #[tokio::test]
+    async fn registration_reserves_handles_and_returns_the_authoritative_country() {
+        let (app, _) = app();
+        let key = keypair();
+        for name in [
+            "dhh",
+            "Ryan.R.Hughes",
+            "hancore_linux",
+            "IAMdothash",
+            "acelogic",
+        ] {
+            let body = serde_json::json!({"public_key": STANDARD.encode(key.verifying_key().to_bytes()), "name": name, "country": "AT"}).to_string().into_bytes();
+            assert_eq!(
+                send(&app, signed(&key, None, "POST", "/v1/players", body))
+                    .await
+                    .0,
+                StatusCode::BAD_REQUEST,
+                "{name}"
+            );
+        }
+        let id = join(&app, &key, "Swift Driver").await;
+        let body = serde_json::json!({"public_key": STANDARD.encode(key.verifying_key().to_bytes()), "name": "Unconfirmed", "country": "DE"}).to_string().into_bytes();
+        let (status, reply) = send(&app, signed(&key, None, "POST", "/v1/players", body)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(reply["id"], id);
+        assert_eq!(reply["name"], "Swift Driver");
+        assert_eq!(reply["country"], "AT");
     }
 }

@@ -42,6 +42,7 @@ impl Plugin for MultiplayerPlugin {
             .add_systems(
                 PreUpdate,
                 network
+                    .run_if(crate::local::solo)
                     .in_set(NetworkSet)
                     .after(bevy::input::InputSystems)
                     .after(bevy::ui::UiSystems::Focus)

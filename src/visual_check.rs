@@ -116,6 +116,7 @@ pub fn configure(app: &mut App) {
             freeze_countdown.after(crate::countdown::CountdownSet),
         )
         .add_systems(PreUpdate, open_screen.after(crate::settings::PageSet))
+        .add_systems(PreUpdate, crate::local::preview)
         .add_systems(Update, (hold_summary, show_guide))
         .add_systems(
             PostUpdate,
@@ -288,8 +289,17 @@ fn open_screen(
     mut menus: MessageWriter<crate::menu::OpenMenu>,
     mut menu: ResMut<crate::menu::Menu>,
     mut frames: Local<u32>,
+    mut profiles: MessageWriter<crate::online::profile::OpenProfile>,
 ) {
     let screen = std::env::var("TODORA_SCREEN").unwrap_or_default();
+    if screen == "profile" {
+        *frames += 1;
+        if *frames == 2 {
+            profiles.write(crate::online::profile::OpenProfile(
+                crate::pause::Halt::Title,
+            ));
+        }
+    }
     let simple = match screen.as_str() {
         "title" => Some(crate::pause::Halt::Title),
         "replay" => Some(crate::pause::Halt::Replay),

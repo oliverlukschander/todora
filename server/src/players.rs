@@ -58,36 +58,38 @@ async fn rename(
     let (mut current, _, renamed_at) = db::player_by_id(&db, &id)
         .map_err(internal)?
         .ok_or_else(|| Problem(StatusCode::NOT_FOUND, "no such player".into()))?;
-    if let Some(name) = change.name {
-        let name = verify::valid_name(&name).map_err(bad)?;
-        if name != current.name {
-            if db::now() - renamed_at < RENAME_EVERY {
-                return Err(Problem(
-                    StatusCode::TOO_MANY_REQUESTS,
-                    "a name can change once a week".into(),
-                ));
-            }
-            db.execute(
-                "UPDATE players SET name = ?1, renamed_at = ?2 WHERE id = ?3",
-                params![name, db::now(), id],
-            )
-            .map_err(internal)?;
-            current.name = name;
-        }
+    // Validate the complete change before writing either field. A rejected
+    // country must not consume the weekly rename or partially save a profile.
+    let name = change.name.as_deref().unwrap_or(&current.name).trim();
+    let renaming = name != current.name;
+    let name = if renaming {
+        verify::valid_name(name).map_err(bad)?
+    } else {
+        current.name.clone()
+    };
+    if renaming && db::now() - renamed_at < RENAME_EVERY {
+        return Err(Problem(
+            StatusCode::TOO_MANY_REQUESTS,
+            "a name can change once a week".into(),
+        ));
     }
-    if let Some(country) = change.country {
-        let country = if country.is_empty() {
-            None
-        } else {
-            Some(verify::valid_country(&country).ok_or_else(|| bad("not a country code"))?)
-        };
-        db.execute(
-            "UPDATE players SET country = ?1 WHERE id = ?2",
-            params![country, id],
-        )
-        .map_err(internal)?;
-        current.country = country;
-    }
+    let country = match change.country {
+        None => current.country.clone(),
+        Some(c) if c.trim().is_empty() => None,
+        Some(c) => Some(verify::valid_country(&c).ok_or_else(|| bad("not a country code"))?),
+    };
+    db.execute(
+        "UPDATE players SET name = ?1, country = ?2, renamed_at = ?3 WHERE id = ?4",
+        params![
+            name,
+            country,
+            if renaming { db::now() } else { renamed_at },
+            id
+        ],
+    )
+    .map_err(internal)?;
+    current.name = name;
+    current.country = country;
     Ok(Json(current))
 }
 
@@ -366,5 +368,52 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         assert_eq!(send(&app, ghost).await.0, StatusCode::NOT_FOUND);
+    }
+    #[tokio::test]
+    async fn profile_validation_is_atomic_and_reserved_names_cannot_be_claimed() {
+        let (app, state) = app();
+        let key = keypair();
+        let id = join(&app, &key, "Kestrel").await;
+        let path = format!("/v1/players/{id}");
+        state
+            .db
+            .lock()
+            .unwrap()
+            .execute("UPDATE players SET renamed_at = 0 WHERE id = ?1", [&id])
+            .unwrap();
+        for body in [
+            br#"{"name":"Merlin", "country":"ZZ"}"#.as_slice(),
+            br#"{"name":"D.H.H", "country":"DE"}"#.as_slice(),
+        ] {
+            let (status, _) =
+                send(&app, signed(&key, Some(&id), "PATCH", &path, body.to_vec())).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            let db = state.db.lock().unwrap();
+            let (player, _, renamed_at) = crate::db::player_by_id(&db, &id).unwrap().unwrap();
+            assert_eq!(player.name, "Kestrel");
+            assert_eq!(player.country.as_deref(), Some("AT"));
+            assert_eq!(renamed_at, 0, "failed validation consumed the rename");
+        }
+        // An operator-verified owner retains their handle when updating country.
+        state
+            .db
+            .lock()
+            .unwrap()
+            .execute("UPDATE players SET name = 'DHH' WHERE id = ?1", [&id])
+            .unwrap();
+        let (status, profile) = send(
+            &app,
+            signed(
+                &key,
+                Some(&id),
+                "PATCH",
+                &path,
+                br#"{"name":"DHH","country":"DK"}"#.to_vec(),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(profile["name"], "DHH");
+        assert_eq!(profile["country"], "DK");
     }
 }

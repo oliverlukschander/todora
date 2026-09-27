@@ -9,7 +9,9 @@
 //! gone online, because even a read tells the server who is asking; offline,
 //! the board last seen is shown with its age.
 
+mod controls;
 use bevy::prelude::*;
+use controls::{CountryCell, action_button, draw_controls, draw_flags};
 
 use super::client::{Ask, Client, Place, Standing};
 use super::ui::Online;
@@ -20,6 +22,14 @@ use crate::pause::{Halt, HaltSet};
 use crate::settings::Settings;
 use crate::track::{Track, all_circuits};
 use crate::ui::{LINE, MUTED, Navigation, SURFACE, TEXT, label};
+
+#[derive(bevy::ecs::system::SystemParam)]
+struct RaceState<'w> {
+    rival: ResMut<'w, crate::ghost::Rival>,
+    mine: ResMut<'w, crate::ghost::Ghost>,
+    resets: MessageWriter<'w, crate::Reset>,
+    session: Option<Res<'w, crate::multiplayer::Session>>,
+}
 
 /// Rows the board shows at once.
 const ROWS: usize = 14;
@@ -37,7 +47,7 @@ pub(crate) enum View {
     Records,
     /// The weekly challenge's board.
     Week,
-    /// The fifty achievements, earned or not.
+    /// Driving achievements, earned or not.
     Awards,
 }
 
@@ -108,7 +118,7 @@ pub(crate) struct Browse {
     from_pause: bool,
     navigation: Navigation,
     /// Whether the board shown is the one asked for.
-    asked: Option<(usize, View)>,
+    asked: Option<String>,
 }
 
 impl Browse {
@@ -121,6 +131,71 @@ impl Browse {
         }
     }
 }
+
+fn matching_board<'a>(
+    online: &'a Online,
+    browse: &Browse,
+    mode: Mode,
+    settings: &Settings,
+    week: &Option<String>,
+) -> Option<&'a Standing> {
+    let country = (browse.view == View::Country && !settings.country.is_empty())
+        .then_some(settings.country.as_str());
+    online.board.as_ref().filter(|b| {
+        b.circuit == all_circuits()[browse.circuit].id
+            && b.mode
+                == if browse.view == View::Week {
+                    "regular".into()
+                } else {
+                    mode.name().to_lowercase()
+                }
+            && b.week == *week
+            && b.country.as_deref() == country
+    })
+}
+
+/// Prefer the closest quicker driver. With no personal time, offer the
+/// slowest available opponent, so the first race is not against the record.
+fn recommended(standing: &Standing) -> Option<&Place> {
+    let you = standing.you.as_ref();
+    let mut candidates: Vec<_> = standing
+        .top
+        .iter()
+        .chain(&standing.around)
+        .chain(&standing.rivals)
+        .filter(|p| you.is_none_or(|you| p.player != you.player))
+        .collect();
+    candidates.sort_by(|a, b| a.seconds.total_cmp(&b.seconds));
+    if let Some(you) = you {
+        candidates
+            .iter()
+            .rev()
+            .find(|p| p.seconds < you.seconds)
+            .copied()
+            .or_else(|| candidates.first().copied())
+    } else {
+        candidates.last().copied()
+    }
+}
+
+#[derive(Component, Clone, Copy)]
+enum Action {
+    Tab(usize),
+    Row(usize),
+    Race,
+    Recommended,
+    Personal,
+    Profile,
+    Pin,
+    Back,
+    Previous,
+    Next,
+    Refresh,
+}
+#[derive(Component)]
+struct Controls;
+#[derive(Component)]
+struct CountryFlag(usize);
 
 /// One line of the board: a place, or a gap between the top and you.
 #[derive(Clone, Debug, PartialEq)]
@@ -236,8 +311,15 @@ struct Note;
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Browse>()
         .add_systems(Startup, setup)
-        .add_systems(PreUpdate, (open, drive).chain().after(HaltSet))
-        .add_systems(Update, (ask, draw).chain());
+        .add_systems(
+            PreUpdate,
+            (open, drive)
+                .chain()
+                .run_if(crate::local::solo)
+                .after(HaltSet)
+                .after(bevy::ui::UiSystems::Focus),
+        )
+        .add_systems(Update, (ask, draw, draw_controls, draw_flags).chain());
 }
 
 fn setup(mut commands: Commands) {
@@ -260,7 +342,7 @@ fn setup(mut commands: Commands) {
             overlay
                 .spawn((
                     Node {
-                        width: px(760),
+                        width: px(1160),
                         padding: UiRect::all(px(26)),
                         border: UiRect::all(px(1)),
                         border_radius: BorderRadius::all(px(16)),
@@ -291,6 +373,8 @@ fn setup(mut commands: Commands) {
                                 .with_children(|tabs| {
                                     for (i, view) in View::ALL.iter().enumerate() {
                                         tabs.spawn((
+                                            Button,
+                                            Action::Tab(i),
                                             ViewTab(i),
                                             Node {
                                                 padding: UiRect::axes(px(12), px(6)),
@@ -319,32 +403,99 @@ fn setup(mut commands: Commands) {
                             ..default()
                         },
                     ));
-                    for i in 0..ROWS {
-                        panel
-                            .spawn((
-                                RowLine(i),
-                                Node {
-                                    padding: UiRect::axes(px(12), px(5)),
-                                    border_radius: BorderRadius::all(px(6)),
-                                    ..default()
-                                },
-                                BackgroundColor(Color::NONE),
-                            ))
-                            .with_children(|row| {
-                                for cell in 0..CELLS {
-                                    row.spawn((
-                                        RowText(i, cell),
-                                        TextLayout::no_wrap(),
-                                        label("", 17.0, TEXT),
+                    panel
+                        .spawn(Node {
+                            column_gap: px(8),
+                            margin: UiRect::bottom(px(8)),
+                            ..default()
+                        })
+                        .with_children(|bar| {
+                            action_button(bar, "‹", Action::Previous, false);
+                            action_button(bar, "›", Action::Next, false);
+                            action_button(
+                                bar,
+                                crate::text::t("profile.title"),
+                                Action::Profile,
+                                false,
+                            );
+                            action_button(bar, crate::text::t("profile.back"), Action::Back, false);
+                        });
+                    panel
+                        .spawn(Node {
+                            column_gap: px(24),
+                            ..default()
+                        })
+                        .with_children(|body| {
+                            body.spawn(Node {
+                                width: px(720),
+                                flex_direction: FlexDirection::Column,
+                                row_gap: px(3),
+                                ..default()
+                            })
+                            .with_children(|list| {
+                                for i in 0..ROWS {
+                                    list.spawn((
+                                        Button,
+                                        Action::Row(i),
+                                        RowLine(i),
                                         Node {
-                                            width: px(widths(View::World)[cell]),
-                                            overflow: Overflow::clip(),
+                                            padding: UiRect::axes(px(12), px(5)),
+                                            border_radius: BorderRadius::all(px(6)),
                                             ..default()
                                         },
-                                    ));
+                                        BackgroundColor(Color::NONE),
+                                    ))
+                                    .with_children(|row| {
+                                        for cell in 0..CELLS {
+                                            if cell == 2 {
+                                                row.spawn((
+                                                    CountryCell,
+                                                    Node {
+                                                        width: px(60),
+                                                        align_items: AlignItems::Center,
+                                                        ..default()
+                                                    },
+                                                ))
+                                                .with_children(|flag| {
+                                                    flag.spawn((
+                                                        CountryFlag(i),
+                                                        ImageNode::default(),
+                                                        Node {
+                                                            width: px(28),
+                                                            height: px(21),
+                                                            ..default()
+                                                        },
+                                                    ));
+                                                });
+                                            }
+                                            row.spawn((
+                                                RowText(i, cell),
+                                                TextLayout::no_wrap(),
+                                                label("", 17.0, TEXT),
+                                                Node {
+                                                    width: px(widths(View::World)[cell]),
+                                                    overflow: Overflow::clip(),
+                                                    ..default()
+                                                },
+                                            ));
+                                        }
+                                    });
                                 }
                             });
-                    }
+                            body.spawn((
+                                Controls,
+                                Node {
+                                    width: px(338),
+                                    min_height: px(470),
+                                    padding: UiRect::all(px(20)),
+                                    flex_direction: FlexDirection::Column,
+                                    row_gap: px(14),
+                                    border_radius: BorderRadius::all(px(12)),
+                                    ..default()
+                                },
+                                BackgroundColor(SURFACE),
+                            ));
+                        });
                     panel.spawn((Note, label("", 15.0, MUTED)));
                     panel.spawn((Footer, label("", 15.0, AMBER_DIM)));
                     panel.spawn(crate::text::label("board.hint", 12.0, AMBER_DIM));
@@ -396,18 +547,49 @@ fn drive(
     mut go: MessageWriter<crate::track::GoTo>,
     mut mode: ResMut<Mode>,
     title: Option<Res<crate::title::Title>>,
+    clicks: Query<(&Action, &Interaction), Changed<Interaction>>,
+    mut profiles: MessageWriter<super::profile::OpenProfile>,
+    mut race: RaceState,
 ) {
     if *halt != Halt::Board || halt.is_changed() {
         return;
     }
     let pad = |button| pads.iter().any(|pad| pad.just_pressed(button));
-    if keys.just_pressed(KeyCode::Escape) || pad(GamepadButton::East) || pad(GamepadButton::Start) {
+    let action = clicks
+        .iter()
+        .find(|(_, i)| **i == Interaction::Pressed)
+        .map(|(a, _)| *a);
+    if matches!(action, Some(Action::Profile)) || keys.just_pressed(KeyCode::F2) {
+        online.wanted = None;
+        online.ghost = None;
+        profiles.write(super::profile::OpenProfile(Halt::Board));
+        return;
+    }
+    if keys.just_pressed(KeyCode::Escape)
+        || pad(GamepadButton::East)
+        || pad(GamepadButton::Start)
+        || matches!(action, Some(Action::Back))
+    {
+        online.wanted = None;
+        online.ghost = None;
+        online.ghost_status.clear();
         *halt = if browse.from_pause {
             crate::title::Title::back_to(title.as_deref())
         } else {
             Halt::Nothing
         };
         return;
+    }
+    if online.wanted.is_some() {
+        return;
+    }
+    if matches!(action, Some(Action::Refresh)) || keys.just_pressed(KeyCode::KeyR) {
+        browse.asked = None;
+        online.connection_error.clear();
+    }
+    if let Some(Action::Tab(at)) = action {
+        browse.view = View::ALL[at];
+        browse.row = 0;
     }
     let view_step = i32::from(keys.just_pressed(KeyCode::KeyE) || pad(GamepadButton::RightTrigger))
         - i32::from(keys.just_pressed(KeyCode::KeyQ) || pad(GamepadButton::LeftTrigger));
@@ -419,14 +601,39 @@ fn drive(
         browse.view = View::ALL[(at + view_step).rem_euclid(View::ALL.len() as i32) as usize];
         browse.row = 0;
     }
-    let step = browse
+    let mut step = browse
         .navigation
         .read(&keys, &pads, time.elapsed_secs_f64());
+    if matches!(action, Some(Action::Previous)) {
+        step.x = -1;
+    }
+    if matches!(action, Some(Action::Next)) {
+        step.x = 1;
+    }
+    if let Some(Action::Row(row)) = action {
+        browse.row = if browse.view == View::Records {
+            browse
+                .row
+                .saturating_sub(ROWS / 2)
+                .min(all_circuits().len() - ROWS)
+                + row
+        } else if browse.view == View::Awards {
+            browse
+                .row
+                .saturating_sub(ROWS / 2)
+                .min(crate::achievements::all().len() - ROWS)
+                + row
+        } else {
+            row
+        };
+    }
     if browse.view == View::Week {
         browse.circuit = challenge.at;
         // F, or the pad's north button: drive this week's circuit, in Regular.
         // (D is right, as the arrows are.)
-        if keys.just_pressed(KeyCode::KeyF) || pad(GamepadButton::North) {
+        if (keys.just_pressed(KeyCode::KeyF) || pad(GamepadButton::North))
+            && !race.session.as_ref().is_some_and(|s| s.active())
+        {
             go.write(crate::track::GoTo(challenge.circuit()));
             mode.set_if_neq(Mode::Regular);
             *halt = Halt::Nothing;
@@ -455,20 +662,43 @@ fn drive(
         browse.circuit = (browse.circuit as i32 + step.x).rem_euclid(n) as usize;
         browse.row = 0;
     }
+    if matches!(action, Some(Action::Personal))
+        && !race.session.as_ref().is_some_and(|s| s.active())
+    {
+        race.mine.on = true;
+        race.rival.on = false;
+        go.write(crate::track::GoTo(&all_circuits()[browse.circuit]));
+        if browse.view == View::Week {
+            mode.set_if_neq(Mode::Regular);
+        }
+        race.resets.write(crate::Reset);
+        *halt = Halt::Nothing;
+        return;
+    }
     let week = (browse.view == View::Week).then(|| challenge.label());
-    let shown = online
-        .board
-        .as_ref()
-        .filter(|b| b.circuit == all_circuits()[browse.circuit].id && b.week == week)
+    let shown = matching_board(&online, &browse, *mode, &settings, &week)
         .map(|b| lines(b, browse.view))
         .unwrap_or_default();
     if step.y != 0 && !shown.is_empty() {
         browse.row = (browse.row as i32 + step.y).clamp(0, shown.len() as i32 - 1) as usize;
     }
-    let Some(Line::Place(place)) = shown.get(browse.row) else {
+    let selected = if matches!(action, Some(Action::Recommended))
+        || keys.just_pressed(KeyCode::KeyF) && browse.view != View::Week
+    {
+        matching_board(&online, &browse, *mode, &settings, &week).and_then(recommended)
+    } else {
+        match shown.get(browse.row) {
+            Some(Line::Place(p)) => Some(p),
+            _ => None,
+        }
+    };
+    let Some(place) = selected else {
         return;
     };
-    if keys.just_pressed(KeyCode::KeyP) || pad(GamepadButton::West) {
+    if keys.just_pressed(KeyCode::KeyP)
+        || pad(GamepadButton::West)
+        || matches!(action, Some(Action::Pin))
+    {
         if let Some(at) = settings.rivals.iter().position(|r| *r == place.player) {
             settings.rivals.remove(at);
         } else if settings.rivals.len() < MOST_RIVALS {
@@ -476,13 +706,30 @@ fn drive(
         }
         browse.asked = None;
     }
-    if (keys.just_pressed(KeyCode::Enter) || pad(GamepadButton::South))
+    if (keys.just_pressed(KeyCode::Enter)
+        || pad(GamepadButton::South)
+        || matches!(action, Some(Action::Race | Action::Recommended))
+        || keys.just_pressed(KeyCode::KeyF) && browse.view != View::Week)
+        && settings.online
+        && !race.session.as_ref().is_some_and(|s| s.active())
         && let Some(client) = client
     {
         let place = place.clone();
         client.ask(Ask::Ghost(place.run.clone()));
-        online.say(crate::text::tf("board.downloading", &[&place.name]));
-        online.wanted = Some((place.run, place.name, place.rank));
+        online.ghost = None;
+        online.ghost_status = crate::text::tf("board.downloading", &[&place.name]);
+        online.wanted = Some(super::ui::GhostTarget {
+            world_record: place.rank == 1
+                && browse.view != View::Country
+                && browse.view != View::Week,
+            place,
+            circuit: all_circuits()[browse.circuit].id.into(),
+            mode: if browse.view == View::Week {
+                Mode::Regular
+            } else {
+                *mode
+            },
+        });
     }
 }
 
@@ -501,12 +748,20 @@ fn ask(
     let Some(client) = client else {
         return;
     };
-    let wanted = (browse.circuit, browse.view);
+    let wanted = format!(
+        "{}:{:?}:{:?}:{}:{:?}:{}",
+        browse.circuit,
+        browse.view,
+        *mode,
+        settings.country,
+        settings.rivals,
+        challenge.label()
+    );
     if browse.view == View::Awards {
         return;
     }
     if browse.view == View::Records {
-        if browse.asked != Some(wanted) {
+        if browse.asked.as_ref() != Some(&wanted) {
             browse.asked = Some(wanted);
             client.ask(Ask::Ranks {
                 mode: mode.name().to_lowercase(),
@@ -517,7 +772,7 @@ fn ask(
     if !settings.online {
         return;
     }
-    if browse.asked == Some(wanted) {
+    if browse.asked.as_ref() == Some(&wanted) {
         return;
     }
     browse.asked = Some(wanted);
@@ -599,10 +854,16 @@ fn draw(
     }
     let columns = widths(browse.view);
     for (cell, _, _, mut node) in &mut texts {
-        let width = px(columns[cell.1]);
+        let width = px(
+            if cell.1 == 2 && !matches!(browse.view, View::Records | View::Awards) {
+                0.0
+            } else {
+                columns[cell.1]
+            },
+        );
         if node.width != width {
             node.width = width;
-            node.display = if columns[cell.1] > 0.0 {
+            node.display = if width != px(0) {
                 Display::Flex
             } else {
                 Display::None
@@ -706,10 +967,7 @@ fn draw(
         }
     }
     let week = (browse.view == View::Week).then(|| challenge.label());
-    let standing = online
-        .board
-        .as_ref()
-        .filter(|b| b.circuit == circuit.id && b.week == week);
+    let standing = matching_board(&online, &browse, *mode, &settings, &week);
     let shown = standing.map(|b| lines(b, browse.view)).unwrap_or_default();
     let you = standing
         .and_then(|b| b.you.as_ref())
@@ -752,7 +1010,9 @@ fn draw(
             None => crate::text::t("board.week_none").into(),
         }
     } else if !settings.online {
-        crate::text::t("board.offline_hint").to_string()
+        crate::text::t("ghost.offline").to_string()
+    } else if !online.connection_error.is_empty() {
+        online.connection_error.clone()
     } else if browse.view == View::Country && settings.country.is_empty() {
         crate::text::t("board.pick_country").into()
     } else if browse.view == View::Rivals && settings.rivals.is_empty() {
@@ -811,7 +1071,7 @@ fn example_place(rank: u64, player: &str) -> Place {
         rank,
         player: player.into(),
         name: format!("Driver {rank}"),
-        country: None,
+        country: Some(["AT", "GB", "US", "DE", "DK", "CA"][(rank as usize) % 6].into()),
         steps: 10_000 + rank as u32,
         seconds: 41.0 + rank as f64 * 0.1,
         car: "tourer".into(),
@@ -825,6 +1085,7 @@ fn example_place(rank: u64, player: &str) -> Place {
 #[cfg(any(test, feature = "visual-check"))]
 pub(crate) fn example(you: u64) -> Standing {
     Standing {
+        country: None,
         circuit: "monza".into(),
         mode: "regular".into(),
         season: 1,
@@ -910,5 +1171,40 @@ mod tests {
             footer(&example(21)),
             "You #21 of 300  ·  0:43.10  ·  record 0:41.10 by Driver 1  ·  +2.00"
         );
+    }
+    #[test]
+    fn suggested_opponent_is_close_and_never_yourself() {
+        let mut board = example(7);
+        assert_eq!(recommended(&board).unwrap().rank, 6);
+        board.you = None;
+        assert_eq!(recommended(&board).unwrap().rank, 40);
+        board.top.clear();
+        board.around.clear();
+        board.rivals.clear();
+        assert!(recommended(&board).is_none());
+    }
+
+    #[test]
+    fn a_stale_country_or_mode_board_cannot_supply_a_ghost() {
+        let board = example(7);
+        let mut browse = Browse {
+            circuit: all_circuits()
+                .iter()
+                .position(|c| c.id == board.circuit)
+                .unwrap(),
+            ..default()
+        };
+        let mut online = Online::default();
+        online.board = Some(board);
+        let settings = Settings {
+            country: "AT".into(),
+            ..default()
+        };
+        assert!(matching_board(&online, &browse, Mode::Regular, &settings, &None).is_some());
+        assert!(matching_board(&online, &browse, Mode::Pro, &settings, &None).is_none());
+        browse.view = View::Country;
+        assert!(matching_board(&online, &browse, Mode::Regular, &settings, &None).is_none());
+        online.board.as_mut().unwrap().country = Some("AT".into());
+        assert!(matching_board(&online, &browse, Mode::Regular, &settings, &None).is_some());
     }
 }

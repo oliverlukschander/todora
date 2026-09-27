@@ -137,8 +137,9 @@ fn update(
             &Transform,
             Option<&crate::car::Handling>,
             Option<&crate::car::Controls>,
+            Option<&crate::local::Seat>,
         ),
-        With<Player>,
+        Or<(With<Player>, With<crate::local::Seat>)>,
     >,
     track: Res<Track>,
     settings: Option<Res<crate::settings::Settings>>,
@@ -155,20 +156,22 @@ fn update(
         .effects_cut
         .store((1.0 - effects_volume).to_bits(), Relaxed);
     // Audio shortcuts work while driving and paused; garage input stays separate.
-    if keys.just_pressed(KeyCode::KeyN) && *halt != Halt::Menu {
+    let shortcuts = matches!(*halt, Halt::Nothing | Halt::Pause | Halt::LocalPause);
+    if keys.just_pressed(KeyCode::KeyN) && shortcuts {
         sound.music = !sound.music;
         if sound.music {
             sound.signal.status.store(0, Relaxed);
         }
     }
-    if keys.just_pressed(KeyCode::F8) && *halt != Halt::Menu {
+    if keys.just_pressed(KeyCode::F8) && shortcuts {
         sound.effects = !sound.effects;
     }
     let audible = windows.iter().all(|window| window.focused);
     let (rolling, scrub, squeal) = if audible && sound.effects && !halt.stopped() {
         players
-            .single()
-            .map(|(car, pose, handling, controls)| {
+            .iter()
+            .max_by_key(|(_, _, _, _, seat)| usize::from(seat.is_some_and(|s| s.index == 0)))
+            .map(|(car, pose, handling, controls, _)| {
                 let grip = track.ground_from(pose.translation, car.along).grip;
                 let top = handling.map_or(24.0, |h| h.top_speed);
                 let load = controls.map_or(0.0, |c| c.throttle);
@@ -296,6 +299,29 @@ fn rolling_level(car: &Car, surface_grip: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typing_a_profile_does_not_toggle_audio_shortcuts() {
+        let mut app = App::new();
+        app.init_resource::<Sound>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .insert_resource(Halt::Profile)
+            .insert_resource(Track::new(&crate::track::all_circuits()[0]))
+            .add_systems(Update, update);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyN);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::F8);
+        app.update();
+        assert!(app.world().resource::<Sound>().music);
+        assert!(app.world().resource::<Sound>().effects);
+        app.insert_resource(Halt::Nothing);
+        app.update();
+        assert!(!app.world().resource::<Sound>().music);
+        assert!(!app.world().resource::<Sound>().effects);
+    }
 
     #[test]
     fn pause_actions_toggle_music_and_effects_independently_and_update_labels() {

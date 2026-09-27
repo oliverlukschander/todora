@@ -1,9 +1,9 @@
 //! Circuit browsing and a garage with draft car/setup choices.
 //! Browsing pauses the game; only Apply commits a selection.
-mod collection;
+use crate::collection;
 mod view;
+use crate::collection::Collection;
 use crate::ui::Navigation;
-use collection::Collection;
 
 use crate::{
     Reset,
@@ -183,6 +183,7 @@ impl Plugin for MenuPlugin {
                 (search, open, walk, clicks)
                     .chain()
                     .run_if(crate::multiplayer::offline)
+                    .run_if(crate::local::solo)
                     .in_set(MenuSet)
                     .after(HaltSet)
                     .after(InputSet)

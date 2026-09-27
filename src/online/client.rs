@@ -51,7 +51,7 @@ pub(crate) enum Ask {
     Ranks {
         mode: String,
     },
-    Rename {
+    SaveProfile {
         name: String,
         country: Option<String>,
     },
@@ -65,7 +65,13 @@ pub(crate) enum Heard {
     /// Registered, or already was, under this name.
     Joined {
         name: String,
+        country: Option<String>,
     },
+    ProfileSaved {
+        name: String,
+        country: Option<String>,
+    },
+    ProfileFailed(String),
     /// A lap went up.
     Sent(Submitted),
     /// A lap was refused, and why; it is moved out of the outbox.
@@ -79,6 +85,10 @@ pub(crate) enum Heard {
     Ghost {
         run: String,
         bytes: Vec<u8>,
+    },
+    GhostFailed {
+        run: String,
+        why: String,
     },
     /// Circuit, your place and how many are on the board, as last seen.
     Ranks(Vec<(String, u64, u64)>),
@@ -116,6 +126,8 @@ pub(crate) struct Place {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub(crate) struct Standing {
+    #[serde(default)]
+    pub country: Option<String>,
     pub circuit: String,
     pub mode: String,
     pub season: u32,
@@ -281,11 +293,11 @@ impl Worker {
             Ask::Online { on, name, country } => {
                 self.online = on;
                 if on {
-                    if self.player.is_none() {
-                        self.join(&name, country.as_deref());
-                    } else {
-                        let _ = self.tell.send(Heard::Joined { name });
-                    }
+                    let reply = match self.join(&name, country.as_deref()) {
+                        Ok((name, country)) => Heard::Joined { name, country },
+                        Err(why) => Heard::Trouble(why),
+                    };
+                    let _ = self.tell.send(reply);
                     self.send_waiting();
                 }
             }
@@ -324,7 +336,21 @@ impl Worker {
                 let ranks = self.cached_ranks(&mode);
                 let _ = self.tell.send(Heard::Ranks(ranks));
             }
-            Ask::Rename { name, country } => self.rename(&name, country.as_deref()),
+            Ask::SaveProfile { name, country } => {
+                let result = self
+                    .join(&name, country.as_deref())
+                    // PATCH is authoritative even with older servers whose
+                    // registration reply did not include a country.
+                    .and_then(|_| self.rename(&name, country.as_deref()));
+                let reply = match result {
+                    Ok((name, country)) => {
+                        self.online = true;
+                        Heard::ProfileSaved { name, country }
+                    }
+                    Err(why) => Heard::ProfileFailed(why),
+                };
+                let _ = self.tell.send(reply);
+            }
             Ask::Forget => self.forget(),
         }
     }
@@ -379,7 +405,11 @@ impl Worker {
         None
     }
 
-    fn join(&mut self, name: &str, country: Option<&str>) {
+    fn join(
+        &mut self,
+        name: &str,
+        country: Option<&str>,
+    ) -> Result<(String, Option<String>), String> {
         let public_key = STANDARD.encode(self.key().verifying_key().to_bytes());
         let body = serde_json::json!({"public_key": public_key, "name": name, "country": country})
             .to_string()
@@ -395,17 +425,23 @@ impl Worker {
                 if let (Some(player), Some(name)) = (reply["id"].as_str(), reply["name"].as_str()) {
                     self.player = Some(player.to_string());
                     self.save();
-                    let _ = self.tell.send(Heard::Joined {
-                        name: name.to_string(),
-                    });
+                    return Ok((
+                        name.to_string(),
+                        reply.get("country").map_or_else(
+                            || country.map(str::to_string),
+                            |value| value.as_str().map(str::to_string),
+                        ),
+                    ));
                 }
             }
             Err(error) => {
-                if let Some(reason) = self.trouble("joining", error) {
-                    let _ = self.tell.send(Heard::Trouble(reason));
-                }
+                let reason = self
+                    .trouble("joining", error)
+                    .unwrap_or_else(|| "Could not reach the server. Try again.".into());
+                return Err(reason);
             }
         }
+        Err("The server returned an incomplete profile.".into())
     }
 
     fn outbox(&self) -> Vec<PathBuf> {
@@ -528,6 +564,7 @@ impl Worker {
             Ok(response) => match response.into_json::<Standing>() {
                 Ok(mut standing) => {
                     standing.fetched_at = unix_now();
+                    standing.country = country.map(str::to_string);
                     standing.week = week.map(str::to_string);
                     if let Some(cache) = &cache {
                         let _ = std::fs::create_dir_all(cache.parent().unwrap_or(cache));
@@ -593,20 +630,31 @@ impl Worker {
                         run: run.to_string(),
                         bytes,
                     });
+                } else {
+                    let _ = self.tell.send(Heard::GhostFailed {
+                        run: run.into(),
+                        why: "The ghost download was incomplete or too large. Try again.".into(),
+                    });
                 }
             }
             Err(error) => {
-                if let Some(reason) = self.trouble("downloading a ghost", error) {
-                    let _ = self.tell.send(Heard::Trouble(reason));
-                }
+                let why = self
+                    .trouble("downloading a ghost", error)
+                    .unwrap_or_else(|| "Could not download this ghost. Try again.".into());
+                let _ = self.tell.send(Heard::GhostFailed {
+                    run: run.into(),
+                    why,
+                });
             }
         }
     }
 
-    fn rename(&mut self, name: &str, country: Option<&str>) {
-        let Some(player) = self.player.clone() else {
-            return;
-        };
+    fn rename(
+        &mut self,
+        name: &str,
+        country: Option<&str>,
+    ) -> Result<(String, Option<String>), String> {
+        let player = self.player.clone().ok_or("Join before saving a profile.")?;
         let path = format!("/v1/players/{player}");
         let body = serde_json::json!({"name": name, "country": country.unwrap_or("")})
             .to_string()
@@ -619,17 +667,17 @@ impl Worker {
         {
             Ok(response) => {
                 let reply: serde_json::Value = response.into_json().unwrap_or_default();
-                if let Some(name) = reply["name"].as_str() {
-                    let _ = self.tell.send(Heard::Joined {
-                        name: name.to_string(),
-                    });
-                }
+                let name = reply["name"]
+                    .as_str()
+                    .ok_or("The server returned an incomplete profile.")?;
+                Ok((
+                    name.to_string(),
+                    reply["country"].as_str().map(str::to_string),
+                ))
             }
-            Err(error) => {
-                if let Some(reason) = self.trouble("renaming", error) {
-                    let _ = self.tell.send(Heard::Trouble(reason));
-                }
-            }
+            Err(error) => Err(self
+                .trouble("saving profile", error)
+                .unwrap_or_else(|| "Could not reach the server. Try again.".into())),
         }
     }
 
@@ -731,12 +779,11 @@ mod tests {
         let folder = std::env::temp_dir().join(format!("todora-e2e-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         let client = Client::start(url, Some(folder.clone()));
-        client.ask(Ask::Online {
-            on: true,
+        client.ask(Ask::SaveProfile {
             name: "Test Driver".into(),
             country: Some("AT".into()),
         });
-        wait(&client, 20, |h| matches!(h, Heard::Joined { .. }));
+        wait(&client, 20, |h| matches!(h, Heard::ProfileSaved { .. }));
         assert!(folder.join("identity.json").exists(), "the key was kept");
 
         let bytes = crate::verify::ai_run("monza", "regular").expect("an AI lap");
@@ -782,6 +829,40 @@ mod tests {
             unreachable!()
         };
         assert_eq!(ghost, &bytes);
+
+        // Explicit saves have their own completion, so a startup join cannot
+        // accidentally close an editor while a save is still in flight.
+        client.ask(Ask::SaveProfile {
+            name: "Test Driver".into(),
+            country: Some("DE".into()),
+        });
+        let saved = wait(&client, 20, |h| matches!(h, Heard::ProfileSaved { .. }));
+        assert!(
+            matches!(saved.last(), Some(Heard::ProfileSaved { name, country }) if name == "Test Driver" && country.as_deref() == Some("DE"))
+        );
+        client.ask(Ask::Online {
+            on: true,
+            name: "Stale Local Name".into(),
+            country: Some("AT".into()),
+        });
+        let joined = wait(&client, 20, |h| matches!(h, Heard::Joined { .. }));
+        assert!(
+            matches!(joined.last(), Some(Heard::Joined { name, country }) if name == "Test Driver" && country.as_deref() == Some("DE"))
+        );
+        client.ask(Ask::SaveProfile {
+            name: "DHH".into(),
+            country: Some("US".into()),
+        });
+        wait(&client, 20, |h| matches!(h, Heard::ProfileFailed(_)));
+        client.ask(Ask::Online {
+            on: true,
+            name: "Ignored".into(),
+            country: None,
+        });
+        let unchanged = wait(&client, 20, |h| matches!(h, Heard::Joined { .. }));
+        assert!(
+            matches!(unchanged.last(), Some(Heard::Joined { name, country }) if name == "Test Driver" && country.as_deref() == Some("DE"))
+        );
 
         client.ask(Ask::Forget);
         wait(&client, 20, |h| matches!(h, Heard::Forgotten));

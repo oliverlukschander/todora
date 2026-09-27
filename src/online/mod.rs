@@ -9,6 +9,8 @@
 //! step into a list reserved once per lap.
 
 mod board;
+pub(crate) mod flags;
+pub(crate) mod profile;
 #[cfg(feature = "visual-check")]
 pub(crate) use board::Browse;
 #[cfg(feature = "visual-check")]
@@ -16,7 +18,7 @@ pub(crate) use board::example;
 pub(crate) mod client;
 pub(crate) mod replay;
 pub(crate) mod run;
-mod ui;
+pub(crate) mod ui;
 
 pub(crate) use ui::Online;
 
@@ -35,8 +37,13 @@ impl Plugin for OnlinePlugin {
             .add_systems(Startup, start_client)
             .add_systems(
                 FixedUpdate,
-                record.after(LapSet).after(crate::challenge::ChallengeSet),
+                record
+                    .run_if(crate::local::solo)
+                    .after(LapSet)
+                    .after(crate::challenge::ChallengeSet),
             );
+        app.add_systems(Startup, flags::setup);
+        profile::plugin(app);
         ui::plugin(app);
         board::plugin(app);
     }

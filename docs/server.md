@@ -2,8 +2,9 @@
 
 `server/` is Todora's leaderboard: one Rust binary and one SQLite file. It links
 the game as a library, so every submitted lap is driven again by the game's own
-engine and lap judge before it counts. A time on the board is a lap somebody
-drove, on the circuit as this build lays it out, under these physics.
+engine and lap judge before it counts. A time on the board is a lap reproducible under the server’s circuit layout and
+physics. Replay does not establish who generated the inputs or which executable
+submitted them; see [competition integrity](online-integrity.md).
 
 ## What it checks
 

@@ -52,7 +52,11 @@ impl Plugin for LapPlugin {
             .add_message::<LapFinished>()
             .add_systems(
                 FixedUpdate,
-                (tick, gate).chain().in_set(LapSet).after(DriveSet),
+                (tick, gate)
+                    .chain()
+                    .run_if(crate::local::solo)
+                    .in_set(LapSet)
+                    .after(DriveSet),
             )
             .add_systems(
                 PreUpdate,

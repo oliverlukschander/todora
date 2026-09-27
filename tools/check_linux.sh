@@ -21,9 +21,9 @@ fi
 unset BEVY_ASSET_ROOT CARGO_MANIFEST_DIR
 cd /tmp
 
-for circuit in suzuka monza monaco le-mans fuji sebring laguna-seca lime-rock long-beach mid-ohio mosport road-america road-atlanta virginia-international-raceway loading circuits; do
+for circuit in suzuka monza monaco le-mans fuji sebring laguna-seca lime-rock long-beach mid-ohio mosport road-america road-atlanta virginia-international-raceway loading circuits profile board local-lobby local-2 local-3 local-4 local-cycle; do
   start="$circuit"
-  unset TODORA_LOAD TODORA_SCREEN TODORA_COLLECTION
+  unset TODORA_LOAD TODORA_SCREEN TODORA_COLLECTION TODORA_PLAYERS TODORA_EXAMPLE
   if [[ "$circuit" == loading ]]; then
     start=red-bull-ring
     export TODORA_LOAD=le-mans
@@ -32,6 +32,16 @@ for circuit in suzuka monza monaco le-mans fuji sebring laguna-seca lime-rock lo
     start=red-bull-ring
     export TODORA_SCREEN=circuits TODORA_COLLECTION=2
   fi
+  case "$circuit" in
+    profile|board|local-lobby|local-cycle)
+      start=monza
+      export TODORA_SCREEN="$circuit" TODORA_PLAYERS=4 TODORA_EXAMPLE=21
+      ;;
+    local-*)
+      start=road-atlanta
+      export TODORA_SCREEN=local TODORA_PLAYERS="${circuit#local-}"
+      ;;
+  esac
   rm -f "$OUT/$circuit.png"
   TODORA_CAPTURE="$OUT/$circuit.png" TODORA_CIRCUIT="$start" TODORA_SMALL=1 \
     timeout 180 "$PACKAGE/todora" > "$OUT/$circuit.log" 2>&1

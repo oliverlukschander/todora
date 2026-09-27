@@ -310,6 +310,14 @@ impl Track {
         Transform::from_translation(grid.pos).looking_to(grid.tangent, Vec3::Y)
     }
 
+    /// Local rows follow the road's curve and elevation, including hilly grids.
+    pub(crate) fn local_grid(&self, index: usize) -> (Transform, f32) {
+        let station = self.ribbon.before_start(RUN_UP + (index / 2) as f32 * 3.0);
+        let mut at = Transform::from_translation(station.pos).looking_to(station.tangent, Vec3::Y);
+        at.translation += *at.right() * if index.is_multiple_of(2) { -1.0 } else { 1.0 };
+        (at.with_scale(Vec3::splat(crate::car::SCALE)), station.s)
+    }
+
     /// How far round the lap the grid slot is. What a car put down on the grid
     /// knows about itself before it has moved, so that the first thing it is
     /// asked is answered by continuity like every one after it.

@@ -17,6 +17,15 @@ use crate::pause::{Halt, HaltSet};
 use crate::settings::Settings;
 use crate::ui::{LINE, TEXT, label};
 
+/// Everything needed to prepare an explicitly selected online opponent.
+#[derive(Clone)]
+pub(crate) struct GhostTarget {
+    pub place: super::client::Place,
+    pub circuit: String,
+    pub mode: crate::car::Mode,
+    pub world_record: bool,
+}
+
 /// What the online side knows, for the rest of the game to read.
 #[derive(Resource, Default)]
 pub(crate) struct Online {
@@ -27,17 +36,15 @@ pub(crate) struct Online {
     /// A downloaded ghost, as run bytes, and whose lap it was.
     pub ghost: Option<(String, Vec<u8>)>,
     /// The ghost asked for: its run, the driver's name and their place.
-    pub wanted: Option<(String, String, u64)>,
+    pub wanted: Option<GhostTarget>,
+    pub ghost_status: String,
+    pub connection_error: String,
     /// Your place and the board's size on each circuit, as last seen.
     pub ranks: std::collections::HashMap<String, (u64, u64)>,
     /// Laps that reached the board since someone last looked.
     pub sent: Vec<super::client::Submitted>,
-    /// The name and country the server last confirmed.
-    confirmed: Option<(String, String)>,
     /// A line to show for a few seconds, and how long it has left.
     toast: Option<(String, f32)>,
-    /// Seconds since the name or country last changed on the page.
-    renamed_ago: Option<f32>,
 }
 
 impl Online {
@@ -52,7 +59,10 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(PostStartup, begin)
         .add_systems(
             PreUpdate,
-            offer.after(HaltSet).after(crate::countdown::CountdownSet),
+            offer
+                .run_if(crate::local::solo)
+                .after(HaltSet)
+                .after(crate::countdown::CountdownSet),
         )
         .add_systems(FixedUpdate, earn.after(LapSet))
         .add_systems(Update, (listen, follow_settings, draw).chain());
@@ -83,6 +93,7 @@ fn earn(mut laps: MessageReader<LapFinished>, mut online: ResMut<Online>) {
 }
 
 /// Show the offer when the car is held on the grid, and take the answer.
+#[allow(clippy::too_many_arguments)]
 fn offer(
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
@@ -91,6 +102,7 @@ fn offer(
     online: Res<Online>,
     mut halt: ResMut<Halt>,
     mut settings: ResMut<Settings>,
+    mut profile: MessageWriter<super::profile::OpenProfile>,
 ) {
     if client.is_none() || settings.online_asked || !online.earned_offer {
         return;
@@ -109,25 +121,49 @@ fn offer(
     let yes = keys.just_pressed(KeyCode::Enter) || pad(GamepadButton::South);
     let no = keys.just_pressed(KeyCode::Escape) || pad(GamepadButton::East);
     if yes || no {
-        settings.online_asked = true;
-        settings.online = yes;
+        settings.online_asked = !yes;
+        if yes {
+            profile.write(super::profile::OpenProfile(Halt::Nothing));
+        }
         *halt = Halt::Nothing;
     }
 }
 
 /// Everything the worker has said, turned into what the page and HUD show.
-fn listen(client: Option<Res<Client>>, mut online: ResMut<Online>, mut settings: ResMut<Settings>) {
+fn listen(
+    client: Option<Res<Client>>,
+    mut online: ResMut<Online>,
+    mut settings: ResMut<Settings>,
+    mut profile: ResMut<super::profile::Profile>,
+    mut halt: ResMut<Halt>,
+) {
     let Some(client) = client else {
         return;
     };
     for heard in client.heard() {
         match heard {
-            Heard::Joined { name, .. } => {
+            Heard::Joined { name, country } => {
+                online.connection_error.clear();
                 settings.online_note = crate::text::tf("online.on", &[&name]);
-                online.confirmed = Some((name.clone(), settings.country.clone()));
-                if settings.name != name {
-                    settings.name = name;
-                }
+                settings.name = name;
+                settings.country = country.unwrap_or_default();
+            }
+            Heard::ProfileSaved { name, country } => {
+                online.connection_error.clear();
+                settings.online_note = crate::text::tf("online.on", &[&name]);
+                settings.name = name;
+                settings.country = country.unwrap_or_default();
+                profile.saving = false;
+                settings.online = true;
+                settings.online_asked = true;
+                online.board = None;
+                *halt = profile.return_to;
+                online.say(crate::text::t("profile.saved"));
+            }
+            Heard::ProfileFailed(why) => {
+                profile.error = why.clone();
+                profile.saving = false;
+                settings.online_note = why;
             }
             Heard::Sent(sent) => {
                 online.sent.push(sent.clone());
@@ -157,6 +193,7 @@ fn listen(client: Option<Res<Client>>, mut online: ResMut<Online>, mut settings:
                 }
             }
             Heard::Board(standing) => {
+                online.connection_error.clear();
                 if let Some(you) = &standing.you {
                     online
                         .ranks
@@ -168,13 +205,27 @@ fn listen(client: Option<Res<Client>>, mut online: ResMut<Online>, mut settings:
                 online.ranks = ranks.into_iter().map(|(c, r, t)| (c, (r, t))).collect();
             }
             Heard::Ghost { run, bytes } => {
-                online.say(crate::text::tf(
-                    "online.ghost",
-                    &[&&run[..6.min(run.len())], &(bytes.len() / 1024)],
-                ));
-                online.ghost = Some((run, bytes));
+                if online
+                    .wanted
+                    .as_ref()
+                    .is_some_and(|target| target.place.run == run)
+                {
+                    online.ghost_status = crate::text::t("ghost.preparing").into();
+                    online.ghost = Some((run, bytes));
+                }
+            }
+            Heard::GhostFailed { run, why } => {
+                if online
+                    .wanted
+                    .as_ref()
+                    .is_some_and(|target| target.place.run == run)
+                {
+                    online.wanted = None;
+                    online.ghost_status = why;
+                }
             }
             Heard::Trouble(why) => {
+                online.connection_error = why.clone();
                 if settings.online {
                     settings.bypass_change_detection().online_note =
                         crate::text::tf("online.offline", &[&why]);
@@ -183,19 +234,16 @@ fn listen(client: Option<Res<Client>>, mut online: ResMut<Online>, mut settings:
             Heard::Forgotten => {
                 settings.online = false;
                 settings.online_note.clear();
-                online.confirmed = None;
                 online.say(crate::text::t("online.deleted"));
             }
         }
     }
 }
 
-/// The page changed something the server should know: going online or off,
-/// a new name or country (sent once typing has settled), or deleting it all.
+/// Online preference and account deletion follow settings; names and countries
+/// are committed only by an explicit profile save.
 fn follow_settings(
-    time: Res<Time<Real>>,
     client: Option<Res<Client>>,
-    mut online: ResMut<Online>,
     mut settings: ResMut<Settings>,
     mut was_online: Local<Option<bool>>,
 ) {
@@ -215,22 +263,6 @@ fn follow_settings(
     if settings.forget_presses >= 2 {
         settings.forget_presses = 0;
         client.ask(Ask::Forget);
-    }
-    let wanted = (settings.name.clone(), settings.country.clone());
-    let changed = online.confirmed.as_ref().is_some_and(|c| *c != wanted);
-    if !changed || !settings.online {
-        online.renamed_ago = None;
-        return;
-    }
-    let ago = online.renamed_ago.get_or_insert(0.0);
-    *ago += time.delta_secs();
-    if *ago > 2.0 && crate::verify::valid_name(&wanted.0).is_ok() {
-        online.renamed_ago = None;
-        online.confirmed = Some(wanted.clone());
-        client.ask(Ask::Rename {
-            name: wanted.0,
-            country: country(&settings),
-        });
     }
 }
 

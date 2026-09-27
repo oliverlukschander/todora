@@ -144,17 +144,23 @@ pub(super) fn hover(
 
 pub(super) fn show_launcher(
     halt: Res<Halt>,
+    race: Option<Res<crate::local::LocalRace>>,
     session: Option<Res<crate::multiplayer::Session>>,
     mut launchers: Query<&mut Node, With<Launcher>>,
 ) {
-    if halt.is_changed() || session.as_ref().is_some_and(|s| s.is_changed()) {
+    if halt.is_changed()
+        || race.as_ref().is_some_and(|r| r.is_changed())
+        || session.as_ref().is_some_and(|s| s.is_changed())
+    {
         for mut launcher in &mut launchers {
-            launcher.display =
-                if *halt == Halt::Nothing && session.as_ref().is_none_or(|s| !s.active()) {
-                    Display::Flex
-                } else {
-                    Display::None
-                };
+            launcher.display = if *halt == Halt::Nothing
+                && !crate::local::active(race.as_deref())
+                && session.as_ref().is_none_or(|s| !s.active())
+            {
+                Display::Flex
+            } else {
+                Display::None
+            };
         }
     }
 }

@@ -328,10 +328,14 @@ fn draw_controls(
     }
 }
 
-fn show(halt: Res<crate::pause::Halt>, mut instruments: Query<&mut Visibility, With<Instrument>>) {
-    if halt.is_changed() {
+fn show(
+    halt: Res<crate::pause::Halt>,
+    race: Option<Res<crate::local::LocalRace>>,
+    mut instruments: Query<&mut Visibility, With<Instrument>>,
+) {
+    if halt.is_changed() || race.as_ref().is_some_and(|r| r.is_changed()) {
         for mut visible in &mut instruments {
-            *visible = if halt.stopped() {
+            *visible = if halt.stopped() || crate::local::active(race.as_deref()) {
                 Visibility::Hidden
             } else {
                 Visibility::Visible
@@ -474,7 +478,7 @@ fn draw_delta(
 
 /// "WR" for the world record, else the driver's name, kept short.
 fn rival_label(rival: &crate::ghost::Rival) -> String {
-    if rival.rank == Some(1) {
+    if rival.world_record {
         "WR".into()
     } else if rival.name.is_empty() {
         "GHOST".into()

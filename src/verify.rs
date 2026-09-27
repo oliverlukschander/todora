@@ -312,6 +312,9 @@ pub fn valid_name(name: &str) -> Result<String, &'static str> {
     if BLOCKED.iter().any(|word| folded.contains(word)) {
         return Err("not that name");
     }
+    if crate::identity::reserved(name) {
+        return Err("this name is reserved for its owner");
+    }
     Ok(name.to_string())
 }
 
@@ -336,7 +339,10 @@ const BLOCKED: &[&str] = &[
 /// A two-letter country code, upper case, or `None` for anything else.
 pub fn valid_country(code: &str) -> Option<String> {
     let code = code.trim().to_uppercase();
-    (code.len() == 2 && code.chars().all(|c| c.is_ascii_uppercase())).then_some(code)
+    crate::identity::countries::ALL
+        .iter()
+        .any(|(id, _)| *id == code)
+        .then_some(code)
 }
 
 /// The version of a lap-rules and engine combination, and whether a build

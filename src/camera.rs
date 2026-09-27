@@ -44,7 +44,9 @@ impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup).add_systems(
             Update,
-            ((zoom, switch_view).run_if(crate::pause::running), follow).chain(),
+            ((zoom, switch_view).run_if(crate::pause::running), follow)
+                .chain()
+                .run_if(crate::local::solo),
         );
     }
 }
@@ -233,7 +235,7 @@ fn follow(
 /// beneath it and a sight line that clears everything in between. Only terrain
 /// and road heights are read, the same lookups the wheels use; nothing is cast
 /// against a mesh. On flat and uphill road both come out below the level boom.
-fn clearance(
+pub(crate) fn clearance(
     track: &Track,
     along: Option<f32>,
     camera: Vec3,

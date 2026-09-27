@@ -31,7 +31,8 @@ impl Plugin for InputPlugin {
             read.in_set(InputSet)
                 .after(bevy::input::InputSystems)
                 .after(HaltSet)
-                .run_if(running),
+                .run_if(running)
+                .run_if(crate::local::solo),
         );
     }
 }

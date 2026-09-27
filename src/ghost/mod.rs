@@ -120,10 +120,18 @@ impl Plugin for GhostPlugin {
                 PreUpdate,
                 reset.after(ClockSet).after(InputSet).after(TrackSet),
             )
-            .add_systems(FixedUpdate, (finish, record).chain().after(LapSet))
+            .add_systems(
+                FixedUpdate,
+                (finish, record)
+                    .chain()
+                    .run_if(crate::local::solo)
+                    .after(LapSet),
+            )
             .add_systems(
                 Update,
-                (toggle.run_if(running), replay).chain().in_set(GhostSet),
+                (toggle.run_if(running).run_if(crate::local::solo), replay)
+                    .chain()
+                    .in_set(GhostSet),
             );
         rival::plugin(app);
     }

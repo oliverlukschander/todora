@@ -2,7 +2,7 @@
 //!
 //! One binary and one SQLite file. Every submitted lap is driven again by the
 //! game's own engine and lap judge before it counts, so a time on the board is
-//! a lap somebody drove. Configuration is three environment variables:
+//! a lap reproducible under the server’s rules. Configuration is three environment variables:
 //!
 //! - `TODORA_DB` — the database file (default `todora.db`)
 //! - `TODORA_LISTEN` — the address to listen on (default `127.0.0.1:8787`;

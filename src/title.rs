@@ -28,16 +28,20 @@ pub(crate) enum Choice {
     Board,
     Weekly,
     Settings,
+    Profile,
+    Local,
     Quit,
 }
 
 impl Choice {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 8] = [
         Self::Drive,
         Self::Circuits,
         Self::Board,
         Self::Weekly,
         Self::Settings,
+        Self::Profile,
+        Self::Local,
         Self::Quit,
     ];
 
@@ -48,6 +52,8 @@ impl Choice {
             Self::Board => "title.board",
             Self::Weekly => "title.weekly",
             Self::Settings => "pause.settings",
+            Self::Profile => "profile.title",
+            Self::Local => "local.title",
             Self::Quit => "title.quit",
         }
     }
@@ -83,7 +89,7 @@ impl Plugin for TitlePlugin {
             .add_systems(Startup, setup)
             .add_systems(PostStartup, open)
             .add_systems(PreUpdate, choose.after(HaltSet))
-            .add_systems(Update, (orbit, draw, fade));
+            .add_systems(Update, (orbit, draw, fade, credit));
     }
 }
 
@@ -107,6 +113,30 @@ struct Button(usize);
 struct Curtain;
 
 fn setup(mut commands: Commands) {
+    commands
+        .spawn((
+            Panel,
+            Creator,
+            bevy::prelude::Button,
+            GlobalZIndex(18),
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(64),
+                bottom: px(24),
+                padding: UiRect::axes(px(12), px(7)),
+                border_radius: BorderRadius::all(px(8)),
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+            Visibility::Hidden,
+        ))
+        .with_children(|credit| {
+            credit.spawn((
+                CreatorText,
+                crate::text::label("title.creator", 14.0, AMBER_DIM),
+            ));
+        });
+
     commands.spawn((
         Curtain,
         GlobalZIndex(30),
@@ -130,7 +160,7 @@ fn setup(mut commands: Commands) {
                 bottom: px(0),
                 flex_direction: FlexDirection::Column,
                 justify_content: JustifyContent::Center,
-                row_gap: px(10),
+                row_gap: px(7),
                 ..default()
             },
             Visibility::Hidden,
@@ -150,7 +180,7 @@ fn setup(mut commands: Commands) {
                         Button(i),
                         Node {
                             width: px(340),
-                            padding: UiRect::axes(px(18), px(11)),
+                            padding: UiRect::axes(px(18), px(8)),
                             border: UiRect::all(px(2)),
                             border_radius: BorderRadius::all(px(10)),
                             ..default()
@@ -184,10 +214,14 @@ fn choose(
     mut go: MessageWriter<crate::track::GoTo>,
     mut mode: ResMut<crate::car::Mode>,
     mut exit: MessageWriter<AppExit>,
+    mut profiles: MessageWriter<crate::online::profile::OpenProfile>,
+    mut local: MessageWriter<crate::local::OpenLocal>,
 ) {
     // Back from a page opened here, or on the way out to the road.
     if *halt == Halt::Nothing || *halt == Halt::Pause {
         title.active = false;
+    } else if *halt == Halt::Title {
+        title.active = true;
     }
     if *halt != Halt::Title || halt.is_changed() {
         return;
@@ -223,10 +257,64 @@ fn choose(
             *halt = Halt::Nothing;
         }
         Choice::Settings => *halt = Halt::Settings,
+        Choice::Profile => {
+            profiles.write(crate::online::profile::OpenProfile(Halt::Title));
+        }
+        Choice::Local => {
+            local.write(crate::local::OpenLocal);
+        }
         Choice::Quit => {
             exit.write(AppExit::Success);
         }
     }
+}
+
+#[derive(Component)]
+struct Creator;
+#[derive(Component)]
+struct CreatorText;
+
+fn credit(
+    halt: Res<Halt>,
+    keys: Res<ButtonInput<KeyCode>>,
+    buttons: Query<&Interaction, With<Creator>>,
+    mut text: Query<&mut TextColor, With<CreatorText>>,
+    mut last: Local<Interaction>,
+) {
+    if *halt != Halt::Title {
+        return;
+    }
+    let interaction = buttons.single().copied().unwrap_or(Interaction::None);
+    for mut colour in &mut text {
+        colour.set_if_neq(TextColor(if interaction == Interaction::None {
+            AMBER_DIM
+        } else {
+            TEXT
+        }));
+    }
+    if (interaction == Interaction::Pressed && *last != Interaction::Pressed)
+        || keys.just_pressed(KeyCode::F1)
+    {
+        std::thread::spawn(|| {
+            #[cfg(target_os = "macos")]
+            let result = std::process::Command::new("open")
+                .arg("https://x.com/olukschander")
+                .status();
+            #[cfg(target_os = "linux")]
+            let result = std::process::Command::new("xdg-open")
+                .arg("https://x.com/olukschander")
+                .status();
+            #[cfg(target_os = "windows")]
+            let result = std::process::Command::new("rundll32.exe")
+                .args(["url.dll,FileProtocolHandler", "https://x.com/olukschander"])
+                .status();
+            #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+            if let Err(error) = result {
+                warn!("could not open creator profile: {error}");
+            }
+        });
+    }
+    *last = interaction;
 }
 
 /// A slow turn round the circuit, high enough to see all of it.
@@ -329,6 +417,8 @@ mod tests {
             .add_message::<crate::menu::OpenMenu>()
             .add_message::<crate::track::GoTo>()
             .add_message::<AppExit>()
+            .add_message::<crate::online::profile::OpenProfile>()
+            .add_message::<crate::local::OpenLocal>()
             .add_systems(Update, choose);
         app.update();
         app

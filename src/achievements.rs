@@ -1,4 +1,4 @@
-//! Fifty things to have done, noticed when they happen and kept for good.
+//! Driving milestones, noticed when they happen and kept for good.
 //!
 //! Each is checked only when something happens that could earn it — a lap
 //! finishing, a sector closing, a lap reaching the board — and never every
@@ -23,7 +23,7 @@ const FILE: &str = "achievements.json";
 const VERSION: u32 = 1;
 
 /// The circuits with a gold of their own to earn.
-const GOLD_AT: [&str; 16] = [
+const GOLD_AT: [&str; 27] = [
     "monaco",
     "spa-francorchamps",
     "suzuka",
@@ -40,6 +40,17 @@ const GOLD_AT: [&str; 16] = [
     "americas",
     "marina-bay",
     "jeddah",
+    "le-mans",
+    "fuji",
+    "sebring",
+    "laguna-seca",
+    "lime-rock",
+    "long-beach",
+    "mid-ohio",
+    "mosport",
+    "road-america",
+    "road-atlanta",
+    "virginia-international-raceway",
 ];
 
 /// Every achievement: its id, its name and what it asks for.
@@ -133,7 +144,106 @@ pub(crate) fn all() -> Vec<(String, String, String)> {
             crate::text::tf("ach.gold_at_what", &[&name]),
         ));
     }
+    let mut tours = Vec::new();
+    for (id, collection) in TOURS {
+        let count = all_circuits()
+            .iter()
+            .filter(|c| collection.contains(c.id))
+            .count();
+        tours.push((
+            format!("tour-{id}"),
+            crate::text::tf("ach.tour", &[&collection.name()]),
+            crate::text::tf("ach.tour_what", &[&count, &collection.name()]),
+        ));
+        tours.push((
+            format!("tour-gold-{id}"),
+            crate::text::tf("ach.tour_gold", &[&collection.name()]),
+            crate::text::tf("ach.tour_gold_what", &[&count, &collection.name()]),
+        ));
+    }
+    tours.extend(out);
+    tours
+}
+
+/// The five current collections add ten milestones; earned IDs never reset
+/// when the catalogue grows. Earlier 40-circuit milestones remain unchanged.
+const TOURS: [(&str, crate::collection::Collection); 5] = [
+    ("dhh-2014", crate::collection::Collection::Dhh2014),
+    ("endurance", crate::collection::Collection::Endurance),
+    ("grand-prix", crate::collection::Collection::GrandPrix),
+    ("heritage", crate::collection::Collection::Heritage),
+    ("all", crate::collection::Collection::All),
+];
+
+fn gold_circuits(records: Option<&crate::ghost::Records>, mode: Mode) -> BTreeSet<String> {
+    all_circuits()
+        .iter()
+        .enumerate()
+        .filter_map(|(at, circuit)| {
+            let best = records?.best(at, mode)?;
+            let (targets, _) = crate::medals::targets_for(circuit.id, mode)?;
+            targets
+                .medal(best)
+                .filter(|m| *m >= Medal::Gold)
+                .map(|_| circuit.id.to_string())
+        })
+        .collect()
+}
+
+fn tour_awards(earned: &Earned, gold: &BTreeSet<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    for (id, collection) in TOURS {
+        let circuits: Vec<_> = all_circuits()
+            .iter()
+            .filter(|c| collection.contains(c.id))
+            .collect();
+        if circuits
+            .iter()
+            .all(|c| earned.modes.get(c.id).is_some_and(|m| !m.is_empty()))
+        {
+            out.push(format!("tour-{id}"));
+        }
+        if circuits.iter().all(|c| gold.contains(c.id)) {
+            out.push(format!("tour-gold-{id}"));
+        }
+    }
     out
+}
+
+/// Collection progress uses valid laps, not merely visiting a circuit.
+pub(crate) fn tour_progress(earned: &Earned) -> Vec<(String, usize, usize)> {
+    TOURS
+        .iter()
+        .map(|(_, collection)| {
+            let circuits: Vec<_> = all_circuits()
+                .iter()
+                .filter(|c| collection.contains(c.id))
+                .collect();
+            let done = circuits
+                .iter()
+                .filter(|c| earned.modes.get(c.id).is_some_and(|m| !m.is_empty()))
+                .count();
+            (collection.name().into(), done, circuits.len())
+        })
+        .collect()
+}
+
+fn reconcile(
+    records: Res<crate::ghost::Records>,
+    mut earned: ResMut<Earned>,
+    mut toast: ResMut<Toast>,
+) {
+    for mode in Mode::ALL {
+        let gold = gold_circuits(Some(&records), mode);
+        let mut ids = tour_awards(&earned, &gold);
+        ids.extend(
+            GOLD_AT
+                .iter()
+                .filter(|id| gold.contains(**id))
+                .map(|id| format!("gold-{id}")),
+        );
+        announce(&mut earned, &mut toast, &ids);
+    }
 }
 
 /// What is kept: what was earned and when, and what it is counted from.
@@ -264,8 +374,12 @@ impl Plugin for AchievementsPlugin {
         app.insert_resource(load())
             .init_resource::<Toast>()
             .add_systems(Startup, setup)
+            .add_systems(PostStartup, reconcile)
             .add_systems(FixedUpdate, laps.after(LapSet))
-            .add_systems(Update, (sectors, distance, online, draw).chain())
+            .add_systems(
+                Update,
+                (sectors, distance.run_if(crate::local::solo), online, draw).chain(),
+            )
             .add_systems(Last, save);
     }
 }
@@ -322,16 +436,10 @@ fn laps(
         let targets = crate::medals::targets(&track, *mode);
         let best = timer.best.map_or(lap.time, |b| b.min(lap.time));
         let medal = targets.and_then(|t| lap.valid.then(|| t.medal(best)).flatten());
-        let golds = records.as_ref().map_or(0, |records| {
-            (0..all_circuits().len())
-                .filter(|&at| {
-                    let best = records.best(at, *mode);
-                    crate::medals::targets_for(all_circuits()[at].id, *mode)
-                        .and_then(|(t, _)| best.and_then(|b| t.medal(b)))
-                        .is_some_and(|m| m >= Medal::Gold)
-                })
-                .count()
-        });
+        let mut golds = gold_circuits(records.as_deref(), *mode);
+        if medal.is_some_and(|m| m >= Medal::Gold) {
+            golds.insert(circuit.into());
+        }
         let beat = rival
             .as_ref()
             .and_then(|r| r.lap_time())
@@ -349,12 +457,13 @@ fn laps(
             *spec,
             &splits,
             medal,
-            golds,
+            golds.len(),
             beat,
         );
         if lap.valid && challenge.as_ref().is_some_and(|c| c.counts(circuit, *mode)) {
             ids.push("weekly".into());
         }
+        ids.extend(tour_awards(&earned, &golds));
         announce(&mut earned, &mut toast, &ids);
     }
 }
@@ -537,11 +646,11 @@ mod tests {
     }
 
     #[test]
-    fn there_are_fifty_with_different_ids() {
+    fn the_expanded_catalogue_has_unique_stable_ids() {
         let all = all();
-        assert_eq!(all.len(), 50);
+        assert_eq!(all.len(), 71);
         let ids: BTreeSet<_> = all.iter().map(|(id, _, _)| id.clone()).collect();
-        assert_eq!(ids.len(), 50);
+        assert_eq!(ids.len(), 71);
         for id in GOLD_AT {
             assert!(
                 all_circuits().iter().any(|c| c.id == id),
@@ -679,5 +788,28 @@ mod tests {
             serde_json::from_str::<Earned>("{}").unwrap(),
             Earned::default()
         );
+    }
+    #[test]
+    fn collection_passports_require_valid_laps_and_preserve_old_awards() {
+        let mut earned = Earned::default();
+        earned.earn("circuits-40", 123);
+        for id in crate::collection::DHH_2014 {
+            earned.lapped.insert((*id).into());
+        }
+        assert!(!tour_awards(&earned, &BTreeSet::new()).contains(&"tour-dhh-2014".into()));
+        for id in crate::collection::DHH_2014 {
+            earned
+                .modes
+                .insert((*id).into(), BTreeSet::from(["regular".into()]));
+        }
+        let gold = crate::collection::DHH_2014
+            .iter()
+            .map(|id| (*id).to_string())
+            .collect();
+        let awards = tour_awards(&earned, &gold);
+        assert!(awards.contains(&"tour-dhh-2014".into()));
+        assert!(awards.contains(&"tour-gold-dhh-2014".into()));
+        assert!(!awards.contains(&"tour-endurance".into()));
+        assert_eq!(earned.earned.get("circuits-40"), Some(&123));
     }
 }

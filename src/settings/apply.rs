@@ -74,8 +74,10 @@ fn scaled_size(window: UVec2, scale: f32) -> Option<UVec2> {
 /// the HUD drawn on top at full resolution: at half scale the world costs a
 /// quarter of the pixels, for one more full-screen quad. At 100% the world is
 /// drawn straight to the window, as it always was.
+#[allow(clippy::too_many_arguments)]
 fn scale(
     settings: Res<Settings>,
+    race: Option<Res<crate::local::LocalRace>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
@@ -86,7 +88,11 @@ fn scale(
     let Ok(window) = windows.single() else {
         return;
     };
-    let wanted = scaled_size(window.physical_size(), settings.render_scale);
+    let wanted = if crate::local::active(race.as_deref()) {
+        None
+    } else {
+        scaled_size(window.physical_size(), settings.render_scale)
+    };
     if *seen == Some(wanted) {
         return;
     }
@@ -144,9 +150,10 @@ fn camera(
     mut commands: Commands,
     mut cameras: Query<(Entity, &mut Projection), With<Camera3d>>,
     mut seen: Local<Option<(bool, u32)>>,
+    added: Query<(), Added<Camera3d>>,
 ) {
     let wanted = (settings.antialiasing, settings.fov.to_bits());
-    if *seen == Some(wanted) {
+    if *seen == Some(wanted) && added.is_empty() {
         return;
     }
     for (camera, mut projection) in &mut cameras {

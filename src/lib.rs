@@ -2,12 +2,15 @@ mod achievements;
 mod camera;
 mod car;
 mod challenge;
+mod collection;
 mod countdown;
 mod ghost;
 mod haptics;
 mod hud;
+mod identity;
 mod input;
 mod lap;
+mod local;
 mod medals;
 mod menu;
 mod minimap;
@@ -124,6 +127,7 @@ impl Plugin for GamePlugin {
                 title::TitlePlugin,
                 text::TextPlugin,
                 multiplayer::MultiplayerPlugin,
+                local::LocalPlugin,
             ))
             .add_systems(Update, quit);
     }

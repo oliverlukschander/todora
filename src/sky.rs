@@ -105,7 +105,7 @@ fn hang(
 /// Centred on the camera, so the sky is infinitely far away, and turning.
 fn drift(
     time: Res<Time>,
-    cameras: Query<&Transform, (With<Camera3d>, Without<Dome>)>,
+    cameras: Query<&Transform, (With<crate::camera::FollowCam>, Without<Dome>)>,
     mut domes: Query<&mut Transform, With<Dome>>,
 ) {
     let Ok(camera) = cameras.single() else {
