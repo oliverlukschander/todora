@@ -43,14 +43,12 @@ impl Tyres {
 }
 
 // Prepared by tools/prepare_engine_audio.py; CC BY 3.0, assets/audio/CREDITS.md.
-// The measured dominant notes align the recordings before blending.
-const ENGINE_LOOPS: [(&[u8], f32); 3] = [
-    (include_bytes!("../../assets/audio/engine-low.s16le"), 182.5),
-    (include_bytes!("../../assets/audio/engine-mid.s16le"), 212.9),
-    (
-        include_bytes!("../../assets/audio/engine-high.s16le"),
-        235.6,
-    ),
+// Each loop contains whole firing cycles, retimed to this common period.
+const ENGINE_PERIOD: usize = 200;
+const ENGINE_LOOPS: [&[u8]; 3] = [
+    include_bytes!("../../assets/audio/engine-low.s16le"),
+    include_bytes!("../../assets/audio/engine-mid.s16le"),
+    include_bytes!("../../assets/audio/engine-high.s16le"),
 ];
 
 /// Three recorded engine textures, aligned in pitch and blended as revs climb.
@@ -58,7 +56,8 @@ const ENGINE_LOOPS: [(&[u8], f32); 3] = [
 /// Playback allocates nothing and does no decoding on the audio thread.
 #[derive(Default)]
 pub(super) struct Engine {
-    positions: [f32; 3],
+    cycles: [usize; 3],
+    phase: f32,
     rpm: f32,
     load: f32,
     level: f32,
@@ -75,17 +74,26 @@ impl Engine {
         let pitch = 70.0 + 250.0 * self.rpm;
         let blend = ((self.rpm - 0.12) / (0.95 - 0.12) * 2.0).clamp(0.0, 2.0);
         let mut voice = 0.0;
-        for (i, (pcm, base)) in ENGINE_LOOPS.iter().enumerate() {
+        for (i, pcm) in ENGINE_LOOPS.iter().enumerate() {
             let length = pcm.len() / 2;
-            let position = &mut self.positions[i];
-            let at = *position as usize;
+            let position = self.phase * ENGINE_PERIOD as f32;
+            let at = self.cycles[i] * ENGINE_PERIOD + position as usize;
             let fraction = position.fract();
             let read = |n: usize| i16::from_le_bytes([pcm[n * 2], pcm[n * 2 + 1]]) as f32 / 32768.0;
             let sample = read(at) * (1.0 - fraction) + read((at + 1) % length) * fraction;
-            *position = (*position + pitch / base) % length as f32;
-            // Constant power across neighbouring loop layers.
-            let weight = (1.0 - (blend - i as f32).abs()).max(0.0).sqrt();
+            // The tonal layers are phase-aligned, so linear weights preserve
+            // their level without boosting the middle of a transition.
+            let weight = (1.0 - (blend - i as f32).abs()).max(0.0);
             voice += sample * weight;
+        }
+        // One shared firing phase prevents the layers drifting apart during
+        // a long straight. Their natural texture still spans different cycles.
+        self.phase += pitch / RATE;
+        if self.phase >= 1.0 {
+            self.phase -= 1.0;
+            for (i, pcm) in ENGINE_LOOPS.iter().enumerate() {
+                self.cycles[i] = (self.cycles[i] + 1) % (pcm.len() / 2 / ENGINE_PERIOD);
+            }
         }
         self.filtered += (voice - self.filtered) * (0.16 + 0.44 * self.load);
         self.filtered * (0.4 + 0.6 * self.load) * self.level * 0.25
@@ -256,19 +264,88 @@ mod tests {
 
     #[test]
     fn engine_loops_are_level_matched_and_join_without_a_click() {
-        for (pcm, _) in ENGINE_LOOPS {
-            assert_eq!(pcm.len() % 2, 0);
+        for pcm in ENGINE_LOOPS {
+            assert_eq!(pcm.len() % (2 * ENGINE_PERIOD), 0);
             let samples: Vec<f32> = pcm
                 .chunks_exact(2)
                 .map(|p| i16::from_le_bytes([p[0], p[1]]) as f32 / 32768.0)
                 .collect();
             assert!(samples.len() > 22_050);
             assert!(samples.iter().all(|s| s.abs() < 0.85));
-            assert!((samples[0] - samples[samples.len() - 1]).abs() < 0.01);
+            // A join on a rising/falling waveform need not have equal sample
+            // values; its step must be consistent with the surrounding slope.
+            let last = samples.len() - 1;
+            let neighbouring_step = (samples[1] - samples[0])
+                .abs()
+                .max((samples[last] - samples[last - 1]).abs());
+            assert!((samples[0] - samples[last]).abs() < neighbouring_step + 0.005);
             let mean = samples.iter().sum::<f32>() / samples.len() as f32;
             let power = samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32;
             assert!(mean.abs() < 0.0001, "DC offset");
             assert!((power.sqrt() - 0.15).abs() < 0.001, "uneven loop volume");
+        }
+    }
+
+    fn pitch_drift(samples: &[f32], pitch: f32) -> f32 {
+        let window = (20.0 * RATE / pitch).round() as usize;
+        let (mut previous, mut phase, mut low, mut high) = (None, 0.0_f32, 0.0_f32, 0.0_f32);
+        // Track the fundamental against a steady carrier. A clean boundary
+        // alone misses the acceleration and pitch reset inside a short loop.
+        for start in (0..samples.len() - window).step_by(window / 4) {
+            let (mut real, mut imaginary) = (0.0, 0.0);
+            for j in 0..window {
+                let at = start + j;
+                let angle = std::f32::consts::TAU * pitch * at as f32 / RATE;
+                let weight = 0.5 - 0.5 * (std::f32::consts::TAU * j as f32 / window as f32).cos();
+                real += samples[at] * weight * angle.cos();
+                imaginary += samples[at] * weight * angle.sin();
+            }
+            let measured = imaginary.atan2(real);
+            if let Some(previous) = previous {
+                let delta: f32 = measured - previous;
+                phase += delta.sin().atan2(delta.cos());
+                low = low.min(phase);
+                high = high.max(phase);
+            }
+            previous = Some(measured);
+        }
+        (high - low) / std::f32::consts::TAU
+    }
+
+    #[test]
+    fn engine_loops_hold_a_steady_note_instead_of_repeating_an_acceleration() {
+        for pcm in ENGINE_LOOPS {
+            let samples: Vec<f32> = pcm
+                .chunks_exact(2)
+                .map(|p| i16::from_le_bytes([p[0], p[1]]) as f32 / 32768.0)
+                .collect();
+            let drift = pitch_drift(&samples, RATE / ENGINE_PERIOD as f32);
+            assert!(drift < 0.05, "engine loop drifts by {drift:.3} cycles");
+        }
+    }
+
+    #[test]
+    fn engine_layers_stay_in_tune_at_every_cars_maximum_speed() {
+        let cruising = crate::car::Spec::ALL.into_iter().map(|spec| {
+            let h = spec.handling();
+            let terminal =
+                ((h.accel - h.rolling) / (h.accel / h.top_speed.powi(2) + h.drag)).sqrt();
+            revs(terminal, h.top_speed)
+        });
+        for rpm in cruising.chain([0.95]) {
+            let mut engine = Engine::default();
+            for _ in 0..44_100 {
+                engine.sample(rpm, 1.0, 1.0);
+            }
+            let pitch = 70.0 + 250.0 * engine.rpm;
+            let samples: Vec<_> = (0..(10 * 44_100))
+                .map(|_| engine.sample(rpm, 1.0, 1.0))
+                .collect();
+            let drift = pitch_drift(&samples, pitch);
+            assert!(
+                drift < 0.05,
+                "steady {rpm:.3} revs drift by {drift:.3} cycles"
+            );
         }
     }
 
@@ -301,22 +378,29 @@ mod tests {
         assert!(engine.sample(0.8, 1.0, 0.0).abs() < 1e-6);
     }
 
-    /// Twelve seconds of the engine pulling from a stop to top speed, lifting
-    /// for a corner and pulling again, as `dist/engine.wav`, for a listen:
+    /// Idle, acceleration, a sustained flat-road maximum, the speed ceiling
+    /// and lifting off, as `dist/engine.wav`, for a listen:
     /// `cargo test --locked --lib write_the_engine -- --ignored`.
     #[test]
     #[ignore = "writes dist/engine.wav"]
     fn write_the_engine() {
         let mut engine = Engine::default();
         let mut pcm = Vec::new();
-        let (top, mut speed) = (22.0f32, 0.0f32);
-        for i in 0..(12 * 44_100) {
+        let h = crate::car::Handling::SHOOTING_BRAKE;
+        // On a flat straight: accel * (1 - (v / top)^2) = drag * v^2 + rolling.
+        let terminal = ((h.accel - h.rolling) / (h.accel / h.top_speed.powi(2) + h.drag)).sqrt();
+        for i in 0..(44 * 44_100) {
             let t = i as f32 / 44_100.0;
-            let throttle = if (7.0..8.5).contains(&t) { 0.0 } else { 1.0 };
-            speed = (speed
-                + (throttle * 3.2 * (1.0 - speed / top) - 1.5 * (1.0 - throttle)) / 44_100.0)
-                .clamp(0.0, top);
-            let sample = engine.sample(revs(speed, top), throttle, 1.0) * 4.0;
+            let speed = match t {
+                t if t < 2.0 => 0.0,
+                t if t < 16.0 => terminal * (t - 2.0) / 14.0,
+                t if t < 28.0 => terminal,
+                t if t < 32.0 => terminal + (h.top_speed - terminal) * (t - 28.0) / 4.0,
+                t if t < 40.0 => h.top_speed,
+                _ => h.top_speed * (1.0 - (t - 40.0) / 8.0),
+            };
+            let throttle = if (2.0..40.0).contains(&t) { 1.0 } else { 0.0 };
+            let sample = engine.sample(revs(speed, h.top_speed), throttle, 1.0) * 4.0;
             pcm.extend_from_slice(&((sample.clamp(-1.0, 1.0) * 32_000.0) as i16).to_le_bytes());
         }
         let mut wav = Vec::new();

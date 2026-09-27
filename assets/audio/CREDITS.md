@@ -16,8 +16,10 @@ It is a Ferrari 355 Spider engine-compartment recording; it does not represent
 the fictional OMARCHY GT #95's real-world counterpart or imply endorsement.
 
 Todora changes: mono 44.1 kHz conversion, high/low-pass filtering, three short
-excerpts, DC removal, level matching and crossfaded loop boundaries. Runtime
-pitch alignment, blending, throttle filtering and gain make the recording
+excerpts, firing-cycle retiming to remove the recorded acceleration, DC
+removal, level matching and crossfading over whole firing cycles. All three
+loops use 200 samples per cycle; runtime playback keeps their firing phase
+aligned. Pitch, blending, throttle filtering and gain make the recording
 interactive. These are excerpts of one acceleration, not separately measured
 idle/low/high-RPM takes. The three `engine-*.s16le` files are headerless signed
 16-bit little-endian PCM. Rebuild them and their WAV previews with
