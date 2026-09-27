@@ -1,6 +1,8 @@
 //! Opt-in reproducible screenshots; absent from the packaged game.
 //! TODORA_CAPTURE=/absolute/path.png TODORA_CIRCUIT=suzuka
 //! TODORA_PROGRESS=0.78 cargo run --features visual-check
+//! TODORA_LOAD=le-mans selects another circuit after startup, captures its
+//! loading screen, and waits for the completed switch before exiting.
 //! TODORA_ZOOM=2.4 sets the chase camera's zoom, which is also how far back
 //! speed stretches the boom. TODORA_BEHIND=15 holds the chase camera that many
 //! metres behind the car in plan, as the follow lag does at speed.
@@ -39,6 +41,8 @@ struct Capture {
     countdown: Option<f32>,
     /// Whether the car is put somewhere round the lap, or left on the grid.
     placed: bool,
+    load: Option<&'static crate::track::Circuit>,
+    loading_frames: u32,
 }
 pub fn configure(app: &mut App) {
     let Ok(path) = std::env::var("TODORA_CAPTURE") else {
@@ -76,6 +80,13 @@ pub fn configure(app: &mut App) {
             behind: std::env::var("TODORA_BEHIND")
                 .ok()
                 .and_then(|s| s.parse().ok()),
+            load: std::env::var("TODORA_LOAD").ok().map(|id| {
+                all_circuits()
+                    .iter()
+                    .find(|c| c.id == id)
+                    .expect("loading circuit")
+            }),
+            loading_frames: 0,
             frame: 0,
             preview: std::env::var_os("TODORA_PREVIEW").is_some(),
             countdown: std::env::var("TODORA_COUNTDOWN")
@@ -168,6 +179,7 @@ fn place(
         }
     }
 }
+#[allow(clippy::too_many_arguments)]
 fn capture(
     mut commands: Commands,
     mut capture: ResMut<Capture>,
@@ -175,8 +187,19 @@ fn capture(
     mut cameras: Query<&mut Transform, (With<Camera3d>, Without<Player>)>,
     mut follow: Query<&mut crate::camera::FollowCam>,
     mut exit: MessageWriter<AppExit>,
+    mut go: MessageWriter<crate::track::GoTo>,
+    track: Res<Track>,
+    halt: Res<crate::pause::Halt>,
 ) {
     capture.frame += 1;
+    if let Some(circuit) = capture.load {
+        if capture.frame == 60 {
+            go.write(crate::track::GoTo(circuit));
+        }
+        if *halt == crate::pause::Halt::Loading {
+            capture.loading_frames += 1;
+        }
+    }
     if let Some(zoom) = capture.zoom {
         for mut camera in &mut follow {
             camera.zoom = zoom;
@@ -189,12 +212,28 @@ fn capture(
             Transform::from_translation(car.translation - *car.forward() * 16.0 + Vec3::Y * 22.0)
                 .looking_at(car.translation + *car.forward() * 8.0, Vec3::Y);
     }
-    if capture.frame == 100 {
+    let take_picture = if capture.load.is_some() {
+        capture.loading_frames == 2 && *halt == crate::pause::Halt::Loading
+    } else {
+        capture.frame == 100
+    };
+    if take_picture {
         commands
             .spawn(Screenshot::primary_window())
             .observe(save_to_disk(capture.path.clone()));
     }
     if capture.frame > 140 {
+        if let Some(circuit) = capture.load {
+            assert!(capture.frame < 36_000, "circuit loading never completed");
+            if track.circuit().id != circuit.id || *halt == crate::pause::Halt::Loading {
+                return;
+            }
+            assert!(capture.loading_frames > 1, "loading blocked the frame loop");
+            info!(
+                "Circuit loaded with {} responsive loading frames",
+                capture.loading_frames
+            );
+        }
         exit.write(AppExit::Success);
     }
 }

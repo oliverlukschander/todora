@@ -52,6 +52,8 @@ pub(crate) enum Halt {
     Replay,
     /// The title screen the game opens on.
     Title,
+    /// A circuit is being built in the background.
+    Loading,
 }
 
 impl Halt {
@@ -95,6 +97,7 @@ impl Plugin for PausePlugin {
                     hold_the_clock
                         .after(HaltSet)
                         .after(crate::menu::MenuSet)
+                        .after(crate::track::TrackSet)
                         .after(crate::multiplayer::ReadySet),
                 ),
             )
@@ -383,7 +386,8 @@ fn hold_the_clock(
             *controls = Controls::default();
         }
     }
-    let stopped = session.as_ref().is_some_and(|s| s.blocks_drive())
+    let stopped = *halt == Halt::Loading
+        || session.as_ref().is_some_and(|s| s.blocks_drive())
         || (halt.stopped() && !session.as_ref().is_some_and(|s| s.driving()));
     if stopped != time.is_paused() {
         if stopped {
@@ -807,9 +811,11 @@ mod tests {
         let mut app = game();
         app.update();
         assert!(!app.world().resource::<Time<Virtual>>().is_paused());
-        *app.world_mut().resource_mut::<Halt>() = Halt::Pause;
-        app.update();
-        assert!(app.world().resource::<Time<Virtual>>().is_paused());
+        for halt in [Halt::Pause, Halt::Loading] {
+            *app.world_mut().resource_mut::<Halt>() = halt;
+            app.update();
+            assert!(app.world().resource::<Time<Virtual>>().is_paused());
+        }
         *app.world_mut().resource_mut::<Halt>() = Halt::Nothing;
         app.update();
         assert!(!app.world().resource::<Time<Virtual>>().is_paused());

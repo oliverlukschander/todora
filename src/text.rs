@@ -518,6 +518,8 @@ pub(crate) const MORE: &[Entry] = &[
     ("menu.handling_setup", ["HANDLING SETUP", "FAHRWERK", "RÉGLAGE DU COMPORTEMENT", "REGLAJE DEL COMPORTAMIENTO", "ASSETTO"]),
     ("menu.driving_mode", ["DRIVING MODE", "FAHRMODUS", "MODE DE CONDUITE", "MODO DE CONDUCCIÓN", "MODALITÀ DI GUIDA"]),
     ("menu.setup_keys", ["1 / 2 / 3 changes handling while driving.", "1 / 2 / 3 ändert das Fahrwerk während der Fahrt.", "1 / 2 / 3 change le réglage en roulant.", "1 / 2 / 3 cambia el reglaje al conducir.", "1 / 2 / 3 cambia l'assetto in guida."]),
+    ("loading.circuit", ["LOADING CIRCUIT", "STRECKE WIRD GELADEN", "CHARGEMENT DU CIRCUIT", "CARGANDO CIRCUITO", "CARICAMENTO CIRCUITO"]),
+    ("loading.wait", ["Getting ready to race…", "Gleich geht’s auf die Strecke…", "Préparation de la course…", "Preparando la carrera…", "Preparativi per la gara…"]),
     ("menu.circuits_key", ["T   Circuits", "T   Strecken", "T   Circuits", "T   Circuitos", "T   Circuiti"]),
     ("menu.garage_key", ["C   Garage & setup", "C   Garage & Setup", "C   Garage et réglages", "C   Garaje y reglaje", "C   Garage e assetto"]),
     ("setup.stable", ["Stable", "Stabil", "Stable", "Estable", "Stabile"]),

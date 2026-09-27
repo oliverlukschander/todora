@@ -21,9 +21,15 @@ fi
 unset BEVY_ASSET_ROOT CARGO_MANIFEST_DIR
 cd /tmp
 
-for circuit in suzuka monza monaco le-mans fuji sebring; do
+for circuit in suzuka monza monaco le-mans fuji sebring loading; do
+  start="$circuit"
+  unset TODORA_LOAD
+  if [[ "$circuit" == loading ]]; then
+    start=red-bull-ring
+    export TODORA_LOAD=le-mans
+  fi
   rm -f "$OUT/$circuit.png"
-  TODORA_CAPTURE="$OUT/$circuit.png" TODORA_CIRCUIT="$circuit" TODORA_SMALL=1 \
+  TODORA_CAPTURE="$OUT/$circuit.png" TODORA_CIRCUIT="$start" TODORA_SMALL=1 \
     timeout 180 "$PACKAGE/todora" > "$OUT/$circuit.log" 2>&1
   python3 - "$OUT/$circuit.png" "$OUT/$circuit.log" <<'PY'
 import pathlib
@@ -38,6 +44,8 @@ assert sum(ImageStat.Stat(picture).var) > 100, "blank capture"
 assert len(picture.getcolors(picture.width * picture.height)) > 100, "empty scene"
 log = pathlib.Path(sys.argv[2]).read_text()
 assert "ERROR" not in log and "panicked" not in log, log
+if pathlib.Path(sys.argv[1]).stem == "loading":
+    assert "responsive loading frames" in log, "loading did not complete"
 print(f"Rendered {pathlib.Path(sys.argv[1]).stem}: {picture.size}")
 PY
 done

@@ -785,12 +785,16 @@ fn a_switch_builds_the_circuit_before_it_says_so() {
     }
 
     let mut app = App::new();
-    app.add_message::<Reset>()
+    app.add_plugins(MinimalPlugins)
+        .init_resource::<loading::Loading>()
+        .init_resource::<trackside::Prepared>()
+        .init_resource::<crate::pause::Halt>()
+        .add_message::<Reset>()
         .add_message::<GoTo>()
         .init_resource::<Assets<Mesh>>()
         .init_resource::<ResetsHeard>()
         .insert_resource(Track::new(circuits::first()))
-        .add_systems(Update, (switch, count).chain());
+        .add_systems(Update, (loading::switch, count).chain());
 
     let road = {
         let track = app.world().resource::<Track>();
@@ -823,9 +827,42 @@ fn a_switch_builds_the_circuit_before_it_says_so() {
         "the circuit being driven was rebuilt for nothing"
     );
 
+    fn await_switch(app: &mut App, circuit: &'static Circuit) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
+        while app.world().resource::<Track>().circuit().id != circuit.id {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "circuit did not finish loading"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            app.update();
+        }
+        // Installing the meshes holds the pause until the following frame.
+        assert_eq!(
+            *app.world().resource::<crate::pause::Halt>(),
+            crate::pause::Halt::Loading
+        );
+        app.update();
+        assert_eq!(
+            *app.world().resource::<crate::pause::Halt>(),
+            crate::pause::Halt::Nothing
+        );
+    }
+
     let next = &circuits::all()[1];
     app.world_mut().write_message(GoTo(next));
     app.update();
+    assert_eq!(
+        *app.world().resource::<crate::pause::Halt>(),
+        crate::pause::Halt::Loading
+    );
+    assert_eq!(
+        app.world().resource::<Track>().circuit().id,
+        circuits::first().id
+    );
+    assert_eq!(app.world().resource::<ResetsHeard>().0, 0);
+    assert_eq!(app.world().get::<Mesh3d>(loft).unwrap().0, road);
+    await_switch(&mut app, next);
     assert_eq!(
         app.world().resource::<Track>().circuit().id,
         next.id,
@@ -860,11 +897,13 @@ fn a_switch_builds_the_circuit_before_it_says_so() {
     // All three materials retain their mesh entities when switching
     // into a crossing and back out of it.
     let suzuka = circuits::all().iter().find(|c| c.id == "suzuka").unwrap();
-    for circuit in [suzuka, circuits::first()] {
+    let sarthe = circuits::all().iter().find(|c| c.id == "le-mans").unwrap();
+    for circuit in [suzuka, sarthe, circuits::first()] {
         let before =
             [loft, asphalt, grass].map(|e| app.world().get::<Mesh3d>(e).unwrap().0.clone());
         app.world_mut().write_message(GoTo(circuit));
         app.update();
+        await_switch(&mut app, circuit);
         for (entity, old) in [loft, asphalt, grass].into_iter().zip(before) {
             assert_ne!(app.world().get::<Mesh3d>(entity).unwrap().0, old);
         }

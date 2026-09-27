@@ -37,9 +37,14 @@ use std::collections::HashMap;
 #[derive(Component)]
 pub(super) struct Trackside;
 
+#[derive(Resource, Default)]
+pub(super) struct Prepared(pub Option<[Mesh; 2]>);
+
+#[allow(clippy::too_many_arguments)]
 pub(super) fn rebuild(
     mut commands: Commands,
     track: Res<Track>,
+    mut prepared: ResMut<Prepared>,
     old: Query<Entity, With<Trackside>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -64,7 +69,7 @@ pub(super) fn rebuild(
             ]
         })
         .clone();
-    let [shape_mesh, sign_mesh] = meshes_for(&track);
+    let [shape_mesh, sign_mesh] = prepared.0.take().unwrap_or_else(|| meshes_for(&track));
     for (mesh, material) in [(shape_mesh, shapes), (sign_mesh, signs)] {
         commands.spawn((
             Trackside,

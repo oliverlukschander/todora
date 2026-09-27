@@ -8,7 +8,9 @@ The weekly challenge keeps its original 40-circuit rotation so older clients and
 
 The circuits are laid out from public GPS traces of real circuits, and each carries a name of its own that nods to where it is — Parco Reale, Ardennes Loop, Figure-Eight Hills, Styrian Bowl. Todora is not affiliated with any circuit, series or team, and uses none of their names or marks. Internally a circuit keeps the id it has always had (`monza`, `spa-francorchamps`), which boards, saved laps and the weekly challenge are keyed to, so renaming one never touches a time; the circuit search finds a circuit by either.
 
-The three new tracks are in the development build on `main`; the v0.11.1 downloads below still contain 40 circuits.
+Selecting a circuit shows its name and animated loading lights while it prepares. Driving stays paused until the circuit is ready. Reduced Motion keeps the lights still.
+
+The three new tracks and loading screen are in the development build on `main`; the v0.11.1 downloads below still contain 40 circuits.
 
 [Download Todora 0.11.1 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.11.1/Todora.dmg) · [for Linux x86-64](https://github.com/oliverlukschander/todora/releases/download/v0.11.1/Todora-linux-x86_64.tar.gz) · [Release notes](docs/releases/v0.11.1.md)
 

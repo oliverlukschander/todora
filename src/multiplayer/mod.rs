@@ -269,7 +269,7 @@ fn loaded(
     let ready = remote
         .iter()
         .any(|root| assets.is_loaded_with_dependencies(&root.0));
-    let actions = if ready {
+    let actions = if ready && *halt != Halt::Loading {
         session.loaded(&config(&track, *mode), time.elapsed_secs_f64())
     } else {
         vec![]

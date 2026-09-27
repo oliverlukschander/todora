@@ -28,6 +28,7 @@ mod boards;
 mod bridge;
 #[allow(clippy::approx_constant)]
 mod circuits;
+mod loading;
 mod markers;
 mod profile;
 mod ribbon;
@@ -133,7 +134,7 @@ const RUN_UP: f32 = 40.5;
 /// has been rounded off into a ring.
 const LEAST_KEPT: f32 = 0.75;
 
-/// Building the chosen circuit runs in here, after the menu that chose it and
+/// Installing the chosen circuit runs in here, after the menu that chose it and
 /// before anything that puts itself back on a [`Reset`]. A switch writes that
 /// reset, so by the time the car, the clock, the ghost and the marks act on it,
 /// [`Track`] is already the new circuit.
@@ -151,11 +152,14 @@ impl Plugin for TrackPlugin {
             .get_resource::<crate::settings::Settings>()
             .and_then(crate::settings::Settings::chosen_circuit)
             .unwrap_or_else(circuits::first);
-        app.init_resource::<start::Finish>();
+        app.init_resource::<start::Finish>()
+            .init_resource::<loading::Loading>()
+            .init_resource::<trackside::Prepared>();
         app.insert_resource(Track::new(circuit))
             .add_message::<GoTo>()
-            .add_systems(Startup, setup)
-            .add_systems(PreUpdate, switch.in_set(TrackSet).after(MenuSet))
+            .add_systems(Startup, (setup, loading::setup))
+            .add_systems(PreUpdate, loading::switch.in_set(TrackSet).after(MenuSet))
+            .add_systems(Update, loading::show)
             .add_systems(
                 Update,
                 (
@@ -196,7 +200,7 @@ pub(crate) fn circuit_at(circuit: &Circuit) -> usize {
     circuits::at(circuit)
 }
 
-/// Drive that one. Written by the circuit menu and acted on by [`switch`];
+/// Drive that one. Written by the circuit menu and acted on by [`loading::switch`];
 /// nothing outside this module knows how a circuit is built, and nothing inside
 /// it knows which key was pressed.
 #[derive(Message)]
@@ -691,17 +695,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let (mut scenery, mut road, mut grass) = track.profile.surfaces(&track.ribbon);
-    rubber::apply(&mut road, &track.ribbon);
-    let terrain = track.terrain().mesh.clone();
-    if let Some(details) = bridge::mesh(&track.profile, &track.ribbon, &terrain) {
-        scenery
-            .merge(&details)
-            .expect("bridge shares the scenery attributes");
-    }
-    grass
-        .merge(&terrain)
-        .expect("grass meshes share attributes");
+    let [scenery, road, grass] = surfaces(&track);
     let (road_material, grass_material) = textures::materials(&mut commands, &assets);
     commands.spawn((
         Asphalt,
@@ -723,48 +717,20 @@ fn setup(
     ));
 }
 
-/// Go where the menu said.
-///
-/// Rebuild the spline and surrounding terrain once while the game is stopped
-/// behind the menu. The old meshes go when the last handles to them do.
-fn switch(
-    mut asked: MessageReader<GoTo>,
-    mut track: ResMut<Track>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut loft: Query<&mut Mesh3d, LoftMesh>,
-    mut ground: Query<&mut Mesh3d, TerrainMesh>,
-    mut road: Query<&mut Mesh3d, AsphaltMesh>,
-    mut reset: MessageWriter<Reset>,
-) {
-    let Some(GoTo(next)) = asked.read().last() else {
-        return;
-    };
-    if next.id == track.circuit.id {
-        return;
-    }
-    *track = Track::new(next);
-    let (mut scenery, mut asphalt, mut grass) = track.profile.surfaces(&track.ribbon);
-    rubber::apply(&mut asphalt, &track.ribbon);
+/// CPU-only geometry, shared by startup and background circuit loading.
+fn surfaces(track: &Track) -> [Mesh; 3] {
+    let (mut scenery, mut road, mut grass) = track.profile.surfaces(&track.ribbon);
+    rubber::apply(&mut road, &track.ribbon);
     let terrain = track.terrain().mesh.clone();
     if let Some(details) = bridge::mesh(&track.profile, &track.ribbon, &terrain) {
         scenery
             .merge(&details)
             .expect("bridge shares the scenery attributes");
     }
-    if let Ok(mut mesh) = loft.single_mut() {
-        mesh.0 = meshes.add(scenery);
-    }
-    if let Ok(mut mesh) = road.single_mut() {
-        mesh.0 = meshes.add(asphalt);
-    }
-    if let Ok(mut mesh) = ground.single_mut() {
-        grass
-            .merge(&terrain)
-            .expect("grass meshes share attributes");
-        mesh.0 = meshes.add(grass);
-    }
-    // Everything that owns a piece of the old lap puts it back itself.
-    reset.write(Reset);
+    grass
+        .merge(&terrain)
+        .expect("grass meshes share attributes");
+    [scenery, road, grass]
 }
 
 #[cfg(test)]
