@@ -51,7 +51,7 @@ rsvg-convert -w 512 -h 512 "$ICON_SRC" -o "$ICON_PNG"
 cat > "$OUT/$BIN.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Version=1.5
+Version=1.0
 Name=$NAME
 Comment=A 3rd-person arcade racer around 51 scaled circuits
 Exec="$PWD/$OUT/$BIN"
@@ -79,7 +79,7 @@ if [[ "$INSTALL" -eq 1 ]]; then
   cat > "$APP_DESKTOP" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Version=1.5
+Version=1.0
 Name=$NAME
 Comment=A 3rd-person arcade racer around 51 scaled circuits
 Exec="$APPDIR/$BIN"
