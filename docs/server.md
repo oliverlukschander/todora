@@ -101,6 +101,11 @@ ARCH=arm64 TRAEFIK_NETWORK=<traefik's network> server/deploy/deploy.sh root@your
 `todora.lukschander.com`) and the resolver (default `myresolver`). The name's
 DNS must point at the host before Traefik can get its certificate.
 
+The Traefik configuration redirects visits to `/` (including a query string)
+to `https://github.com/oliverlukschander/todora/releases/latest`. This temporary
+redirect leaves `/v1/*`, `/admin/*` and other paths untouched, and lets the home
+page become a website later without a permanently cached redirect.
+
 The script builds the image for the target, copies it over SSH, and runs one
 container on `127.0.0.1:8787` with its data in the `todora-data` volume,
 `--restart unless-stopped`, 512 MB of memory and 1.5 CPUs. It makes an admin
