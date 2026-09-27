@@ -42,17 +42,27 @@ impl Tyres {
     }
 }
 
-/// The engine: a few harmonics of a firing note, a little filtered noise
-/// under load, and a pitch that climbs through six gears with speed. All of it
-/// made here, sample by sample, from two numbers the game publishes: how far
-/// through the rev range the engine is, and how hard it is being asked to pull.
+// Prepared by tools/prepare_engine_audio.py; CC BY 3.0, assets/audio/CREDITS.md.
+// The measured dominant notes align the recordings before blending.
+const ENGINE_LOOPS: [(&[u8], f32); 3] = [
+    (include_bytes!("../../assets/audio/engine-low.s16le"), 182.5),
+    (include_bytes!("../../assets/audio/engine-mid.s16le"), 212.9),
+    (
+        include_bytes!("../../assets/audio/engine-high.s16le"),
+        235.6,
+    ),
+];
+
+/// Three recorded engine textures, aligned in pitch and blended as revs climb.
+/// Throttle opens the intake's tone and volume; lifting leaves a muted overrun.
+/// Playback allocates nothing and does no decoding on the audio thread.
 #[derive(Default)]
 pub(super) struct Engine {
-    phase: f32,
+    positions: [f32; 3],
     rpm: f32,
     load: f32,
-    rumble: f32,
-    noise: u32,
+    level: f32,
+    filtered: f32,
 }
 
 impl Engine {
@@ -61,20 +71,24 @@ impl Engine {
         // Slewed per sample so a gear change is a quick swoop, not a click.
         self.rpm += (rpm - self.rpm) * 0.0009;
         self.load += (load - self.load) * 0.0006;
-        let pitch = 48.0 * (1.0 + 3.2 * self.rpm);
-        self.phase = (self.phase + pitch / RATE * std::f32::consts::TAU) % std::f32::consts::TAU;
-        let p = self.phase;
-        let tone =
-            p.sin() + 0.55 * (2.0 * p).sin() + 0.3 * (3.0 * p + 0.4).sin() + 0.12 * (5.0 * p).sin();
-        // A cheap, fixed noise source, filtered low for the intake roar.
-        self.noise = self
-            .noise
-            .wrapping_mul(1_664_525)
-            .wrapping_add(1_013_904_223);
-        let white = (self.noise >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
-        self.rumble += (white - self.rumble) * 0.05;
-        let voice = tone * (0.35 + 0.65 * self.load) + self.rumble * 1.2 * self.load;
-        voice * level * 0.045
+        self.level += (level - self.level) * 0.001;
+        let pitch = 70.0 + 250.0 * self.rpm;
+        let blend = ((self.rpm - 0.12) / (0.95 - 0.12) * 2.0).clamp(0.0, 2.0);
+        let mut voice = 0.0;
+        for (i, (pcm, base)) in ENGINE_LOOPS.iter().enumerate() {
+            let length = pcm.len() / 2;
+            let position = &mut self.positions[i];
+            let at = *position as usize;
+            let fraction = position.fract();
+            let read = |n: usize| i16::from_le_bytes([pcm[n * 2], pcm[n * 2 + 1]]) as f32 / 32768.0;
+            let sample = read(at) * (1.0 - fraction) + read((at + 1) % length) * fraction;
+            *position = (*position + pitch / base) % length as f32;
+            // Constant power across neighbouring loop layers.
+            let weight = (1.0 - (blend - i as f32).abs()).max(0.0).sqrt();
+            voice += sample * weight;
+        }
+        self.filtered += (voice - self.filtered) * (0.16 + 0.44 * self.load);
+        self.filtered * (0.4 + 0.6 * self.load) * self.level * 0.25
     }
 }
 
@@ -238,6 +252,53 @@ mod tests {
         assert!(loud.iter().any(|s| s.abs() > 0.02));
         let mut quiet = Engine::default();
         assert!((0..1000).all(|_| quiet.sample(0.8, 1.0, 0.0) == 0.0));
+    }
+
+    #[test]
+    fn engine_loops_are_level_matched_and_join_without_a_click() {
+        for (pcm, _) in ENGINE_LOOPS {
+            assert_eq!(pcm.len() % 2, 0);
+            let samples: Vec<f32> = pcm
+                .chunks_exact(2)
+                .map(|p| i16::from_le_bytes([p[0], p[1]]) as f32 / 32768.0)
+                .collect();
+            assert!(samples.len() > 22_050);
+            assert!(samples.iter().all(|s| s.abs() < 0.85));
+            assert!((samples[0] - samples[samples.len() - 1]).abs() < 0.01);
+            let mean = samples.iter().sum::<f32>() / samples.len() as f32;
+            let power = samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32;
+            assert!(mean.abs() < 0.0001, "DC offset");
+            assert!((power.sqrt() - 0.15).abs() < 0.001, "uneven loop volume");
+        }
+    }
+
+    #[test]
+    fn recorded_engine_handles_shifts_overrun_and_mute_without_spikes() {
+        let mut engine = Engine::default();
+        let mut previous = 0.0;
+        for rpm in [0.0, 0.12, 0.95, 0.42, 0.535, 0.75, 1.0] {
+            let mut power = [0.0; 2];
+            for (i, load) in [0.0, 1.0].into_iter().enumerate() {
+                for frame in 0..(4 * 44_100) {
+                    let sample = engine.sample(rpm, load, 1.0);
+                    assert!(sample.is_finite() && sample.abs() < 0.25);
+                    assert!((sample - previous).abs() < 0.1, "audio discontinuity");
+                    previous = sample;
+                    if frame >= 44_100 {
+                        power[i] += sample * sample;
+                    }
+                }
+            }
+            assert!(power[0] > 0.01, "idle and overrun must stay audible");
+            assert!(
+                power[1] > power[0] * 2.0,
+                "throttle must open up the engine"
+            );
+        }
+        for _ in 0..22_050 {
+            engine.sample(0.8, 1.0, 0.0);
+        }
+        assert!(engine.sample(0.8, 1.0, 0.0).abs() < 1e-6);
     }
 
     /// Twelve seconds of the engine pulling from a stop to top speed, lifting
