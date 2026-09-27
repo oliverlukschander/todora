@@ -41,6 +41,17 @@ pub(super) fn tyre_walls(track: &Track, site: &mut Site, out: &mut Builder) {
     let step = track.ribbon.length() / n as f32;
     for corner in boards::big_corners(&curvature, step) {
         let side = corner.outside;
+        // A tyre stack cannot drape over an embankment. If the usual line
+        // crosses one, keep the whole corner's wall on the fitted shoulder;
+        // switching individual nodes would kink the wall in and out.
+        let on_shoulder = (0..corner.length + TYRE_RUN_OUT)
+            .step_by(TYRE_STRIDE)
+            .any(|d| {
+                let at = (corner.entry + d) as i64;
+                let inner = beside(track, at, side, TYRE_OUT);
+                let outer = beside(track, at, side, TYRE_OUT + TYRE_DEEP);
+                (site.ground(inner) - site.ground(outer)).abs() > TYRE_HEIGHT / 2.0
+            });
         let mut run: Vec<(i64, Vec3, Vec3)> = Vec::new();
         let mut belt = 0;
         let mut finish = |run: &mut Vec<(i64, Vec3, Vec3)>, site: &mut Site, out: &mut Builder| {
@@ -52,12 +63,22 @@ pub(super) fn tyre_walls(track: &Track, site: &mut Site, out: &mut Builder) {
         for d in (0..corner.length + TYRE_RUN_OUT).step_by(TYRE_STRIDE) {
             let at = (corner.entry + d) as i64;
             let station = &stations[at.rem_euclid(n as i64) as usize];
+            let offset = if on_shoulder {
+                track
+                    .profile
+                    .reach(at.rem_euclid(n as i64) as usize, 0.0, side)
+                    - HALF_WIDTH
+                    - TYRE_DEEP
+                    - 0.1
+            } else {
+                TYRE_OUT
+            };
             // Where this stretch bends the other way tighter than the wall is
             // far out, the wall would fold over itself: break it there.
             let folds = station.curvature * side > 0.0
-                && station.curvature.abs() * (HALF_WIDTH + TYRE_OUT + TYRE_DEEP + 1.0) > 1.0;
-            let inner = beside(track, at, side, TYRE_OUT);
-            let outer = beside(track, at, side, TYRE_OUT + TYRE_DEEP);
+                && station.curvature.abs() * (HALF_WIDTH + offset + TYRE_DEEP + 1.0) > 1.0;
+            let inner = beside(track, at, side, offset);
+            let outer = beside(track, at, side, offset + TYRE_DEEP);
             let centre = (inner + outer) / 2.0;
             if !folds && site.fits(centre, TYRE_DEEP / 2.0 + 0.1, 0.3) {
                 run.push((at, inner, outer));
@@ -202,5 +223,47 @@ fn left_to_right(a: Vec3, b: Vec3, facing: Vec3) -> (Vec3, Vec3) {
         (a, b)
     } else {
         (b, a)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tyre_walls_do_not_stretch_across_steep_banks() {
+        for circuit in crate::track::all_circuits() {
+            let track = Track::new(circuit);
+            let mut out = Builder::default();
+            tyre_walls(&track, &mut Site::new(&track), &mut out);
+            assert!(
+                !out.signs.positions.is_empty(),
+                "{} lost its tyre walls",
+                circuit.name
+            );
+            let mut worst = 0.0_f32;
+            for (face, normals) in out
+                .positions
+                .chunks_exact(6)
+                .zip(out.normals.chunks_exact(6))
+            {
+                if Vec3::from(normals[0]) != Vec3::Y {
+                    continue;
+                }
+                for a in face {
+                    for b in face {
+                        let (a, b) = (Vec3::from(*a), Vec3::from(*b));
+                        if (a.xz().distance(b.xz()) - TYRE_DEEP).abs() < 0.0001 {
+                            worst = worst.max((a.y - b.y).abs());
+                        }
+                    }
+                }
+            }
+            assert!(
+                worst <= TYRE_HEIGHT / 2.0,
+                "{}: a tyre wall's 34 cm cap climbs {worst:.3} m across its width",
+                circuit.name
+            );
+        }
     }
 }
