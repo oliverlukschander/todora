@@ -4,6 +4,7 @@ mod car;
 mod challenge;
 mod collection;
 mod countdown;
+mod fun;
 mod ghost;
 mod haptics;
 mod hud;
@@ -128,6 +129,7 @@ impl Plugin for GamePlugin {
                 text::TextPlugin,
                 multiplayer::MultiplayerPlugin,
                 local::LocalPlugin,
+                fun::FunPlugin,
             ))
             .add_systems(Update, quit);
     }

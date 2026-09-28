@@ -139,6 +139,18 @@ pub(crate) struct Settings {
     pub rumble: bool,
     /// Which key and pad button does what; added in version 2.
     pub bindings: bindings::Bindings,
+    // Fun. See [`crate::fun`]: the silliness says how much of the rest may
+    // happen, and the rows below it say which.
+    pub silliness: crate::fun::Silliness,
+    pub mount: crate::fun::Mount,
+    pub hat: crate::fun::Hat,
+    pub googly_eyes: bool,
+    pub speed: crate::fun::Speed,
+    pub wild: crate::fun::Wild,
+    pub neon: bool,
+    pub techno: bool,
+    /// Random nonsense every so often.
+    pub chaos: bool,
     // What was being driven.
     pub ghost: bool,
     pub onboarding_done: bool,
@@ -207,6 +219,15 @@ impl Default for Settings {
             deadzone: 0.12,
             rumble: true,
             bindings: bindings::Bindings::default(),
+            silliness: crate::fun::Silliness::default(),
+            mount: crate::fun::Mount::default(),
+            hat: crate::fun::Hat::default(),
+            googly_eyes: true,
+            speed: crate::fun::Speed::default(),
+            wild: crate::fun::Wild::default(),
+            neon: true,
+            techno: true,
+            chaos: true,
             ghost: true,
             onboarding_done: false,
             beginner_hint_shown: false,

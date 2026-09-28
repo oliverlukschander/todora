@@ -27,7 +27,7 @@ pub(crate) use garage::Spec;
 pub(crate) use mode::Mode;
 pub(crate) use physics::{
     Car, Controls, FRONT_AXLE, HALF_TRACK, Handling, PHYSICS_VERSION, REAR_AXLE, SCALE, Surface,
-    WHEEL_WIDTH,
+    WHEEL_RADIUS, WHEEL_WIDTH,
 };
 pub(crate) use setup::Setup;
 
@@ -60,6 +60,10 @@ const LEAN_RATE: f32 = 9.0;
 pub(crate) struct DriveSet;
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct CarResetSet;
+/// The body settling onto its springs, so anything that dresses or follows the
+/// body can run after it.
+#[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
+pub(crate) struct LeanSet;
 
 /// The car the player is driving. [`crate::input`] fills its [`Controls`].
 #[derive(Component)]
@@ -67,7 +71,7 @@ pub(crate) struct Player;
 
 /// The model, as a child of the car. It leans; the car does not.
 #[derive(Component, Default)]
-struct Body {
+pub(crate) struct Body {
     /// The g the springs have settled onto, which lags what the car is doing.
     lean: Vec2,
 }
@@ -117,7 +121,7 @@ impl Plugin for CarPlugin {
                 Update,
                 (
                     turn_wheels,
-                    lean_body,
+                    lean_body.in_set(LeanSet),
                     repaint,
                     cockpit_view,
                     turn_steering_wheel,

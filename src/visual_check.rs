@@ -19,6 +19,14 @@
 //! TODORA_SCREEN=title|replay|offer|circuits|garage opens that screen, and
 //! TODORA_EXAMPLE=21 fills the leaderboard as if you were 21st of 300.
 //! TODORA_COLLECTION=0..4 chooses All, DHH ’14, Endurance, Grand Prix or Heritage.
+//! TODORA_CAM=yaw:pitch:distance holds the camera on an orbit round the car, for
+//! looking at it from all sides: yaw 0 is straight behind, 90 the right, 180
+//! in front; pitch is degrees up; distance is in game units.
+//! TODORA_DRIVE=1 puts the game's own AI driver at the wheel from TODORA_PROGRESS
+//! onwards, so that things that move can be looked at moving. TODORA_FRAME=n
+//! takes the picture on that frame instead of the 100th, and
+//! TODORA_BURST=count:interval takes `count` pictures `interval` frames apart,
+//! named `<path>-000.png` onwards.
 //! TODORA_COUNTDOWN=ready|3|2|1|go freezes the start lights at that moment and,
 //! unless TODORA_PROGRESS is also given, leaves the car on the grid.
 use crate::{
@@ -34,6 +42,14 @@ struct Capture {
     path: String,
     progress: f32,
     wide: bool,
+    /// Yaw, pitch and distance of an orbit round the car.
+    cam: Option<(f32, f32, f32)>,
+    /// The AI drives.
+    drive: bool,
+    /// The frame to take the picture on.
+    shoot: u32,
+    /// How many pictures, and how many frames apart.
+    burst: (u32, u32),
     zoom: Option<f32>,
     behind: Option<f32>,
     frame: u32,
@@ -75,6 +91,22 @@ pub fn configure(app: &mut App) {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0.78),
             wide: std::env::var_os("TODORA_WIDE").is_some(),
+            drive: std::env::var_os("TODORA_DRIVE").is_some(),
+            shoot: std::env::var("TODORA_FRAME")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(100),
+            burst: std::env::var("TODORA_BURST")
+                .ok()
+                .and_then(|text| {
+                    let (count, every) = text.split_once(':')?;
+                    Some((count.parse().ok()?, every.parse().ok()?))
+                })
+                .unwrap_or((1, 1)),
+            cam: std::env::var("TODORA_CAM").ok().and_then(|text| {
+                let mut parts = text.split(':').map(|p| p.parse::<f32>().ok());
+                Some((parts.next()??, parts.next()??, parts.next()??))
+            }),
             zoom: std::env::var("TODORA_ZOOM")
                 .ok()
                 .and_then(|s| s.parse().ok()),
@@ -115,6 +147,7 @@ pub fn configure(app: &mut App) {
             PreUpdate,
             freeze_countdown.after(crate::countdown::CountdownSet),
         )
+        .add_systems(PreUpdate, ai_drive.after(crate::input::InputSet))
         .add_systems(PreUpdate, open_screen.after(crate::settings::PageSet))
         .add_systems(PreUpdate, crate::local::preview)
         .add_systems(Update, (hold_summary, show_guide))
@@ -123,6 +156,23 @@ pub fn configure(app: &mut App) {
             capture.before(bevy::transform::TransformSystems::Propagate),
         );
 }
+/// The game's own plain driver, at the wheel.
+#[allow(clippy::type_complexity)]
+fn ai_drive(
+    capture: Res<Capture>,
+    track: Res<Track>,
+    mut driver: Local<Option<Box<dyn FnMut(&Track, &crate::car::Handling, &Transform, &Car) -> crate::car::Controls + Send + Sync>>>,
+    mut cars: Query<(&Transform, &Car, &crate::car::Handling, &mut crate::car::Controls), With<Player>>,
+) {
+    if !capture.drive || capture.frame < 3 {
+        return;
+    }
+    let driver = driver.get_or_insert_with(|| Box::new(crate::car::ai_driver()));
+    for (at, car, handling, mut controls) in &mut cars {
+        *controls = driver(&track, handling, at, car);
+    }
+}
+
 fn place(
     track: Res<Track>,
     capture: Res<Capture>,
@@ -160,7 +210,7 @@ fn place(
             });
         }
     }
-    if !capture.placed {
+    if !capture.placed || (capture.drive && capture.frame > 2) {
         return;
     }
     let points: Vec<_> = track.map_points().collect();
@@ -214,17 +264,36 @@ fn capture(
             Transform::from_translation(car.translation - *car.forward() * 16.0 + Vec3::Y * 22.0)
                 .looking_at(car.translation + *car.forward() * 8.0, Vec3::Y);
     }
+    if let Some((yaw, pitch, distance)) = capture.cam
+        && let (Ok(car), Ok(mut camera)) = (cars.single(), cameras.single_mut())
+    {
+        let behind = -crate::car::level(*car.forward());
+        let flat = Quat::from_rotation_y(-yaw.to_radians()) * behind;
+        let rise = pitch.to_radians();
+        let target = car.translation + Vec3::Y * 0.55;
+        let offset = (flat * rise.cos() + Vec3::Y * rise.sin()) * distance;
+        *camera = Transform::from_translation(target + offset).looking_at(target, Vec3::Y);
+    }
     let take_picture = if capture.load.is_some() {
         capture.loading_frames == 2 && *halt == crate::pause::Halt::Loading
     } else {
-        capture.frame == 100
+        capture.frame >= capture.shoot
+            && (capture.frame - capture.shoot) % capture.burst.1 == 0
+            && (capture.frame - capture.shoot) / capture.burst.1 < capture.burst.0
     };
     if take_picture {
+        let path = if capture.burst.0 > 1 {
+            let n = (capture.frame - capture.shoot) / capture.burst.1;
+            capture.path.replace(".png", &format!("-{n:03}.png"))
+        } else {
+            capture.path.clone()
+        };
         commands
             .spawn(Screenshot::primary_window())
-            .observe(save_to_disk(capture.path.clone()));
+            .observe(save_to_disk(path));
     }
-    if capture.frame > 140 {
+    let last = capture.shoot + capture.burst.0 * capture.burst.1 + 40;
+    if capture.frame > last.max(140) {
         if let Some(circuit) = capture.load {
             assert!(capture.frame < 36_000, "circuit loading never completed");
             if track.circuit().id != circuit.id || *halt == crate::pause::Halt::Loading {
