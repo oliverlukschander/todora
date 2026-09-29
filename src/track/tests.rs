@@ -1637,3 +1637,229 @@ fn every_circuit_is_its_own_place() {
         }
     }
 }
+
+/// The four circuits the quick checks of wild roads are made on: a flat fast
+/// one, a tight one in a town, one with a bridge, and one with real hills. The
+/// slow check is made on all of them.
+const SAMPLED: [&str; 4] = ["monza", "monaco", "suzuka", "spa-francorchamps"];
+
+fn circuit_named(id: &str) -> &'static Circuit {
+    circuits::all()
+        .iter()
+        .find(|c| c.id == id)
+        .unwrap_or_else(|| panic!("no circuit called {id}"))
+}
+
+/// How far apart the highest and lowest points of the centreline are.
+fn rise_of(track: &Track) -> f32 {
+    let (low, high) = track
+        .ribbon
+        .stations()
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(l, h), s| {
+            (l.min(s.pos.y), h.max(s.pos.y))
+        });
+    high - low
+}
+
+/// The steepest the centreline gets between neighbouring stations, off any
+/// bridge: a bridge brings ramps of its own, held to their own promise by
+/// `the_bridge_stays_inside_the_grade_cap`.
+fn steepest(track: &Track) -> f32 {
+    let stations = track.ribbon.stations();
+    let n = stations.len();
+    (0..n)
+        .filter_map(|i| {
+            let (a, b) = (&stations[i], &stations[(i + 1) % n]);
+            (a.deck == 0.0 && b.deck == 0.0)
+                .then(|| (b.pos.y - a.pos.y).abs() / flat(b.pos - a.pos).length().max(1e-3))
+        })
+        .fold(0.0, f32::max)
+}
+
+/// What the fun layer does to a circuit is change how high it goes and nothing
+/// else. The map is the same map, to a centimetre, so the circuit is still the
+/// circuit; the start line is where it was, at the height it was; the surface
+/// is *not* the same surface, which is what stops a lap driven on it being taken
+/// for a lap on the real one; and it really is hillier, or there was no point.
+#[test]
+fn a_wild_road_is_the_same_road_only_higher() {
+    for id in SAMPLED {
+        let circuit = circuit_named(id);
+        let stock = Track::new(circuit);
+        for level in 1..=3u8 {
+            let wild = Track::with_wild(circuit, level);
+            let name = format!("{id} at wildness {level}");
+            assert_eq!(wild.wild_asked(), level, "{name}");
+            assert!(
+                wild.wild_used() >= 1,
+                "{name} fell all the way back to the survey"
+            );
+            let (before, after) = (plan_of(&stock), plan_of(&wild));
+            assert_eq!(before.len(), after.len(), "{name}: stations were added");
+            for (i, (a, b)) in before.iter().zip(&after).enumerate() {
+                assert!(
+                    a.distance(*b) < 0.01,
+                    "{name}: station {i} moved {} m across the map",
+                    a.distance(*b)
+                );
+            }
+            assert_ne!(
+                wild.fingerprint(),
+                stock.fingerprint(),
+                "{name}: a lap on it would pass for a lap on the real circuit"
+            );
+            let line = |t: &Track| t.ribbon.stations()[0].pos.y;
+            assert!(
+                (line(&wild) - line(&stock)).abs() < 1e-3,
+                "{name}: the start line is {} m from where it was",
+                (line(&wild) - line(&stock)).abs()
+            );
+            assert!(
+                rise_of(&wild) > rise_of(&stock),
+                "{name} is no hillier than the real one"
+            );
+        }
+    }
+}
+
+/// The same circuit is given the same hills every time it is built, or a ghost
+/// driven on one would not be on the road it is replayed on; and the wilder
+/// setting is never gentler than the milder one below it.
+#[test]
+fn a_circuit_always_gets_the_same_hills() {
+    let circuit = circuit_named("monza");
+    let (a, b) = (Track::with_wild(circuit, 2), Track::with_wild(circuit, 2));
+    assert_eq!(a.fingerprint(), b.fingerprint());
+    let rises: Vec<f32> = (0..=3)
+        .map(|level| rise_of(&Track::with_wild(circuit, level)))
+        .collect();
+    assert!(
+        rises.windows(2).all(|w| w[0] < w[1]),
+        "the hills do not grow with the setting: {rises:?}"
+    );
+}
+
+/// The road is never steeper than the setting says, so the cap is a promise and
+/// not a suggestion: a cliff would be a wall to the car.
+#[test]
+fn a_wild_road_stays_inside_its_grade() {
+    for id in SAMPLED {
+        let circuit = circuit_named(id);
+        for level in 1..=3u8 {
+            let track = Track::with_wild(circuit, level);
+            if track.wild_used() != level {
+                continue;
+            }
+            let cap = ribbon::wild_grade(level);
+            let worst = steepest(&track);
+            assert!(
+                worst <= cap * 1.02 + 0.005,
+                "{id} at wildness {level} climbs {worst:.2} where {cap:.2} is the most"
+            );
+        }
+    }
+}
+
+/// Every circuit at every wildness, saying what each came to. A circuit too
+/// cramped to carry a wild road is built a little milder rather than refused,
+/// and this is how much milder (see it with `--nocapture`, and it is none):
+/// `cargo test --lib every_circuit_takes_every_wildness -- --nocapture`.
+#[test]
+fn every_circuit_takes_every_wildness() {
+    let all = circuits::all();
+    let mut rows: Vec<Option<String>> = vec![None; all.len()];
+    let mut fell = Vec::new();
+    std::thread::scope(|scope| {
+        let mut handles = Vec::new();
+        for (some, slots) in all.chunks(5).zip(rows.chunks_mut(5)) {
+            handles.push(scope.spawn(move || {
+                let mut fell = Vec::new();
+                for (circuit, slot) in some.iter().zip(slots) {
+                    let stock = rise_of(&Track::new(circuit));
+                    let mut row = format!("{:>24}  rise {stock:5.1}", circuit.id);
+                    for level in 1..=3u8 {
+                        let track = Track::with_wild(circuit, level);
+                        row += &format!(
+                            "   w{level}: used {} rise {:5.1} steepest {:.2}",
+                            track.wild_used(),
+                            rise_of(&track),
+                            steepest(&track)
+                        );
+                        if track.wild_used() == 0 {
+                            fell.push((circuit.id, level));
+                        }
+                    }
+                    *slot = Some(row);
+                }
+                fell
+            }));
+        }
+        for handle in handles {
+            fell.extend(handle.join().unwrap());
+        }
+    });
+    for row in rows.into_iter().flatten() {
+        println!("{row}");
+    }
+    assert!(fell.is_empty(), "these fell all the way back: {fell:?}");
+}
+
+/// Opening the split-screen lobby on a wild circuit builds the circuit as
+/// surveyed, once, and comes back to the lobby. It does not go round and round
+/// between the lobby and the loading screen, asking for the hills, then for
+/// none of them, then for the hills again, each answer thrown away as out of
+/// date by the next question: which is what it did, with nothing to say so but a
+/// loading screen that never ended.
+#[test]
+fn the_lobby_is_reached_from_a_wild_circuit_and_stays_reached() {
+    use crate::pause::Halt;
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .init_resource::<loading::Loading>()
+        .init_resource::<trackside::Prepared>()
+        .init_resource::<Halt>()
+        .add_message::<Reset>()
+        .add_message::<GoTo>()
+        .init_resource::<Assets<Mesh>>()
+        .init_resource::<crate::fun::Fun>()
+        .init_resource::<crate::fun::Together>()
+        .init_resource::<crate::local::LocalRace>()
+        .init_resource::<crate::multiplayer::Session>()
+        .insert_resource(crate::settings::Settings::default())
+        .insert_resource(WildRequest(2))
+        .insert_resource(Track::with_wild(circuits::first(), 2))
+        .add_systems(Update, (crate::fun::resolve, loading::switch).chain());
+    let mesh = app
+        .world_mut()
+        .resource_mut::<Assets<Mesh>>()
+        .add(Mesh::from(Cuboid::default()));
+    app.world_mut().spawn((Loft, Mesh3d(mesh.clone())));
+    app.world_mut().spawn((Asphalt, Mesh3d(mesh.clone())));
+    app.world_mut().spawn((Terrain, Mesh3d(mesh)));
+    app.update();
+    assert_eq!(app.world().resource::<Track>().wild_asked(), 2);
+    assert_eq!(*app.world().resource::<Halt>(), Halt::Nothing);
+
+    *app.world_mut().resource_mut::<Halt>() = Halt::LocalLobby;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+    while !(*app.world().resource::<Halt>() == Halt::LocalLobby
+        && app.world().resource::<Track>().wild_asked() == 0)
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the lobby never came back from loading ({:?}, wild {})",
+            app.world().resource::<Halt>(),
+            app.world().resource::<Track>().wild_asked()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        app.update();
+    }
+    // And it stays there: nothing is asked for again.
+    for _ in 0..120 {
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        app.update();
+        assert_eq!(*app.world().resource::<Halt>(), Halt::LocalLobby);
+        assert_eq!(app.world().resource::<Track>().wild_asked(), 0);
+    }
+}

@@ -125,6 +125,9 @@ pub enum Why {
     Rescued { sector: usize },
     /// The game was paused during a shared-practice session.
     Paused,
+    /// The drive was not the shipped game's: see [`crate::fun`]. It is a lap,
+    /// and it is never a record.
+    Bonkers,
 }
 
 /// Everything about one finished lap the summary card shows.
@@ -497,6 +500,7 @@ impl LapTimer {
 /// Read what the judge needs off the track, and let it judge.
 fn gate(
     track: Res<Track>,
+    fun: Option<Res<crate::fun::Fun>>,
     mut timer: ResMut<LapTimer>,
     mut finished: MessageWriter<LapFinished>,
     mut cars: Query<(&Transform, &mut Car), With<Player>>,
@@ -521,8 +525,20 @@ fn gate(
         sectors: track.sector_count(),
         speed: car.velocity.length(),
     };
+    // A drive the fun layer has changed is flagged from the first step of the lap
+    // it is driven in, so nothing it does can ever reach a record. Before the
+    // step is judged, for a lap that is running, so that the step that finishes it
+    // (which the handling was already changed for) is not the one that gets away;
+    // and after it, for the lap that step starts.
+    let bonkers = fun.is_some_and(|fun| fun.changes_the_drive());
+    if bonkers && timer.running() {
+        timer.invalidate(Why::Bonkers);
+    }
     if let Some(lap) = timer.judge(step, || track.on_start_gate(pos, car.along)) {
         finished.write(lap);
+    }
+    if bonkers && timer.running() {
+        timer.invalidate(Why::Bonkers);
     }
 }
 
@@ -878,6 +894,94 @@ mod tests {
             heard[0].time,
             heard[1].best
         );
+    }
+
+    /// Drive `car` along the centreline of the track in half-metre steps for
+    /// `metres`, with the clock ticking and the systems running.
+    fn along_the_road(app: &mut App, car: Entity, metres: f32) {
+        for _ in 0..(metres / 0.5) as usize {
+            let track = app.world().resource::<Track>();
+            let here = app.world().get::<Transform>(car).unwrap().translation;
+            let ground = track.ground(here);
+            let next = ground.centre + ground.tangent * 0.5;
+            app.world_mut()
+                .entity_mut(car)
+                .get_mut::<Transform>()
+                .unwrap()
+                .translation = next;
+            app.world_mut().resource_mut::<LapTimer>().current += 0.02;
+            app.update();
+        }
+    }
+
+    /// A lap driven under a drive the fun layer has changed never counts, however
+    /// the level came to change and whichever step of the lap it changed on: from
+    /// the start, half way, or on the very step that finishes it.
+    #[test]
+    fn a_lap_that_bonkers_had_a_hand_in_never_counts() {
+        use crate::fun::{Fun, Silliness};
+        #[derive(Resource, Default)]
+        struct Heard(Vec<LapFinished>);
+        fn collect(mut laps: MessageReader<LapFinished>, mut heard: ResMut<Heard>) {
+            heard.0.extend(laps.read().copied());
+        }
+        let level = |level| Fun {
+            level,
+            ..Fun::default()
+        };
+        // (the level the lap starts in, and the one it is switched to a metre
+        // before the line, if any; whether the lap that finishes counts)
+        for (start, later, counts) in [
+            (Silliness::Serious, None, true),
+            (Silliness::Silly, None, true),
+            (Silliness::Bonkers, None, false),
+            (Silliness::Serious, Some(Silliness::Bonkers), false),
+            (Silliness::Silly, Some(Silliness::Bonkers), false),
+        ] {
+            let track = Track::any();
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .add_message::<LapFinished>()
+                .init_resource::<Heard>()
+                .init_resource::<LapTimer>()
+                .insert_resource(level(start))
+                .insert_resource(Track::any())
+                .add_systems(Update, (gate, collect).chain());
+            let at = track.start_transform();
+            let car = app.world_mut().spawn((Car::default(), Player, at)).id();
+            app.update();
+            // The run-up, until the clock is armed at the line.
+            let mut metres = 0.0;
+            while !app.world().resource::<LapTimer>().running() {
+                along_the_road(&mut app, car, 5.0);
+                metres += 5.0;
+                assert!(metres < 400.0, "the clock never started");
+            }
+            // Round to a metre or two short of the line.
+            let armed = app.world().resource::<LapTimer>().net_progress;
+            let round = track.length() * (1.0 - armed) - 1.5;
+            along_the_road(&mut app, car, round);
+            assert!(app.world().resource::<Heard>().0.is_empty(), "too soon");
+            if let Some(later) = later {
+                app.insert_resource(level(later));
+            }
+            along_the_road(&mut app, car, 6.0);
+            let heard = &app.world().resource::<Heard>().0;
+            assert_eq!(heard.len(), 1, "{start:?} then {later:?}: one lap");
+            assert_eq!(heard[0].valid, counts, "{start:?} then {later:?}");
+            assert_eq!(
+                heard[0].best, counts,
+                "{start:?} then {later:?}: and it is only a best if it counts"
+            );
+            if !counts {
+                let report = app.world().resource::<LapTimer>().report.clone();
+                assert_eq!(
+                    report.and_then(|r| r.why),
+                    Some(Why::Bonkers),
+                    "{start:?} then {later:?}: and it says why"
+                );
+            }
+        }
     }
 
     /// The judge needs nothing but the timer and what the track says: no app,

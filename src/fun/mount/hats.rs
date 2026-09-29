@@ -72,8 +72,9 @@ pub(super) fn wear(
         blue,
         green,
     } = wardrobe;
-    let (pink, yellow, black, red, gold, orange, white, tan, brown, blue, green) =
-        (pink, yellow, black, red, gold, orange, white, tan, brown, blue, green);
+    let (pink, yellow, black, red, gold, orange, white, tan, brown, blue, green) = (
+        pink, yellow, black, red, gold, orange, white, tan, brown, blue, green,
+    );
 
     let mut hat_joint = joint(parent, at, Quat::IDENTITY);
     hat_joint.insert((
@@ -87,57 +88,265 @@ pub(super) fn wear(
         sized.insert(Transform::from_scale(Vec3::splat(size)));
         sized.with_children(|s| match hat {
             Hat::Party => {
-                add(s, kit, Shape::Cone, pink, Vec3::new(0.0, 0.29, 0.0), Vec3::new(0.36, 0.58, 0.36));
-                add(s, kit, Shape::Cylinder, yellow, Vec3::new(0.0, 0.05, 0.0), Vec3::new(0.375, 0.06, 0.375));
-                add(s, kit, Shape::Cylinder, blue, Vec3::new(0.0, 0.17, 0.0), Vec3::new(0.30, 0.05, 0.30));
-                add(s, kit, Shape::Sphere, yellow, Vec3::new(0.0, 0.60, 0.0), Vec3::splat(0.13));
+                add(
+                    s,
+                    kit,
+                    Shape::Cone,
+                    pink,
+                    Vec3::new(0.0, 0.29, 0.0),
+                    Vec3::new(0.36, 0.58, 0.36),
+                );
+                add(
+                    s,
+                    kit,
+                    Shape::Cylinder,
+                    yellow,
+                    Vec3::new(0.0, 0.05, 0.0),
+                    Vec3::new(0.375, 0.06, 0.375),
+                );
+                add(
+                    s,
+                    kit,
+                    Shape::Cylinder,
+                    blue,
+                    Vec3::new(0.0, 0.17, 0.0),
+                    Vec3::new(0.30, 0.05, 0.30),
+                );
+                add(
+                    s,
+                    kit,
+                    Shape::Sphere,
+                    yellow,
+                    Vec3::new(0.0, 0.60, 0.0),
+                    Vec3::splat(0.13),
+                );
             }
             Hat::Top => {
-                add(s, kit, Shape::Cylinder, black, Vec3::new(0.0, 0.02, 0.0), Vec3::new(0.66, 0.04, 0.66));
-                add(s, kit, Shape::Cylinder, black, Vec3::new(0.0, 0.26, 0.0), Vec3::new(0.40, 0.46, 0.40));
-                add(s, kit, Shape::Cylinder, red, Vec3::new(0.0, 0.10, 0.0), Vec3::new(0.415, 0.09, 0.415));
+                add(
+                    s,
+                    kit,
+                    Shape::Cylinder,
+                    black,
+                    Vec3::new(0.0, 0.02, 0.0),
+                    Vec3::new(0.66, 0.04, 0.66),
+                );
+                add(
+                    s,
+                    kit,
+                    Shape::Cylinder,
+                    black,
+                    Vec3::new(0.0, 0.26, 0.0),
+                    Vec3::new(0.40, 0.46, 0.40),
+                );
+                add(
+                    s,
+                    kit,
+                    Shape::Cylinder,
+                    red,
+                    Vec3::new(0.0, 0.10, 0.0),
+                    Vec3::new(0.415, 0.09, 0.415),
+                );
             }
             Hat::Crown => {
-                add(s, kit, Shape::Cylinder, gold, Vec3::new(0.0, 0.07, 0.0), Vec3::new(0.42, 0.14, 0.42));
+                add(
+                    s,
+                    kit,
+                    Shape::Cylinder,
+                    gold,
+                    Vec3::new(0.0, 0.07, 0.0),
+                    Vec3::new(0.42, 0.14, 0.42),
+                );
                 for i in 0..5 {
                     let a = i as f32 / 5.0 * std::f32::consts::TAU;
                     let (x, z) = (a.cos() * 0.17, a.sin() * 0.17);
-                    add(s, kit, Shape::Cone, gold, Vec3::new(x, 0.25, z), Vec3::new(0.10, 0.24, 0.10));
-                    add(s, kit, Shape::Sphere, red, Vec3::new(x, 0.39, z), Vec3::splat(0.075));
+                    add(
+                        s,
+                        kit,
+                        Shape::Cone,
+                        gold,
+                        Vec3::new(x, 0.25, z),
+                        Vec3::new(0.10, 0.24, 0.10),
+                    );
+                    add(
+                        s,
+                        kit,
+                        Shape::Sphere,
+                        red,
+                        Vec3::new(x, 0.39, z),
+                        Vec3::splat(0.075),
+                    );
                 }
-                add(s, kit, Shape::Sphere, blue, Vec3::new(0.0, 0.08, -0.215), Vec3::splat(0.09));
+                add(
+                    s,
+                    kit,
+                    Shape::Sphere,
+                    blue,
+                    Vec3::new(0.0, 0.08, -0.215),
+                    Vec3::splat(0.09),
+                );
             }
             Hat::Cone => {
-                add(s, kit, Shape::Cube, orange, Vec3::new(0.0, 0.015, 0.0), Vec3::new(0.50, 0.03, 0.50));
-                add(s, kit, Shape::Cone, orange, Vec3::new(0.0, 0.32, 0.0), Vec3::new(0.40, 0.60, 0.40));
-                add(s, kit, Shape::Cylinder, white, Vec3::new(0.0, 0.20, 0.0), Vec3::new(0.30, 0.09, 0.30));
-                add(s, kit, Shape::Cylinder, white, Vec3::new(0.0, 0.38, 0.0), Vec3::new(0.20, 0.07, 0.20));
+                add(
+                    s,
+                    kit,
+                    Shape::Cube,
+                    orange,
+                    Vec3::new(0.0, 0.015, 0.0),
+                    Vec3::new(0.50, 0.03, 0.50),
+                );
+                add(
+                    s,
+                    kit,
+                    Shape::Cone,
+                    orange,
+                    Vec3::new(0.0, 0.32, 0.0),
+                    Vec3::new(0.40, 0.60, 0.40),
+                );
+                add(
+                    s,
+                    kit,
+                    Shape::Cylinder,
+                    white,
+                    Vec3::new(0.0, 0.20, 0.0),
+                    Vec3::new(0.30, 0.09, 0.30),
+                );
+                add(
+                    s,
+                    kit,
+                    Shape::Cylinder,
+                    white,
+                    Vec3::new(0.0, 0.38, 0.0),
+                    Vec3::new(0.20, 0.07, 0.20),
+                );
             }
             Hat::Propeller => {
-                add(s, kit, Shape::Sphere, red, Vec3::new(0.0, 0.05, 0.0), Vec3::new(0.46, 0.26, 0.46));
-                add(s, kit, Shape::Sphere, blue, Vec3::new(0.0, 0.05, -0.12), Vec3::new(0.28, 0.24, 0.30));
-                add(s, kit, Shape::Sphere, yellow, Vec3::new(0.0, 0.05, 0.13), Vec3::new(0.28, 0.24, 0.26));
-                add(s, kit, Shape::Cylinder, black, Vec3::new(0.0, 0.22, 0.0), Vec3::new(0.03, 0.12, 0.03));
+                add(
+                    s,
+                    kit,
+                    Shape::Sphere,
+                    red,
+                    Vec3::new(0.0, 0.05, 0.0),
+                    Vec3::new(0.46, 0.26, 0.46),
+                );
+                add(
+                    s,
+                    kit,
+                    Shape::Sphere,
+                    blue,
+                    Vec3::new(0.0, 0.05, -0.12),
+                    Vec3::new(0.28, 0.24, 0.30),
+                );
+                add(
+                    s,
+                    kit,
+                    Shape::Sphere,
+                    yellow,
+                    Vec3::new(0.0, 0.05, 0.13),
+                    Vec3::new(0.28, 0.24, 0.26),
+                );
+                add(
+                    s,
+                    kit,
+                    Shape::Cylinder,
+                    black,
+                    Vec3::new(0.0, 0.22, 0.0),
+                    Vec3::new(0.03, 0.12, 0.03),
+                );
                 let mut spin = joint(s, Vec3::new(0.0, 0.29, 0.0), Quat::IDENTITY);
                 spin.insert((Part::Spin(1.0), Rest(Transform::from_xyz(0.0, 0.29, 0.0))));
                 spin.with_children(|p| {
-                    add(p, kit, Shape::Cube, green, Vec3::ZERO, Vec3::new(0.78, 0.015, 0.09));
-                    add(p, kit, Shape::Cube, yellow, Vec3::ZERO, Vec3::new(0.09, 0.015, 0.78));
-                    add(p, kit, Shape::Sphere, red, Vec3::new(0.0, 0.02, 0.0), Vec3::splat(0.07));
+                    add(
+                        p,
+                        kit,
+                        Shape::Cube,
+                        green,
+                        Vec3::ZERO,
+                        Vec3::new(0.78, 0.015, 0.09),
+                    );
+                    add(
+                        p,
+                        kit,
+                        Shape::Cube,
+                        yellow,
+                        Vec3::ZERO,
+                        Vec3::new(0.09, 0.015, 0.78),
+                    );
+                    add(
+                        p,
+                        kit,
+                        Shape::Sphere,
+                        red,
+                        Vec3::new(0.0, 0.02, 0.0),
+                        Vec3::splat(0.07),
+                    );
                 });
             }
             Hat::Chef => {
-                add(s, kit, Shape::Cylinder, white, Vec3::new(0.0, 0.11, 0.0), Vec3::new(0.40, 0.22, 0.40));
-                for (x, z, r) in [(0.0, 0.0, 0.34), (0.13, 0.08, 0.26), (-0.13, 0.08, 0.26), (0.0, -0.14, 0.26)] {
-                    add(s, kit, Shape::Sphere, white, Vec3::new(x, 0.30, z), Vec3::splat(r));
+                add(
+                    s,
+                    kit,
+                    Shape::Cylinder,
+                    white,
+                    Vec3::new(0.0, 0.11, 0.0),
+                    Vec3::new(0.40, 0.22, 0.40),
+                );
+                for (x, z, r) in [
+                    (0.0, 0.0, 0.34),
+                    (0.13, 0.08, 0.26),
+                    (-0.13, 0.08, 0.26),
+                    (0.0, -0.14, 0.26),
+                ] {
+                    add(
+                        s,
+                        kit,
+                        Shape::Sphere,
+                        white,
+                        Vec3::new(x, 0.30, z),
+                        Vec3::splat(r),
+                    );
                 }
-                add(s, kit, Shape::Cylinder, blue, Vec3::new(0.0, 0.03, 0.0), Vec3::new(0.415, 0.06, 0.415));
+                add(
+                    s,
+                    kit,
+                    Shape::Cylinder,
+                    blue,
+                    Vec3::new(0.0, 0.03, 0.0),
+                    Vec3::new(0.415, 0.06, 0.415),
+                );
             }
             Hat::Cowboy => {
-                add(s, kit, Shape::Cylinder, tan, Vec3::new(0.0, 0.02, 0.0), Vec3::new(0.92, 0.035, 0.66));
-                add(s, kit, Shape::Sphere, tan, Vec3::new(0.0, 0.16, 0.0), Vec3::new(0.36, 0.34, 0.36));
-                add(s, kit, Shape::Cylinder, brown, Vec3::new(0.0, 0.08, 0.0), Vec3::new(0.375, 0.07, 0.375));
-                add(s, kit, Shape::Sphere, gold, Vec3::new(0.0, 0.08, -0.19), Vec3::new(0.07, 0.06, 0.03));
+                add(
+                    s,
+                    kit,
+                    Shape::Cylinder,
+                    tan,
+                    Vec3::new(0.0, 0.02, 0.0),
+                    Vec3::new(0.92, 0.035, 0.66),
+                );
+                add(
+                    s,
+                    kit,
+                    Shape::Sphere,
+                    tan,
+                    Vec3::new(0.0, 0.16, 0.0),
+                    Vec3::new(0.36, 0.34, 0.36),
+                );
+                add(
+                    s,
+                    kit,
+                    Shape::Cylinder,
+                    brown,
+                    Vec3::new(0.0, 0.08, 0.0),
+                    Vec3::new(0.375, 0.07, 0.375),
+                );
+                add(
+                    s,
+                    kit,
+                    Shape::Sphere,
+                    gold,
+                    Vec3::new(0.0, 0.08, -0.19),
+                    Vec3::new(0.07, 0.06, 0.03),
+                );
             }
             Hat::Bare | Hat::Surprise => {}
         });

@@ -221,10 +221,21 @@ fn drive(
 fn count_misses(
     mut laps: MessageReader<LapFinished>,
     mode: Option<Res<Mode>>,
+    timer: Option<Res<crate::lap::LapTimer>>,
     mut settings: Option<ResMut<Settings>>,
     mut guide: ResMut<Guide>,
 ) {
     for lap in laps.read() {
+        // A lap that did not count because it was never going to, as the
+        // Bonkers Edition's are not, is not a lap that missed: the hint is for
+        // the drivers whose laps might have.
+        let for_glory = timer
+            .as_ref()
+            .and_then(|t| t.report.as_ref())
+            .is_some_and(|report| report.why == Some(crate::lap::Why::Bonkers));
+        if for_glory {
+            continue;
+        }
         guide.misses = if lap.valid { 0 } else { guide.misses + 1 };
         let shown = settings.as_ref().is_none_or(|s| s.beginner_hint_shown);
         let beginner = mode.as_ref().is_some_and(|m| **m == Mode::Beginner);
@@ -357,6 +368,50 @@ mod tests {
             footer(2, LastDevice::Pad),
             "3 / 3        A  drive      B  skip"
         );
+    }
+
+    #[test]
+    fn laps_that_were_never_going_to_count_are_not_misses() {
+        use crate::lap::{LapReport, LapTimer, Why};
+        let mut app = app(true);
+        // The lap that has just finished says why it did not count.
+        let mut timer = LapTimer::default();
+        timer.report = Some(LapReport {
+            number: 1,
+            time: 60.0,
+            valid: false,
+            best: false,
+            previous_best: None,
+            sectors: Vec::new(),
+            splits: Vec::new(),
+            why: Some(Why::Bonkers),
+            assisted: false,
+            top_speed: 30.0,
+            slowest: None,
+        });
+        app.insert_resource(timer);
+        let bonkers = LapFinished {
+            time: 60.0,
+            best: false,
+            valid: false,
+        };
+        for _ in 0..5 {
+            app.world_mut().write_message(bonkers);
+            app.update();
+        }
+        assert_eq!(app.world().resource::<Guide>().misses, 0);
+        assert_eq!(app.world().resource::<Guide>().hint_left, 0.0);
+        assert!(!app.world().resource::<Settings>().beginner_hint_shown);
+        // A lap that missed for any other reason still is one.
+        app.world_mut()
+            .resource_mut::<LapTimer>()
+            .report
+            .as_mut()
+            .unwrap()
+            .why = Some(Why::OffTrack { sector: 2 });
+        app.world_mut().write_message(bonkers);
+        app.update();
+        assert_eq!(app.world().resource::<Guide>().misses, 1);
     }
 
     #[test]

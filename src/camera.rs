@@ -37,6 +37,10 @@ const SIGHT_REACH: f32 = 0.75;
 /// the edge of a verge, and a cap on how many a stretched, zoomed-out boom gets.
 const SIGHT_STEP: f32 = 0.6;
 const SIGHT_SAMPLES: usize = 32;
+/// A change in the ground between two neighbouring checks that is worth looking
+/// between, and how many pieces to look at it in.
+const SIGHT_JUMP: f32 = 0.4;
+const SIGHT_REFINE: usize = 6;
 
 pub struct CameraPlugin;
 
@@ -141,13 +145,14 @@ fn bonnet(car: &Transform) -> (Vec3, Vec3, Vec3) {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn follow(
+pub(crate) fn follow(
     time: Res<Time>,
     halt: Option<Res<crate::pause::Halt>>,
     mut resets: MessageReader<Reset>,
     track: Res<Track>,
     settings: Option<Res<crate::settings::Settings>>,
-    cars: Query<(&Car, &Transform), Without<FollowCam>>,
+    fun: Option<Res<crate::fun::Fun>>,
+    cars: Query<(&Car, &Transform, Option<&crate::fun::air::Air>), Without<FollowCam>>,
     mut cameras: Query<(&FollowCam, &mut Transform, &mut Projection), Without<Car>>,
 ) {
     // The car has been put back on the grid, which is somewhere else — and on a
@@ -158,14 +163,30 @@ fn follow(
     if halt.is_some_and(|h| matches!(*h, crate::pause::Halt::Replay | crate::pause::Halt::Title)) {
         return;
     }
-    let Ok((state, car)) = cars.single() else {
+    let Ok((state, car, air)) = cars.single() else {
         return;
     };
+    // Off the road, the camera goes up a little way after the car, and looks up
+    // the rest of the way, so that a jump is seen rather than followed.
+    let lift = air.map_or(0.0, |air| air.height);
+    let up = Vec3::Y * lift;
+    // A faster car is followed faster, so that the boom is as long at three
+    // times the speed as it was at one.
+    let quick = fun.as_ref().map_or(1.0, |fun| fun.speed.scale());
+    let chase = fun
+        .as_ref()
+        .is_none_or(|fun| fun.mount == crate::fun::Mount::Car);
     let Ok((follow, mut camera, mut projection)) = cameras.single_mut() else {
         return;
     };
     let dt = time.delta_secs();
     let view = settings.map_or(crate::settings::CameraView::Far, |s| s.camera);
+    // Only the car has a cockpit or a bonnet to sit in.
+    let view = if chase {
+        view
+    } else {
+        crate::settings::CameraView::Far
+    };
     let near = if view != crate::settings::CameraView::Far {
         COCKPIT_NEAR
     } else {
@@ -197,16 +218,16 @@ fn follow(
     // descent, which leaves the driver looking at the roof with the corner
     // ahead crushed into the bottom of the frame.
     let ahead = level(*car.forward());
-    let desired = car.translation - ahead * (BACK * zoom) + Vec3::Y * (HEIGHT * zoom);
+    let desired = car.translation - ahead * (BACK * zoom) + Vec3::Y * (HEIGHT * zoom) + up * 0.55;
     let t_xz = if cut {
         1.0
     } else {
-        1.0 - (-FOLLOW_XZ * dt).exp()
+        1.0 - (-FOLLOW_XZ * quick * dt).exp()
     };
     let t_y = if cut {
         1.0
     } else {
-        1.0 - (-FOLLOW_Y * dt).exp()
+        1.0 - (-FOLLOW_Y * quick * dt).exp()
     };
     camera.translation.x = camera.translation.x.lerp(desired.x, t_xz);
     camera.translation.z = camera.translation.z.lerp(desired.z, t_xz);
@@ -217,7 +238,7 @@ fn follow(
         &track,
         state.along,
         Vec3::new(camera.translation.x, desired.y, camera.translation.z),
-        car.translation + Vec3::Y * SIGHT,
+        car.translation + Vec3::Y * SIGHT + up * 0.75,
         zoom,
     );
     camera.translation.y = camera
@@ -226,7 +247,7 @@ fn follow(
         .lerp(desired.y.max(rise), t_y)
         .max(floor);
 
-    let look = car.translation + ahead * LOOK_AHEAD + Vec3::Y * LOOK_HEIGHT;
+    let look = car.translation + ahead * LOOK_AHEAD + Vec3::Y * LOOK_HEIGHT + up * 0.75;
     camera.look_at(look, Vec3::Y);
 }
 
@@ -246,13 +267,33 @@ pub(crate) fn clearance(
     let mut rise = beneath + ABOVE_GROUND * zoom.min(1.0);
     let reach = (target - camera).reject_from(Vec3::Y).length() * SIGHT_REACH;
     let samples = ((reach / SIGHT_STEP).ceil() as usize).clamp(4, SIGHT_SAMPLES);
+    // The height at the camera that puts the line through a ground `height`,
+    // plus the margin, at fraction `f` of the way to the target.
+    let needs = |f: f32, height: f32| (height + SIGHT_CLEAR - f * target.y) / (1.0 - f);
+    let fine = track.wild_used() > 0;
+    let mut before: Option<(f32, f32)> = None;
     for k in 1..=samples {
         let f = SIGHT_REACH * k as f32 / samples as f32;
-        let sight = camera.lerp(target, f);
-        let ground = track.ground_from(sight, along).height;
-        // The height at the camera that puts the line through `ground` plus the
-        // margin at this fraction of the way to the target.
-        rise = rise.max((ground + SIGHT_CLEAR - f * target.y) / (1.0 - f));
+        let ground = track.ground_from(camera.lerp(target, f), along).height;
+        rise = rise.max(needs(f, ground));
+        // A cliff between two samples has its top between them, which is the
+        // one place neither sample can see: the edge of a ridge the road runs
+        // along. Look again, closer, wherever the ground changes that much. Only on
+        // a road the fun layer has made hills for: the circuits as surveyed have
+        // none, and their camera is exactly the one that shipped.
+        if fine
+            && let Some((behind, then)) = before
+            && (ground - then).abs() > SIGHT_JUMP
+        {
+            for j in 1..SIGHT_REFINE {
+                let between = behind + (f - behind) * j as f32 / SIGHT_REFINE as f32;
+                let height = track
+                    .ground_from(camera.lerp(target, between), along)
+                    .height;
+                rise = rise.max(needs(between, height));
+            }
+        }
+        before = Some((f, ground));
     }
     (beneath + FLOOR, rise)
 }
@@ -299,8 +340,13 @@ mod tests {
     }
 
     fn every_track() -> impl Iterator<Item = (Track, Vec<(Vec3, f32)>)> {
-        crate::track::all_circuits().iter().map(|circuit| {
-            let track = Track::new(circuit);
+        every_track_at(0)
+    }
+
+    /// Every circuit, made `wild` wild.
+    fn every_track_at(wild: u8) -> impl Iterator<Item = (Track, Vec<(Vec3, f32)>)> {
+        crate::track::all_circuits().iter().map(move |circuit| {
+            let track = Track::with_wild(circuit, wild);
             let points = track.map_points().collect();
             (track, points)
         })
@@ -312,12 +358,32 @@ mod tests {
     /// and at both ends of the zoom.
     #[test]
     fn the_car_stays_in_sight_on_every_circuit() {
-        for (track, points) in every_track() {
-            for i in (0..points.len()).step_by(5) {
+        the_car_is_in_sight_on(every_track(), 5, 0.8);
+    }
+
+    /// And on the wildest hills, which have crests the camera has to be lifted
+    /// over and dips it has to be kept out of. As far as it looks: the last
+    /// quarter of the way to the car it takes to be the road the car is on, and
+    /// with a crest a metre behind a car that has just come over it that is not
+    /// so, which is a car going over a hill and being hidden by it for a moment.
+    #[test]
+    fn the_car_stays_in_sight_on_the_wildest_roads() {
+        the_car_is_in_sight_on(every_track_at(3), 9, SIGHT_REACH);
+    }
+
+    /// Every `every`th station of each track, as far along the sight line as
+    /// `reach`.
+    fn the_car_is_in_sight_on(
+        tracks: impl Iterator<Item = (Track, Vec<(Vec3, f32)>)>,
+        every: usize,
+        reach: f32,
+    ) {
+        for (track, points) in tracks {
+            for i in (0..points.len()).step_by(every) {
                 for (stretch, zoom) in [(1.0, 1.0), (2.5, 1.0), (1.0, ZOOM_MIN), (1.5, ZOOM_MAX)] {
                     let (camera, target, _) = raised(&track, &points, i, stretch, zoom);
                     for k in 0..=40 {
-                        let f = k as f32 / 40.0 * 0.8;
+                        let f = k as f32 / 40.0 * reach;
                         let sight = camera.lerp(target, f);
                         let ground = track.ground_from(sight, Some(points[i].1)).height;
                         assert!(

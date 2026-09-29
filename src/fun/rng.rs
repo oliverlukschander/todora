@@ -109,7 +109,10 @@ mod tests {
         let first: Vec<u64> = (0..8).map(|_| a.next_u64()).collect();
         assert_eq!(first, (0..8).map(|_| b.next_u64()).collect::<Vec<_>>());
         assert_ne!(first, (0..8).map(|_| other.next_u64()).collect::<Vec<_>>());
-        assert_ne!(Rng::of("monza", 1).next_u64(), Rng::of("monza", 2).next_u64());
+        assert_ne!(
+            Rng::of("monza", 1).next_u64(),
+            Rng::of("monza", 2).next_u64()
+        );
     }
 
     #[test]
@@ -127,6 +130,6 @@ mod tests {
         }
         assert!(low < 0.01 && high > 0.99, "{low} {high}");
         assert_eq!(rng.below(0), 0);
-        assert_eq!(Rng::new(0).next_u64() != 0, true, "a zero seed still runs");
+        assert!(Rng::new(0).next_u64() != 0, "a zero seed still runs");
     }
 }

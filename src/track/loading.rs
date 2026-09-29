@@ -17,8 +17,8 @@ struct Built {
 }
 
 impl Built {
-    fn new(circuit: &'static Circuit) -> Self {
-        let track = Track::new(circuit);
+    fn new(circuit: &'static Circuit, wild: u8) -> Self {
+        let track = Track::with_wild(circuit, wild);
         let surfaces = surfaces(&track);
         let trackside = trackside::meshes_for(&track);
         Self {
@@ -43,6 +43,7 @@ pub(super) fn switch(
     mut road: Query<&mut Mesh3d, AsphaltMesh>,
     mut scenery: ResMut<trackside::Prepared>,
     mut reset: MessageWriter<Reset>,
+    wild: Option<Res<WildRequest>>,
 ) {
     if loading.task.is_none()
         && let Some(resume) = loading.resume.take()
@@ -59,6 +60,14 @@ pub(super) fn switch(
         loading.resume.get_or_insert(*halt);
         *halt = Halt::Loading;
     }
+    // The wildness was changed on the settings page: this circuit is built
+    // again, wilder or milder, the way a change of circuit is.
+    let wild = wild.map_or(0, |request| request.0);
+    if loading.target.is_none() && loading.task.is_none() && track.wild_asked() != wild {
+        loading.target = Some(track.circuit);
+        loading.resume.get_or_insert(*halt);
+        *halt = Halt::Loading;
+    }
     let Some(target) = loading.target else {
         return;
     };
@@ -67,7 +76,7 @@ pub(super) fn switch(
             return;
         };
         loading.task = None;
-        if built.track.circuit.id == target.id {
+        if built.track.circuit.id == target.id && built.track.wild_asked() == wild {
             let [scenery_mesh, asphalt, grass] = built.surfaces;
             if let Ok(mut mesh) = loft.single_mut() {
                 mesh.0 = meshes.add(scenery_mesh);
@@ -86,8 +95,9 @@ pub(super) fn switch(
     }
     // Coalesce further requests without launching competing terrain builders.
     // Returning to the active circuit also discards an obsolete result.
-    if target.id != track.circuit.id {
-        loading.task = Some(AsyncComputeTaskPool::get().spawn(async move { Built::new(target) }));
+    if target.id != track.circuit.id || track.wild_asked() != wild {
+        loading.task =
+            Some(AsyncComputeTaskPool::get().spawn(async move { Built::new(target, wild) }));
     }
 }
 
@@ -197,6 +207,56 @@ pub(super) fn show(
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    /// Everything a circuit is made of when it is loaded: the road, the ground
+    /// and the scenery each have something in them.
+    fn assert_whole(built: &Built, name: &str, wild: u8) {
+        let parts = built.surfaces.iter().chain(&built.trackside);
+        for (i, mesh) in parts.enumerate() {
+            assert!(
+                mesh.count_vertices() > 0,
+                "{name} at wildness {wild}: part {i} of what was built is empty"
+            );
+        }
+        assert_eq!(built.track.wild_asked(), wild, "{name}");
+    }
+
+    /// The hills are made in the centreline, and the road, the ground and the
+    /// scenery are all built from that after; so the wildest one is built all
+    /// the way through on a flat circuit, a hilly one and one with a bridge.
+    #[test]
+    fn the_wildest_circuit_is_built_all_the_way_through() {
+        for id in ["monza", "spa-francorchamps", "suzuka"] {
+            let circuit = circuits::all().iter().find(|c| c.id == id).unwrap();
+            assert_whole(&Built::new(circuit, 3), id, 3);
+        }
+    }
+
+    /// The same for every circuit at every setting, which is what loading one
+    /// from the circuit menu does:
+    /// `cargo test --lib every_circuit_loads_at_every_wildness -- --ignored`.
+    #[test]
+    #[ignore = "builds the road, ground and scenery of every circuit three times"]
+    fn every_circuit_loads_at_every_wildness() {
+        let all = circuits::all();
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = all
+                .chunks(4)
+                .map(|some| {
+                    scope.spawn(move || {
+                        for circuit in some {
+                            for wild in 1..=3u8 {
+                                assert_whole(&Built::new(circuit, wild), circuit.id, wild);
+                            }
+                        }
+                    })
+                })
+                .collect();
+            for handle in handles {
+                handle.join().unwrap();
+            }
+        });
+    }
 
     #[test]
     fn loading_animates_with_a_paused_clock_and_respects_reduced_motion() {

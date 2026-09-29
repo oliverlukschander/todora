@@ -11,6 +11,8 @@ use std::sync::atomic::{AtomicU8, Ordering::Relaxed};
 
 use bevy::prelude::*;
 
+mod fun;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Language {
     En,
@@ -103,6 +105,7 @@ pub(crate) fn t_in(language: Language, key: &str) -> &'static str {
     TABLE
         .iter()
         .chain(MORE)
+        .chain(fun::FUN)
         .find(|(k, _)| *k == key)
         .map_or("?", |(_, words)| {
             let word = words[at];
@@ -164,7 +167,7 @@ fn choose(settings: Option<Res<crate::settings::Settings>>, mut seen: Local<Opti
 }
 
 /// Every marked label, again, when the language has changed.
-fn retranslate(mut labels: Query<(&Tr, &mut Text)>, mut last: Local<Option<Language>>) {
+pub(crate) fn retranslate(mut labels: Query<(&Tr, &mut Text)>, mut last: Local<Option<Language>>) {
     let now = current();
     if *last == Some(now) {
         return;
@@ -380,6 +383,7 @@ pub(crate) fn achievement(id: &str) -> Option<(&'static str, &'static str)> {
         .unwrap_or(0);
     ACHIEVEMENTS
         .iter()
+        .chain(fun::ACHIEVEMENTS)
         .find(|(i, _, _)| *i == id)
         .map(|(_, name, what)| (name[at], what[at]))
 }
@@ -668,7 +672,7 @@ mod tests {
 
     #[test]
     fn every_achievement_is_named_in_every_language() {
-        for (id, names, whats) in ACHIEVEMENTS {
+        for (id, names, whats) in ACHIEVEMENTS.iter().chain(fun::ACHIEVEMENTS) {
             assert!(names.iter().chain(whats).all(|w| !w.is_empty()), "{id}");
         }
     }
@@ -676,7 +680,7 @@ mod tests {
     #[test]
     fn every_key_is_there_once_in_every_language() {
         let mut seen = std::collections::HashSet::new();
-        for (key, words) in TABLE.iter().chain(MORE) {
+        for (key, words) in TABLE.iter().chain(MORE).chain(fun::FUN) {
             assert!(seen.insert(*key), "{key} twice");
             for (language, word) in Language::ALL.iter().zip(words) {
                 assert!(!word.is_empty(), "{key} has no {language:?}");
@@ -707,7 +711,7 @@ mod tests {
 
     #[test]
     fn no_word_is_more_than_twice_as_long_as_the_english() {
-        for (key, words) in TABLE.iter().chain(MORE) {
+        for (key, words) in TABLE.iter().chain(MORE).chain(fun::FUN) {
             let english = words[0].chars().count().max(8);
             for word in &words[1..] {
                 assert!(

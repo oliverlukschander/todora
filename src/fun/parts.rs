@@ -56,16 +56,25 @@ impl Kit {
         };
         put(
             Shape::Sphere,
-            SphereMeshBuilder::new(0.5, SphereKind::Uv {
-                sectors: 20,
-                stacks: 14,
-            })
+            SphereMeshBuilder::new(
+                0.5,
+                SphereKind::Uv {
+                    sectors: 20,
+                    stacks: 14,
+                },
+            )
             .build(),
         );
         put(Shape::Cube, Cuboid::new(1.0, 1.0, 1.0).into());
-        put(Shape::Cylinder, CylinderMeshBuilder::new(0.5, 1.0, 20).build());
+        put(
+            Shape::Cylinder,
+            CylinderMeshBuilder::new(0.5, 1.0, 20).build(),
+        );
         put(Shape::Cone, ConeMeshBuilder::new(0.5, 1.0, 20).build());
-        put(Shape::Capsule, Capsule3dMeshBuilder::new(0.5, 1.0, 14, 6).build());
+        put(
+            Shape::Capsule,
+            Capsule3dMeshBuilder::new(0.5, 1.0, 14, 6).build(),
+        );
         put(Shape::Disc, disc(24));
         put(Shape::Quad, Rectangle::new(1.0, 1.0).into());
         put(Shape::Star, star());
@@ -228,10 +237,7 @@ fn star() -> Mesh {
         positions.push([a.cos() * r, a.sin() * r, 0.0]);
     }
     let normals = vec![[0.0, 0.0, 1.0]; positions.len()];
-    let uvs: Vec<[f32; 2]> = positions
-        .iter()
-        .map(|p| [p[0] + 0.5, 0.5 - p[1]])
-        .collect();
+    let uvs: Vec<[f32; 2]> = positions.iter().map(|p| [p[0] + 0.5, 0.5 - p[1]]).collect();
     let mut indices = Vec::new();
     for i in 0..8u32 {
         indices.extend([0, 1 + i, 1 + (i + 1) % 8]);

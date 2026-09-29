@@ -201,7 +201,21 @@ pub struct Fix {
 impl Ribbon {
     /// Build the centreline from raw control points: spline, open the corners
     /// that are too tight to loft, then settle the elevation.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(control: &[Vec3], corners: f32, over: &[Overpass]) -> Self {
+        Self::with_wild(control, corners, over, 0, "")
+    }
+
+    /// As [`Ribbon::new`], with the elevation made wilder by `wild` (0 leaves it
+    /// as surveyed). What the circuit is on the map is not touched: only how
+    /// high it goes. `name` seeds the hills, so a circuit always gets the same.
+    pub fn with_wild(
+        control: &[Vec3],
+        corners: f32,
+        over: &[Overpass],
+        wild: u8,
+        name: &str,
+    ) -> Self {
         let mut line = resample(&spline(control), STEP);
         exaggerate_corners(&mut line, corners);
         // Measured after exaggerating, because `kept` is about what opening the
@@ -224,6 +238,11 @@ impl Ribbon {
         #[cfg(test)]
         let smoothed = relief(&line);
         cap_grade(&mut line);
+        // After the cap, so the hills keep what they are given, and before the
+        // bridges, which are built on whatever ground is there.
+        if wild > 0 {
+            make_wild(&mut line, over, wild, name);
+        }
         // After the cap and not before it. The cap shaves crests down to what
         // the grade allows, so a bridge built before it is a bridge the cap
         // takes straight back off. A bridge built after it has to come with its
@@ -1135,8 +1154,14 @@ fn crossing_stations(line: &[Vec3], pass: &Overpass) -> Option<(usize, usize)> {
 /// backward around the loop takes each height down to the lowest point reachable
 /// at that slope, which flattens the cliffs and leaves the long climbs alone.
 fn cap_grade(line: &mut [Vec3]) {
+    cap_grade_to(line, MAX_GRADE);
+}
+
+/// [`cap_grade`] with a steeper limit, for the circuits that are meant to be
+/// climbed like roller coasters.
+fn cap_grade_to(line: &mut [Vec3], grade: f32) {
     let n = line.len();
-    let rise = MAX_GRADE * (closed_length(line) / n as f32);
+    let rise = grade * (closed_length(line) / n as f32);
     for _ in 0..8 {
         for i in 0..n {
             let cap = line[i].y + rise;
@@ -1147,6 +1172,158 @@ fn cap_grade(line: &mut [Vec3]) {
             line[i].y = line[i].y.min(cap);
         }
     }
+}
+
+/// How wild each level of wildness is.
+struct Wildness {
+    /// How much more of the surveyed relief there is.
+    relief: f32,
+    /// Two hills' amplitudes and wavelengths, in metres.
+    hills: [(f32, f32); 2],
+    /// A ramp with a drop behind it, this often, this tall.
+    kicker_every: f32,
+    kicker: f32,
+    /// The steepest the road may then be.
+    grade: f32,
+}
+
+const WILDNESS: [Wildness; 3] = [
+    Wildness {
+        relief: 1.15,
+        hills: [(1.3, 78.0), (0.6, 33.0)],
+        kicker_every: f32::INFINITY,
+        kicker: 0.0,
+        grade: 0.28,
+    },
+    Wildness {
+        relief: 1.5,
+        hills: [(3.0, 62.0), (1.4, 27.0)],
+        kicker_every: 380.0,
+        kicker: 1.3,
+        grade: 0.40,
+    },
+    Wildness {
+        relief: 2.0,
+        hills: [(5.0, 50.0), (2.4, 22.0)],
+        kicker_every: 220.0,
+        kicker: 2.2,
+        grade: 0.60,
+    },
+];
+
+/// The steepest the road may be at a level of wildness, for the tests that hold
+/// it to that.
+#[cfg(test)]
+pub(super) fn wild_grade(level: u8) -> f32 {
+    WILDNESS[usize::from(level) - 1].grade
+}
+
+/// Metres either side of the start line, and of a bridge, that stay as they
+/// were: the grid and the gantry want level ground, and a bridge's clearance is
+/// worked out from the road it crosses.
+const KEEP_LEVEL_AT_LINE: f32 = 75.0;
+const KEEP_LEVEL_AT_CROSSING: f32 = 90.0;
+/// A kicker: metres of ramp up, and of drop behind it.
+const KICKER_UP: f32 = 14.0;
+const KICKER_DOWN: f32 = 7.0;
+
+fn smoothstep(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Make the circuit's elevation wilder: more of the surveyed relief, rolling
+/// hills of its own on top, and ramps to jump off on the straights. The plan is
+/// not touched, so the circuit is the same circuit; only how high it goes.
+///
+/// It is a function of how far round the lap, and of the circuit's name, so the
+/// same circuit always gets the same hills, and it fades to nothing at the start
+/// line and at any crossing.
+fn make_wild(line: &mut [Vec3], over: &[Overpass], level: u8, name: &str) {
+    use crate::fun::rng::Rng;
+    let Some(wild) = WILDNESS.get(usize::from(level).saturating_sub(1)) else {
+        return;
+    };
+    let n = line.len();
+    let length = closed_length(line);
+    let step = length / n as f32;
+    let mut rng = Rng::of(name, 0x1_0715);
+    let phases = [
+        rng.range(0.0, std::f32::consts::TAU),
+        rng.range(0.0, std::f32::consts::TAU),
+    ];
+    let envelope_phase = rng.range(0.0, std::f32::consts::TAU);
+    let envelope_span = rng.range(210.0, 350.0);
+
+    // Stations that are the middles of crossings, on either road.
+    let crossings: Vec<usize> = over
+        .iter()
+        .filter_map(|pass| crossing_stations(line, pass))
+        .flat_map(|(a, b)| [a, b])
+        .collect();
+    // Where the kickers go: straight stretches, spread round the lap.
+    let count = (length / wild.kicker_every).floor() as usize;
+    let mut kickers = Vec::new();
+    for k in 0..count {
+        let slot = length * (k as f32 + 0.5) / count as f32;
+        // The straightest place within a slot's worth either side of where it
+        // would go.
+        let reach = (length / count as f32 * 0.35 / step) as usize;
+        let middle = (slot / step) as usize;
+        let straight = |i: usize| -> f32 {
+            let wide = (((KICKER_UP + KICKER_DOWN + 30.0) / step) as usize).max(1);
+            (0..wide)
+                .step_by(6)
+                .map(|d| curvature_at(line, (i + d) % n).abs())
+                .fold(0.0f32, f32::max)
+        };
+        let best = (0..=2 * reach)
+            .map(|d| (middle + n + d - reach) % n)
+            .min_by(|a, b| straight(*a).total_cmp(&straight(*b)));
+        if let Some(at) = best {
+            kickers.push(at as f32 * step);
+        }
+    }
+
+    for (i, point) in line.iter_mut().enumerate() {
+        let s = i as f32 * step;
+        let round = |a: f32, b: f32| {
+            let d = (a - b).abs();
+            d.min(length - d)
+        };
+        let mut fade = smoothstep(round(s, 0.0) / KEEP_LEVEL_AT_LINE);
+        for &c in &crossings {
+            fade = fade.min(smoothstep(
+                round(s, c as f32 * step) / KEEP_LEVEL_AT_CROSSING,
+            ));
+        }
+        let envelope =
+            0.55 + 0.45 * (std::f32::consts::TAU * s / envelope_span + envelope_phase).sin();
+        let hills: f32 = wild
+            .hills
+            .iter()
+            .zip(phases)
+            .map(|((amplitude, wavelength), phase)| {
+                amplitude * (std::f32::consts::TAU * s / wavelength + phase).sin()
+            })
+            .sum::<f32>()
+            * envelope;
+        let ramp: f32 = kickers
+            .iter()
+            .map(|&at| {
+                let t = (s - at).rem_euclid(length);
+                if t < KICKER_UP {
+                    wild.kicker * (t / KICKER_UP)
+                } else if t < KICKER_UP + KICKER_DOWN {
+                    wild.kicker * (1.0 - smoothstep((t - KICKER_UP) / KICKER_DOWN))
+                } else {
+                    0.0
+                }
+            })
+            .sum();
+        point.y = point.y * (1.0 + (wild.relief - 1.0) * fade) + (hills + ramp) * fade;
+    }
+    cap_grade_to(line, wild.grade);
 }
 
 #[cfg(test)]

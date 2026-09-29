@@ -292,6 +292,7 @@ impl Settings {
         self.steering = within(self.steering, 0.5, 1.5, d.steering);
         self.deadzone = within(self.deadzone, 0.02, 0.4, d.deadzone);
         self.fps_cap = self.fps_cap.min(240);
+        self.bindings = self.bindings.settled();
         self
     }
 

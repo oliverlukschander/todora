@@ -155,7 +155,13 @@ impl Plugin for TrackPlugin {
         app.init_resource::<start::Finish>()
             .init_resource::<loading::Loading>()
             .init_resource::<trackside::Prepared>();
-        app.insert_resource(Track::new(circuit))
+        // The fun layer has not resolved anything yet, so read what it will.
+        let wild = app
+            .world()
+            .get_resource::<crate::settings::Settings>()
+            .map_or(0, |settings| crate::fun::Fun::of(settings).wild.level());
+        app.insert_resource(WildRequest(wild))
+            .insert_resource(Track::with_wild(circuit, wild))
             .add_message::<GoTo>()
             .add_systems(Startup, (setup, loading::setup))
             .add_systems(PreUpdate, loading::switch.in_set(TrackSet).after(MenuSet))
@@ -189,6 +195,13 @@ struct Asphalt;
 type LoftMesh = (With<Loft>, Without<Terrain>, Without<Asphalt>);
 type TerrainMesh = (With<Terrain>, Without<Loft>, Without<Asphalt>);
 type AsphaltMesh = (With<Asphalt>, Without<Loft>, Without<Terrain>);
+
+/// How wild the circuits are asked to be, as the fun layer last said. A circuit
+/// built for driving takes its wildness from here; one built for a test, the
+/// server or a saved ghost is built as surveyed, so that none of them can see
+/// the fun layer at all.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct WildRequest(pub u8);
 
 /// Every circuit there is, in the order the menu lists them.
 pub(crate) fn all_circuits() -> &'static [Circuit] {
@@ -225,6 +238,10 @@ pub struct Track {
     ribbon: Ribbon,
     profile: Profile,
     terrain: std::sync::OnceLock<terrain::Surface>,
+    /// The wildness this was asked to be built with, and what it managed: a
+    /// circuit too cramped to carry a wild road is built a little milder.
+    wild_asked: u8,
+    wild_used: u8,
 }
 
 impl Track {
@@ -237,6 +254,39 @@ impl Track {
     /// `every_circuit_carries_a_road` is what catches that, rather than the
     /// player pressing the track key.
     pub(crate) fn new(circuit: &'static Circuit) -> Self {
+        Self::build(circuit, 0).unwrap_or_else(|why| panic!("{why}"))
+    }
+
+    /// The circuit made `asked` wild, falling back to milder ones, and in the
+    /// end to the circuit as surveyed, which always builds.
+    pub(crate) fn with_wild(circuit: &'static Circuit, asked: u8) -> Self {
+        let mut level = asked;
+        loop {
+            match Self::build(circuit, level) {
+                Ok(mut track) => {
+                    track.wild_asked = asked;
+                    return track;
+                }
+                Err(why) if level > 0 => {
+                    warn!("{why}; building {} a little milder", circuit.name);
+                    level -= 1;
+                }
+                Err(why) => panic!("{why}"),
+            }
+        }
+    }
+
+    /// How wild this was asked to be, which is what a change of the request is
+    /// compared with; and how wild it is.
+    pub(crate) fn wild_asked(&self) -> u8 {
+        self.wild_asked
+    }
+
+    pub(crate) fn wild_used(&self) -> u8 {
+        self.wild_used
+    }
+
+    fn build(circuit: &'static Circuit, wild: u8) -> Result<Self, String> {
         let plan = PLAN_SCALE * circuit.plan_scale;
         let control: Vec<Vec3> = circuit
             .centreline
@@ -267,24 +317,27 @@ impl Track {
                 }
             })
             .collect();
-        let ribbon = Ribbon::new(&control, circuit.corners, &over);
-        assert!(
-            ribbon.kept() > LEAST_KEPT,
-            "{} does not survive Todora's scale: opening its corners left \
-             {:.0}% of the lap, {:.0} m of a circuit that should be {:.0} m",
-            circuit.name,
-            ribbon.kept() * 100.0,
-            ribbon.length(),
-            ribbon.length() / ribbon.kept(),
-        );
+        let ribbon = Ribbon::with_wild(&control, circuit.corners, &over, wild, circuit.id);
+        if ribbon.kept() <= LEAST_KEPT {
+            return Err(format!(
+                "{} does not survive Todora's scale: opening its corners left \
+                 {:.0}% of the lap, {:.0} m of a circuit that should be {:.0} m",
+                circuit.name,
+                ribbon.kept() * 100.0,
+                ribbon.length(),
+                ribbon.length() / ribbon.kept(),
+            ));
+        }
         let profile = Profile::fit(&ribbon)
-            .unwrap_or_else(|why| panic!("{} cannot carry a road: {why}", circuit.name));
-        Self {
+            .map_err(|why| format!("{} cannot carry a road: {why}", circuit.name))?;
+        Ok(Self {
             circuit,
             ribbon,
             profile,
             terrain: std::sync::OnceLock::new(),
-        }
+            wild_asked: wild,
+            wild_used: wild,
+        })
     }
 
     /// The circuit the game opens on, for tests that just need somewhere to
@@ -482,6 +535,25 @@ impl Track {
             .get_or_init(|| terrain::Surface::new(terrain::fill(&self.profile, &self.ribbon)))
     }
 
+    /// Every cross-section of the lap, in order, `STEP` metres apart.
+    pub(crate) fn spots(&self) -> impl ExactSizeIterator<Item = Spot> + '_ {
+        self.ribbon.stations().iter().map(Spot::from)
+    }
+
+    /// The cross-section at `s` metres round the lap, wrapping at the line.
+    pub(crate) fn spot_at(&self, s: f32) -> Spot {
+        let lap = self.ribbon.length();
+        Spot::from(self.ribbon.along(s.rem_euclid(lap), 0.0))
+    }
+
+    /// How far right of the centreline `pos` is, in metres, without asking what
+    /// the ground is there: the ground off the road is built lazily and is not
+    /// cheap, and how far from the road something stands rarely needs it.
+    #[cfg(test)]
+    pub(crate) fn lateral_of(&self, pos: Vec3, was: Option<f32>) -> f32 {
+        self.fix(pos, was).lateral
+    }
+
     pub(crate) fn map_points(&self) -> impl Iterator<Item = (Vec3, f32)> + '_ {
         self.ribbon.stations().iter().map(|s| (s.pos, s.s))
     }
@@ -632,6 +704,35 @@ impl Track {
             } else {
                 profile::grip(fix.lateral)
             },
+        }
+    }
+}
+
+/// A cross-section of the circuit: where it is, which way the lap runs there
+/// and how far round it is. What anything that stands along the road — neon,
+/// cones, cows — is placed from.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Spot {
+    /// On the centreline, at the circuit's elevation.
+    pub pos: Vec3,
+    /// The way the lap runs, level.
+    pub tangent: Vec3,
+    /// To the right of that.
+    pub right: Vec3,
+    /// Plan distance from the start/finish line.
+    pub s: f32,
+    /// Signed curvature: positive where the circuit turns right.
+    pub curvature: f32,
+}
+
+impl From<&ribbon::Station> for Spot {
+    fn from(station: &ribbon::Station) -> Self {
+        Self {
+            pos: station.pos,
+            tangent: station.tangent,
+            right: station.right,
+            s: station.s,
+            curvature: station.curvature,
         }
     }
 }

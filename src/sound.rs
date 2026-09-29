@@ -1,6 +1,9 @@
 //! Quiet radio and recorded wheel sounds driven by speed and grip.
 mod radio;
+mod sfx;
 mod synth;
+mod techno;
+pub(crate) use sfx::{Kind as SfxKind, Sfx};
 pub(crate) use synth::Cue;
 use synth::{Engine, Tyres};
 
@@ -23,9 +26,13 @@ impl Plugin for SoundPlugin {
         app.init_resource::<Sound>()
             .add_message::<SoundToggle>()
             .add_message::<Cue>()
+            .add_message::<Sfx>()
             .add_audio_source::<radio::Soundtrack>()
             .add_systems(Startup, start)
-            .add_systems(Update, (apply_toggles, update, draw_toggles, beep).chain())
+            .add_systems(
+                Update,
+                (apply_toggles, update, draw_toggles, beep, play_sfx).chain(),
+            )
             .add_systems(Last, shutdown_on_exit);
     }
 }
@@ -56,10 +63,21 @@ pub(crate) enum SoundToggle {
 }
 
 impl Sound {
+    /// Where the techno has got to, in beats, once it has begun.
+    pub(crate) fn beat(&self) -> Option<f64> {
+        match self.signal.beat.load(Relaxed) {
+            0 => None,
+            units => Some(f64::from(units) / 256.0),
+        }
+    }
+
     /// The radio's state, as a key into [`crate::text`].
     pub fn station(&self) -> &'static str {
         if !self.music {
             return "word.off";
+        }
+        if self.signal.techno_on.load(Relaxed) {
+            return "radio.techno";
         }
         match self.signal.status.load(Relaxed) {
             1 => "radio.playing",
@@ -88,6 +106,19 @@ struct Signal {
     engine_rpm: AtomicU32,
     engine_load: AtomicU32,
     engine_level: AtomicU32,
+    /// Silly noises asked for, for the audio thread to pick up.
+    sfx: sfx::Queue,
+    /// How often the chicken's engine clucks, a second, and how loudly. Both
+    /// are f32 bits; zero rate is silence.
+    cluck_rate: AtomicU32,
+    cluck_level: AtomicU32,
+    /// The techno: how much is going on and how loud, both f32 bits; whether it
+    /// is what plays instead of the radio; and where the sequencer has got to,
+    /// in 256ths of a beat.
+    techno_energy: AtomicU32,
+    techno_level: AtomicU32,
+    techno_on: AtomicBool,
+    beat: AtomicU32,
 }
 
 impl Signal {
@@ -126,7 +157,13 @@ fn start(mut commands: Commands, mut assets: ResMut<Assets<radio::Soundtrack>>, 
     ));
 }
 
-#[allow(clippy::type_complexity)]
+/// How loud the techno is, against the music volume. The sequencer's own level
+/// puts its kick at about twice the level of the radio the techno stands in for,
+/// and a good deal above the engine and the tyres, whose warnings it must not
+/// bury; a third of that is loud enough to dance to and leaves them audible.
+const TECHNO: f32 = 0.28;
+
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn update(
     keys: Res<ButtonInput<KeyCode>>,
     halt: Res<Halt>,
@@ -143,11 +180,15 @@ fn update(
     >,
     track: Res<Track>,
     settings: Option<Res<crate::settings::Settings>>,
+    fun: Option<Res<crate::fun::Fun>>,
+    boost: Option<Res<crate::fun::tweak::Boost>>,
     mut sound: ResMut<Sound>,
 ) {
     if sound.signal.shutting_down.load(Relaxed) {
         return;
     }
+    let mount = fun.as_ref().map_or(crate::fun::Mount::Car, |f| f.mount);
+    let speed_scale = fun.as_ref().map_or(1.0, |f| f.speed.scale());
     let (music_volume, effects_volume) = settings
         .as_ref()
         .map_or((0.8, 1.0), |s| (s.music_volume, s.effects_volume));
@@ -173,27 +214,70 @@ fn update(
             .max_by_key(|(_, _, _, _, seat)| usize::from(seat.is_some_and(|s| s.index == 0)))
             .map(|(car, pose, handling, controls, _)| {
                 let grip = track.ground_from(pose.translation, car.along).grip;
-                let top = handling.map_or(24.0, |h| h.top_speed);
+                let top = handling.map_or(24.0, |h| h.top_speed) * speed_scale;
                 let load = controls.map_or(0.0, |c| c.throttle);
                 let revs = synth::revs(car.velocity.length(), top);
                 sound.signal.engine_rpm.store(revs.to_bits(), Relaxed);
                 sound.signal.engine_load.store(load.to_bits(), Relaxed);
+                // A chicken's engine is a chicken: it clucks faster the faster
+                // it goes, and only while it is going.
+                let travelling = car.velocity.length();
+                let cluck = if mount == crate::fun::Mount::Chicken && travelling > 1.0 {
+                    1.3 + 5.2 * (travelling / top).min(1.0)
+                } else {
+                    0.0
+                };
+                sound.signal.cluck_rate.store(cluck.to_bits(), Relaxed);
                 let (scrub, squeal) = tyre_levels(car, grip);
                 (rolling_level(car, grip), scrub, squeal)
             })
             .unwrap_or_default()
     } else {
+        sound.signal.cluck_rate.store(0, Relaxed);
         (0.0, 0.0, 0.0)
     };
     sound.signal.rolling.store(rolling.to_bits(), Relaxed);
+    // The techno stands in for the radio, and follows how fast the car goes.
+    let techno = fun.as_ref().is_some_and(|f| f.techno);
+    let fastest = players
+        .iter()
+        .map(|(car, _, handling, _, _)| {
+            car.velocity.length() / (handling.map_or(24.0, |h| h.top_speed) * speed_scale)
+        })
+        .fold(0.0f32, f32::max);
+    let pushed = boost.as_ref().map_or(0.0, |b| b.strength());
+    let energy = if halt.stopped() {
+        0.32
+    } else {
+        (0.30 + 0.55 * fastest.min(1.2) + 0.2 * pushed).min(1.0)
+    };
+    let heard = audible && sound.music && techno;
+    sound.signal.techno_on.store(techno, Relaxed);
+    sound.signal.techno_energy.store(energy.to_bits(), Relaxed);
+    // Room for the tyre warning, as the radio makes it.
+    let room = 1.0 - 0.7 * squeal.clamp(0.0, 1.0);
+    sound.signal.techno_level.store(
+        (if heard {
+            music_volume * TECHNO * room
+        } else {
+            0.0
+        })
+        .to_bits(),
+        Relaxed,
+    );
     // A little extra room for the tyre warning when a slide becomes loud.
-    // 0.8 is where the radio has always sat.
-    let music = if audible && sound.music {
+    // 0.8 is where the radio has always sat. Not while the techno is what is
+    // playing: the radio has a stream's worth of sound buffered ahead, and would
+    // go on under the techno for most of a second.
+    let music = if audible && sound.music && !techno {
         (0.075 - 0.08 * squeal) * music_volume / 0.8
     } else {
         0.0
     };
-    sound.signal.enabled.store(audible && sound.music, Relaxed);
+    sound
+        .signal
+        .enabled
+        .store(audible && sound.music && !techno, Relaxed);
     sound.signal.music.store(music.to_bits(), Relaxed);
     sound.signal.scrub.store(scrub.to_bits(), Relaxed);
     sound.signal.squeal.store(squeal.to_bits(), Relaxed);
@@ -202,7 +286,21 @@ fn update(
     } else {
         0.0
     };
-    sound.signal.engine_level.store(engine.to_bits(), Relaxed);
+    // A mount that is not a car keeps a little of the engine's rumble under
+    // whatever it is doing instead.
+    let (kept, cluck_level) = match mount {
+        crate::fun::Mount::Car => (1.0, 0.0),
+        crate::fun::Mount::Chicken => (0.4, 0.55),
+        _ => (0.6, 0.0),
+    };
+    sound
+        .signal
+        .engine_level
+        .store((engine * kept).to_bits(), Relaxed);
+    sound
+        .signal
+        .cluck_level
+        .store((engine * cluck_level).to_bits(), Relaxed);
 }
 
 /// A start light has come on. It is heard with the tyres, so the tyre toggle
@@ -222,6 +320,21 @@ fn beep(
             let asked = sound.signal.beep.load(Relaxed);
             let next = ((asked >> 2).wrapping_add(1) << 2) | cue.code();
             sound.signal.beep.store(next, Relaxed);
+        }
+    }
+}
+
+/// Something silly has been asked for. Heard with the tyres, so the tyre toggle
+/// silences it too, and not at all while the window is in the background.
+fn play_sfx(
+    mut asked: MessageReader<Sfx>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    sound: Res<Sound>,
+) {
+    let heard = sound.effects && windows.iter().all(|window| window.focused);
+    for sfx in asked.read() {
+        if heard {
+            sound.signal.sfx.push(sfx.kind, sfx.pitch, sfx.gain);
         }
     }
 }

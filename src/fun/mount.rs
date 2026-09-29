@@ -20,8 +20,8 @@ use super::{Fun, Hat, Mount};
 use crate::car::{Body, Car, Player, SCALE, Spec, level};
 
 mod chicken;
-mod pose;
 mod hats;
+mod pose;
 mod rider;
 mod things;
 
@@ -196,7 +196,10 @@ pub(super) fn plugin(app: &mut App) {
 
 /// Somebody leaned on the horn.
 #[derive(Message, Clone, Copy)]
-pub(crate) struct Honk;
+pub(crate) struct Honk {
+    /// It was the rooster's crow.
+    pub crowed: bool,
+}
 
 /// Counts the times the car has gone back to the grid.
 #[derive(Resource, Default)]
@@ -266,11 +269,7 @@ fn rebuild(
         hat: wanted.hat,
     };
     commands.entity(car).with_children(|car| {
-        let mut rig = car.spawn((
-            Rig(wanted),
-            Transform::IDENTITY,
-            Visibility::Inherited,
-        ));
+        let mut rig = car.spawn((Rig(wanted), Transform::IDENTITY, Visibility::Inherited));
         rig.with_children(|rig| match wanted.mount {
             Mount::Chicken => chicken::build(rig, &mut kit, &mut materials, &look),
             Mount::Duck => things::duck(rig, &mut kit, &mut materials, &look),
@@ -307,6 +306,7 @@ fn update_pose(
     mut honks: MessageReader<Honk>,
     cars: Query<(&Car, &Transform, Option<&super::air::Air>), With<Player>>,
     boost: Option<Res<super::tweak::Boost>>,
+    fun: Res<Fun>,
 ) {
     let dt = time.delta_secs();
     if honks.read().next().is_some() {
@@ -328,11 +328,15 @@ fn update_pose(
     let moving = ((speed.abs() - 0.4) / 2.5).clamp(0.0, 1.0);
     pose.run = glide(pose.run, moving, 9.0);
     let hz = (speed.abs() / STRIDE).min(MOST_HZ);
-    pose.stride =
-        (pose.stride + hz * std::f32::consts::TAU * dt * speed.signum()).rem_euclid(std::f32::consts::TAU);
-    pose.lean = pose.lean.lerp(car.g_force, (9.0 * dt).min(1.0));
+    pose.stride = (pose.stride + hz * std::f32::consts::TAU * dt * speed.signum())
+        .rem_euclid(std::f32::consts::TAU);
+    pose.lean = pose.lean.lerp(
+        car.g_force * super::g_scale(Some(&fun)),
+        (9.0 * dt).min(1.0),
+    );
     pose.steer = car.steer_angle;
-    pose.wheel = (pose.wheel - speed / crate::car::WHEEL_RADIUS * dt).rem_euclid(std::f32::consts::TAU);
+    pose.wheel =
+        (pose.wheel - speed / crate::car::WHEEL_RADIUS * dt).rem_euclid(std::f32::consts::TAU);
     pose.turn = glide(pose.turn, car.yaw_rate, 8.0);
 
     let (lift, airborne) = air.map_or((0.0, false), |a| (a.height, a.height > 0.001));
@@ -377,13 +381,22 @@ fn update_pose(
 }
 
 /// The lean, lift, squash and bob of the whole mount.
-fn animate_rig(pose: Res<Pose>, mut rigs: Query<&mut Transform, With<Rig>>) {
+fn animate_rig(
+    pose: Res<Pose>,
+    chaos: Res<super::events::Chaos>,
+    mut rigs: Query<&mut Transform, With<Rig>>,
+) {
+    let size = chaos.size();
     let roll = Quat::from_rotation_z(pose.lean.x * 0.11);
     let dive = Quat::from_rotation_x(pose.lean.y * 0.08);
     let step = (2.0 * pose.stride).sin().abs() * pose.run;
     let bob = 0.05 * step;
     let squash = pose.squash;
-    let scale = Vec3::new(1.0 + squash * 0.24, 1.0 - squash * 0.42, 1.0 + squash * 0.24);
+    let scale = Vec3::new(
+        1.0 + squash * 0.24,
+        1.0 - squash * 0.42,
+        1.0 + squash * 0.24,
+    ) * size;
     for mut transform in &mut rigs {
         transform.translation = Vec3::new(0.0, pose.lift / SCALE + bob, 0.0);
         transform.rotation = roll * dive;
@@ -502,7 +515,8 @@ mod tests {
     fn the_stride_is_capped_below_the_strobing_rate() {
         let fast = (300.0f32 / STRIDE).min(MOST_HZ);
         assert_eq!(fast, MOST_HZ);
-        // At sixty frames a second a cycle is at least ten frames long.
-        assert!(60.0 / MOST_HZ >= 10.0);
     }
+
+    // At sixty frames a second a cycle is at least ten frames long.
+    const _: () = assert!(60.0 / MOST_HZ >= 10.0);
 }

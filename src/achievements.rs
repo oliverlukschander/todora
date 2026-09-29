@@ -264,6 +264,8 @@ pub(crate) struct Earned {
     pub streak: u32,
     /// Author times beaten, by circuit and mode.
     pub authors: BTreeSet<String>,
+    /// What the silly awards are counted from, kept with the rest.
+    pub fun: crate::fun::awards::Counts,
 }
 
 impl Earned {
@@ -401,17 +403,27 @@ fn load() -> Earned {
 
 /// Newly earned ones waiting to be shown, and the one being shown.
 #[derive(Resource, Default)]
-struct Toast {
+pub(crate) struct Toast {
     waiting: Vec<String>,
     showing: Option<(String, f32)>,
 }
 
-fn announce(earned: &mut Earned, toast: &mut Toast, ids: &[impl AsRef<str>]) {
+/// Every award there is to list: the serious ones, and the silly ones in a game
+/// that is silly enough for them.
+pub(crate) fn listed(silly: bool) -> Vec<(String, String, String)> {
+    let mut out = all();
+    if silly {
+        out.extend(crate::fun::awards::listed());
+    }
+    out
+}
+
+pub(crate) fn announce(earned: &mut Earned, toast: &mut Toast, ids: &[impl AsRef<str>]) {
     let now = crate::online::client::unix_now();
     for id in ids {
         let id = id.as_ref();
         if earned.earn(id, now)
-            && let Some((_, name, _)) = all().into_iter().find(|(i, _, _)| i == id)
+            && let Some((_, name, _)) = listed(true).into_iter().find(|(i, _, _)| i == id)
         {
             toast.waiting.push(name);
         }
@@ -477,14 +489,20 @@ fn sectors(timer: Res<LapTimer>, mut earned: ResMut<Earned>, mut toast: ResMut<T
     }
 }
 
-/// Distance is the one thing summed every frame: one multiply and add.
+/// Distance is the one thing summed every frame: one multiply and add. What is
+/// driven in a car the fun layer has made faster is not counted: the awards for
+/// distance are for the distance of the game as it shipped.
 fn distance(
     time: Res<Time>,
+    fun: Option<Res<crate::fun::Fun>>,
     cars: Query<&Car, With<Player>>,
     mut earned: ResMut<Earned>,
     mut toast: ResMut<Toast>,
     mut counted: Local<f64>,
 ) {
+    if fun.is_some_and(|fun| fun.changes_the_drive()) {
+        return;
+    }
     let Ok(car) = cars.single() else {
         return;
     };
@@ -550,8 +568,9 @@ fn setup(mut commands: Commands) {
 fn draw(
     time: Res<Time>,
     halt: Res<crate::pause::Halt>,
+    fun: Option<Res<crate::fun::Fun>>,
     mut toast: ResMut<Toast>,
-    mut texts: Query<(&mut Text, &mut Visibility), With<ToastText>>,
+    mut texts: Query<(&mut Text, &mut Visibility, &mut Node), With<ToastText>>,
 ) {
     let dt = time.delta_secs();
     if let Some((_, left)) = toast.showing.as_mut() {
@@ -560,9 +579,18 @@ fn draw(
     if toast.showing.as_ref().is_none_or(|(_, left)| *left <= 0.0) {
         toast.showing = (!toast.waiting.is_empty()).then(|| (toast.waiting.remove(0), 3.5));
     }
-    let Ok((mut text, mut visibility)) = texts.single_mut() else {
+    let Ok((mut text, mut visibility, mut node)) = texts.single_mut() else {
         return;
     };
+    // Where the fun layer keeps its score is where this would be, so it goes below.
+    let top = if fun.is_some_and(|fun| fun.silly()) {
+        px(128)
+    } else {
+        px(24)
+    };
+    if node.top != top {
+        node.top = top;
+    }
     match &toast.showing {
         Some((name, _)) if !halt.stopped() => {
             let wanted = crate::text::tf("ach.toast", &[name]);

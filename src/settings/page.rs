@@ -15,6 +15,7 @@ use crate::ui::{LINE, Navigation, SURFACE, TEXT, label};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Tab {
+    Fun,
     Audio,
     Display,
     Hud,
@@ -26,6 +27,7 @@ pub(crate) enum Tab {
 impl Tab {
     fn key(self) -> &'static str {
         match self {
+            Self::Fun => "tab.fun",
             Self::Audio => "tab.audio",
             Self::Display => "tab.display",
             Self::Hud => "tab.hud",
@@ -35,7 +37,8 @@ impl Tab {
         }
     }
 
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
+        Self::Fun,
         Self::Audio,
         Self::Display,
         Self::Hud,
@@ -47,6 +50,9 @@ impl Tab {
     fn rows(self) -> &'static [Row] {
         use Row::*;
         match self {
+            Self::Fun => &[
+                Silliness, Mount, Hat, Eyes, Speed, Wild, Neon, Techno, Chaos,
+            ],
             Self::Audio => &[Music, MusicVolume, Effects, EffectsVolume, EngineVolume],
             Self::Display => &[
                 Fullscreen,
@@ -81,6 +87,8 @@ impl Tab {
                 Bind(6),
                 Bind(7),
                 Bind(8),
+                Bind(9),
+                Bind(10),
                 Defaults,
             ],
             Self::Online => &[Online, Name, Country, Pending, Forget],
@@ -91,6 +99,15 @@ impl Tab {
 /// One line of the page: what it is called, what it says now, how it moves.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Row {
+    Silliness,
+    Mount,
+    Hat,
+    Eyes,
+    Speed,
+    Wild,
+    Neon,
+    Techno,
+    Chaos,
     Music,
     MusicVolume,
     Effects,
@@ -136,7 +153,7 @@ pub(crate) const COUNTRIES: [&str; 24] = [
 ];
 
 /// The most rows any tab has; that many row nodes are built once.
-const ROWS: usize = 10;
+const ROWS: usize = 12;
 const FPS_CAPS: [u32; 5] = [0, 30, 60, 120, 144];
 
 fn on_off(on: bool) -> String {
@@ -160,8 +177,31 @@ fn cycle<T: PartialEq + Copy>(options: &[T], now: T, dir: i32) -> T {
 }
 
 impl Row {
+    /// Whether the row changes nothing at the silliness the game is at: the ride
+    /// and its trimmings when it is Serious, and the rest of what Bonkers does
+    /// when it is anything less.
+    fn idle(self, settings: &Settings) -> bool {
+        use crate::fun::Silliness;
+        match self {
+            Self::Mount | Self::Hat | Self::Eyes => settings.silliness < Silliness::Silly,
+            Self::Speed | Self::Wild | Self::Neon | Self::Techno | Self::Chaos => {
+                settings.silliness < Silliness::Bonkers
+            }
+            _ => false,
+        }
+    }
+
     fn name(self) -> &'static str {
         match self {
+            Self::Silliness => crate::text::t("row.silliness"),
+            Self::Mount => crate::text::t("row.mount"),
+            Self::Hat => crate::text::t("row.hat"),
+            Self::Eyes => crate::text::t("row.eyes"),
+            Self::Speed => crate::text::t("row.speed"),
+            Self::Wild => crate::text::t("row.wild"),
+            Self::Neon => crate::text::t("row.neon"),
+            Self::Techno => crate::text::t("row.techno"),
+            Self::Chaos => crate::text::t("row.chaos"),
             Self::Music => crate::text::t("row.music"),
             Self::MusicVolume => crate::text::t("row.music_volume"),
             Self::Effects => crate::text::t("row.effects"),
@@ -202,6 +242,15 @@ impl Row {
 
     pub(crate) fn value(self, s: &Settings) -> String {
         match self {
+            Self::Silliness => crate::text::t(s.silliness.key()).into(),
+            Self::Mount => crate::text::t(s.mount.key()).into(),
+            Self::Hat => crate::text::t(s.hat.key()).into(),
+            Self::Eyes => on_off(s.googly_eyes),
+            Self::Speed => crate::text::t(s.speed.key()).into(),
+            Self::Wild => crate::text::t(s.wild.key()).into(),
+            Self::Neon => on_off(s.neon),
+            Self::Techno => on_off(s.techno),
+            Self::Chaos => on_off(s.chaos),
             Self::Music => on_off(s.music),
             Self::MusicVolume => percent(s.music_volume),
             Self::Effects => on_off(s.effects),
@@ -271,6 +320,17 @@ impl Row {
     /// Move the value one step; `dir` is -1 or 1. A switch flips either way.
     pub(crate) fn change(self, s: &mut Settings, dir: i32) {
         match self {
+            Self::Silliness => {
+                s.silliness = cycle(&crate::fun::Silliness::ALL, s.silliness, dir);
+            }
+            Self::Mount => s.mount = cycle(&crate::fun::Mount::ALL, s.mount, dir),
+            Self::Hat => s.hat = cycle(&crate::fun::Hat::ALL, s.hat, dir),
+            Self::Eyes => s.googly_eyes = !s.googly_eyes,
+            Self::Speed => s.speed = cycle(&crate::fun::Speed::ALL, s.speed, dir),
+            Self::Wild => s.wild = cycle(&crate::fun::Wild::ALL, s.wild, dir),
+            Self::Neon => s.neon = !s.neon,
+            Self::Techno => s.techno = !s.techno,
+            Self::Chaos => s.chaos = !s.chaos,
             Self::Music => s.music = !s.music,
             Self::MusicVolume => s.music_volume = nudge(s.music_volume, dir, 0.1, 0.0, 1.0),
             Self::Effects => s.effects = !s.effects,
@@ -409,13 +469,16 @@ fn setup(mut commands: Commands) {
         .with_children(|overlay| {
             overlay
                 .spawn((
+                    // Wide enough for seven tabs in the longest of the languages, and
+                    // rows close enough together for the tab with the most of them
+                    // to fit the screen with the text at 110%.
                     Node {
-                        width: px(640),
+                        width: px(700),
                         padding: UiRect::all(px(30)),
                         border: UiRect::all(px(1)),
                         border_radius: BorderRadius::all(px(16)),
                         flex_direction: FlexDirection::Column,
-                        row_gap: px(10),
+                        row_gap: px(8),
                         ..default()
                     },
                     BackgroundColor(FRONT),
@@ -425,7 +488,7 @@ fn setup(mut commands: Commands) {
                     panel.spawn(crate::text::label("settings.label", 12.0, AMBER));
                     panel
                         .spawn(Node {
-                            column_gap: px(8),
+                            column_gap: px(6),
                             margin: UiRect::bottom(px(8)),
                             ..default()
                         })
@@ -435,7 +498,7 @@ fn setup(mut commands: Commands) {
                                     TabLabel(i),
                                     Button,
                                     Node {
-                                        padding: UiRect::axes(px(14), px(8)),
+                                        padding: UiRect::axes(px(10), px(8)),
                                         border_radius: BorderRadius::all(px(8)),
                                         ..default()
                                     },
@@ -452,7 +515,7 @@ fn setup(mut commands: Commands) {
                                 RowLine(i),
                                 Button,
                                 Node {
-                                    padding: UiRect::axes(px(14), px(9)),
+                                    padding: UiRect::axes(px(14), px(6)),
                                     border: UiRect::all(px(2)),
                                     border_radius: BorderRadius::all(px(8)),
                                     justify_content: JustifyContent::SpaceBetween,
@@ -673,7 +736,15 @@ fn draw(
             if text.0 != wanted {
                 text.0 = wanted;
             }
-            colour.set_if_neq(TextColor(if value.0 == page.row { FRONT } else { AMBER }));
+            // A row that does nothing at the level the game is at is dimmed, so that
+            // turning it does not look like it should.
+            colour.set_if_neq(TextColor(if value.0 == page.row {
+                FRONT
+            } else if row.idle(&settings) {
+                AMBER_DIM
+            } else {
+                AMBER
+            }));
         }
     }
 }
@@ -720,6 +791,36 @@ mod tests {
     }
 
     #[test]
+    fn a_row_is_idle_exactly_when_the_level_leaves_it_nothing_to_do() {
+        use crate::fun::Silliness;
+        let at = |level| Settings {
+            silliness: level,
+            ..Settings::default()
+        };
+        let idle = |level| {
+            Tab::Fun
+                .rows()
+                .iter()
+                .filter(|row| row.idle(&at(level)))
+                .count()
+        };
+        // Serious keeps only the level itself; Silly the looks; Bonkers all.
+        assert_eq!(
+            (
+                idle(Silliness::Serious),
+                idle(Silliness::Silly),
+                idle(Silliness::Bonkers)
+            ),
+            (8, 5, 0)
+        );
+        assert!(!Row::Silliness.idle(&at(Silliness::Serious)));
+        assert!(
+            !Row::Music.idle(&at(Silliness::Serious)),
+            "nothing outside the tab"
+        );
+    }
+
+    #[test]
     fn steps_land_on_round_numbers() {
         let mut settings = Settings::default();
         for _ in 0..3 {
@@ -759,9 +860,10 @@ mod tests {
         let mut app = app();
         *app.world_mut().resource_mut::<Halt>() = Halt::Settings;
         app.update();
-        // The first row is the radio: Enter flips it.
+        // Enter steps the first row, whatever it is.
+        let before = app.world().resource::<Settings>().clone();
         tap(&mut app, KeyCode::Enter);
-        assert!(!app.world().resource::<Settings>().music);
+        assert_ne!(*app.world().resource::<Settings>(), before);
         for tab in Tab::ALL {
             for _ in 1..tab.rows().len() {
                 tap(&mut app, KeyCode::ArrowDown);
@@ -774,7 +876,7 @@ mod tests {
         }
         assert_eq!(
             app.world().resource::<Page>().tab(),
-            Tab::Audio,
+            Tab::ALL[0],
             "tabs wrap"
         );
         tap(&mut app, KeyCode::ArrowRight);
@@ -850,11 +952,13 @@ mod tests {
     #[test]
     fn the_press_that_opens_the_page_does_not_change_a_row() {
         let mut app = app();
+        let before = app.world().resource::<Settings>().clone();
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Enter);
         *app.world_mut().resource_mut::<Halt>() = Halt::Settings;
         app.update();
-        assert!(app.world().resource::<Settings>().music);
+        // Not the first row, whichever that is, or any other.
+        assert_eq!(*app.world().resource::<Settings>(), before);
     }
 }

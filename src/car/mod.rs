@@ -274,11 +274,13 @@ fn find_the_steering_wheel(
 /// is riding in the car: not on the title's orbit or in a replay.
 fn cockpit_view(
     settings: Option<Res<crate::settings::Settings>>,
+    fun: Option<Res<crate::fun::Fun>>,
     halt: Option<Res<crate::pause::Halt>>,
     mut cockpits: Query<&mut Visibility, (With<Cockpit>, Without<Cabin>)>,
     mut cabins: Query<&mut Visibility, (With<Cabin>, Without<Cockpit>)>,
 ) {
     let inside = settings.is_some_and(|s| s.camera == crate::settings::CameraView::Cockpit)
+        && fun.is_none_or(|fun| fun.mount == crate::fun::Mount::Car)
         && !halt
             .is_some_and(|h| matches!(*h, crate::pause::Halt::Replay | crate::pause::Halt::Title));
     let (cockpit, cabin) = if inside {
@@ -388,6 +390,7 @@ pub(crate) fn advance(
 fn drive(
     time: Res<Time>,
     track: Res<Track>,
+    tweaks: Option<Res<crate::fun::tweak::Tweaks>>,
     mut cars: Query<
         (&mut Transform, &mut Car, &Handling, &Controls),
         (
@@ -397,9 +400,12 @@ fn drive(
     >,
 ) {
     for (mut transform, mut car, handling, controls) in &mut cars {
+        // The engine is handed whatever the fun layer has made of the handling on
+        // its way in, which is the handling itself when it has made nothing.
+        let tuned = tweaks.as_ref().map_or(*handling, |t| t.apply(handling));
         advance(
             &track,
-            handling,
+            &tuned,
             *controls,
             &mut transform,
             &mut car,
@@ -515,15 +521,18 @@ fn turn_wheels(
 /// brakes, lagging the car a little, which is what makes it read as weight.
 fn lean_body(
     time: Res<Time>,
+    fun: Option<Res<crate::fun::Fun>>,
     cars: Query<(Entity, &Car)>,
     children: Query<&Children>,
     mut bodies: Query<(&mut Transform, &mut Body)>,
 ) {
     let settle = (LEAN_RATE * time.delta_secs()).min(1.0);
+    // The body leans as it would in the shipped car, however fast this one is.
+    let scale = crate::fun::g_scale(fun.as_deref());
     for (entity, car) in &cars {
         for descendant in children.iter_descendants(entity) {
             if let Ok((mut transform, mut body)) = bodies.get_mut(descendant) {
-                body.lean = body.lean.lerp(car.g_force, settle);
+                body.lean = body.lean.lerp(car.g_force * scale, settle);
                 transform.rotation = lean(body.lean);
             }
         }

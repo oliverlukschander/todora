@@ -554,6 +554,7 @@ fn drive(
     if *halt != Halt::Board || halt.is_changed() {
         return;
     }
+    let silly = settings.silliness >= crate::fun::Silliness::Silly;
     let pad = |button| pads.iter().any(|pad| pad.just_pressed(button));
     let action = clicks
         .iter()
@@ -621,7 +622,7 @@ fn drive(
             browse
                 .row
                 .saturating_sub(ROWS / 2)
-                .min(crate::achievements::all().len() - ROWS)
+                .min(crate::achievements::listed(silly).len() - ROWS)
                 + row
         } else {
             row
@@ -641,7 +642,7 @@ fn drive(
         }
     }
     if browse.view == View::Awards {
-        let n = crate::achievements::all().len() as i32;
+        let n = crate::achievements::listed(silly).len() as i32;
         browse.row = (browse.row as i32 + step.y).clamp(0, n - 1) as usize;
         return;
     }
@@ -871,7 +872,7 @@ fn draw(
         }
     }
     if browse.view == View::Awards {
-        let all = crate::achievements::all();
+        let all = crate::achievements::listed(settings.silliness >= crate::fun::Silliness::Silly);
         let first = browse.row.saturating_sub(ROWS / 2).min(all.len() - ROWS);
         let got = |id: &str| earned.as_ref().and_then(|e| e.earned.get(id).copied());
         if let Ok(mut text) = titles.single_mut() {

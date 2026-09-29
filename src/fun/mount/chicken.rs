@@ -41,22 +41,71 @@ pub(super) fn build(
     let kit = &*kit;
 
     // The body, and the breast pushed out in front of it.
-    add(rig, kit, Shape::Sphere, &feathers, Vec3::new(0.0, 1.46, 0.08), Vec3::new(1.26, 1.30, 1.92));
-    add(rig, kit, Shape::Sphere, &feathers, Vec3::new(0.0, 1.52, -0.52), Vec3::new(1.06, 1.14, 1.10));
+    add(
+        rig,
+        kit,
+        Shape::Sphere,
+        &feathers,
+        Vec3::new(0.0, 1.46, 0.08),
+        Vec3::new(1.26, 1.30, 1.92),
+    );
+    add(
+        rig,
+        kit,
+        Shape::Sphere,
+        &feathers,
+        Vec3::new(0.0, 1.52, -0.52),
+        Vec3::new(1.06, 1.14, 1.10),
+    );
     // A tuft of belly feathers, so the legs come out of something.
-    add(rig, kit, Shape::Sphere, &shade, Vec3::new(0.0, 0.98, 0.10), Vec3::new(0.95, 0.42, 1.20));
+    add(
+        rig,
+        kit,
+        Shape::Sphere,
+        &shade,
+        Vec3::new(0.0, 0.98, 0.10),
+        Vec3::new(0.95, 0.42, 1.20),
+    );
 
     // The saddle blanket, in the car's paint with the orange piping.
-    add(rig, kit, Shape::Sphere, &saddle, Vec3::new(0.0, 2.03, 0.08), Vec3::new(1.02, 0.20, 1.12));
-    add(rig, kit, Shape::Sphere, &trim, Vec3::new(0.0, 2.05, 0.08), Vec3::new(0.22, 0.20, 1.16));
+    add(
+        rig,
+        kit,
+        Shape::Sphere,
+        &saddle,
+        Vec3::new(0.0, 2.03, 0.08),
+        Vec3::new(1.02, 0.20, 1.12),
+    );
+    add(
+        rig,
+        kit,
+        Shape::Sphere,
+        &trim,
+        Vec3::new(0.0, 2.05, 0.08),
+        Vec3::new(0.22, 0.20, 1.16),
+    );
 
     // Legs: hip, knee, ankle, and three toes forward and one back.
     for (side, phase) in [(-1.0f32, 0.0f32), (1.0, std::f32::consts::PI)] {
         let hip = Vec3::new(side * 0.36, 1.06, 0.14);
         hinge(rig, hip, Part::Hip(side, phase)).with_children(|h| {
-            add(h, kit, Shape::Sphere, &feathers, Vec3::new(0.0, -0.10, 0.0), Vec3::new(0.46, 0.66, 0.52));
+            add(
+                h,
+                kit,
+                Shape::Sphere,
+                &feathers,
+                Vec3::new(0.0, -0.10, 0.0),
+                Vec3::new(0.46, 0.66, 0.52),
+            );
             hinge(h, Vec3::new(0.0, -0.36, 0.0), Part::Knee(side, phase)).with_children(|k| {
-                add(k, kit, Shape::Cylinder, &leg, Vec3::new(0.0, -0.30, 0.0), Vec3::new(0.10, 0.62, 0.10));
+                add(
+                    k,
+                    kit,
+                    Shape::Cylinder,
+                    &leg,
+                    Vec3::new(0.0, -0.30, 0.0),
+                    Vec3::new(0.10, 0.62, 0.10),
+                );
                 hinge(k, Vec3::new(0.0, -0.60, 0.0), Part::Ankle(side, phase)).with_children(|a| {
                     add(a, kit, Shape::Sphere, &leg, Vec3::ZERO, Vec3::splat(0.14));
                     for toe in [-0.42f32, 0.0, 0.42] {
@@ -67,7 +116,8 @@ pub(super) fn build(
                             &leg,
                             Vec3::new(toe * 0.33, -0.01, -0.20),
                             Vec3::new(0.075, 0.30, 0.075),
-                            Quat::from_rotation_y(-toe) * Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
+                            Quat::from_rotation_y(-toe)
+                                * Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
                         );
                     }
                     add_turned(
@@ -107,7 +157,8 @@ pub(super) fn build(
                     if i % 2 == 0 { &feathers } else { &shade },
                     Vec3::new(side * 0.06, -0.86 - f * 0.10, 0.62 - f * 0.28),
                     Vec3::new(0.09, 0.62, 0.20),
-                    Quat::from_rotation_x(0.14 + f * 0.05) * Quat::from_rotation_z(side * (f - 0.5) * 0.30),
+                    Quat::from_rotation_x(0.14 + f * 0.05)
+                        * Quat::from_rotation_z(side * (f - 0.5) * 0.30),
                 );
             }
         });
@@ -132,16 +183,37 @@ pub(super) fn build(
                 Rest(Transform::from_rotation(rest)),
             ));
             feather.with_children(|f| {
-                add(f, kit, Shape::Sphere, paint, Vec3::new(0.0, length * 0.5, 0.0), Vec3::new(0.24, length, 0.07));
+                add(
+                    f,
+                    kit,
+                    Shape::Sphere,
+                    paint,
+                    Vec3::new(0.0, length * 0.5, 0.0),
+                    Vec3::new(0.24, length, 0.07),
+                );
             });
         }
     });
 
     // The neck rises from the breast and the head sits on top of it.
     hinge(rig, Vec3::new(0.0, 1.98, -0.66), Part::Neck).with_children(|n| {
-        add(n, kit, Shape::Capsule, &feathers, Vec3::new(0.0, 0.40, 0.0), Vec3::new(0.32, 0.56, 0.32));
+        add(
+            n,
+            kit,
+            Shape::Capsule,
+            &feathers,
+            Vec3::new(0.0, 0.40, 0.0),
+            Vec3::new(0.32, 0.56, 0.32),
+        );
         hinge(n, Vec3::new(0.0, 0.92, 0.0), Part::Head).with_children(|h| {
-            add(h, kit, Shape::Sphere, &feathers, Vec3::ZERO, Vec3::splat(0.68));
+            add(
+                h,
+                kit,
+                Shape::Sphere,
+                &feathers,
+                Vec3::ZERO,
+                Vec3::splat(0.68),
+            );
             // The beak: an upper half fixed, a lower half on a hinge.
             add_turned(
                 h,
@@ -164,17 +236,46 @@ pub(super) fn build(
                 );
             });
             // The wattle under the chin, and the comb on top.
-            let mut wattle = animated(h, kit, Shape::Sphere, &red, Vec3::new(0.0, -0.31, -0.32), Vec3::new(0.11, 0.22, 0.10), Part::Wattle);
+            let mut wattle = animated(
+                h,
+                kit,
+                Shape::Sphere,
+                &red,
+                Vec3::new(0.0, -0.31, -0.32),
+                Vec3::new(0.11, 0.22, 0.10),
+                Part::Wattle,
+            );
             wattle.insert(Spring::default());
-            hinge(h, Vec3::new(0.0, 0.30, 0.0), Part::Comb).insert(Spring::default()).with_children(|c| {
-                for (z, h_, w) in [(-0.17, 0.14, 0.10), (-0.06, 0.25, 0.11), (0.06, 0.22, 0.11), (0.17, 0.13, 0.10)] {
-                    add(c, kit, Shape::Sphere, &red, Vec3::new(0.0, h_ * 0.5, z), Vec3::new(w, h_, 0.16));
-                }
-            });
+            hinge(h, Vec3::new(0.0, 0.30, 0.0), Part::Comb)
+                .insert(Spring::default())
+                .with_children(|c| {
+                    for (z, h_, w) in [
+                        (-0.17, 0.14, 0.10),
+                        (-0.06, 0.25, 0.11),
+                        (0.06, 0.22, 0.11),
+                        (0.17, 0.13, 0.10),
+                    ] {
+                        add(
+                            c,
+                            kit,
+                            Shape::Sphere,
+                            &red,
+                            Vec3::new(0.0, h_ * 0.5, z),
+                            Vec3::new(w, h_, 0.16),
+                        );
+                    }
+                });
             // The eyes. Googly ones are big, white, and loose.
             for side in [-1.0f32, 1.0] {
                 if look.eyes {
-                    add(h, kit, Shape::Sphere, &white, Vec3::new(side * 0.23, 0.11, -0.22), Vec3::splat(0.30));
+                    add(
+                        h,
+                        kit,
+                        Shape::Sphere,
+                        &white,
+                        Vec3::new(side * 0.23, 0.11, -0.22),
+                        Vec3::splat(0.30),
+                    );
                     let mut pupil = animated(
                         h,
                         kit,
@@ -186,8 +287,22 @@ pub(super) fn build(
                     );
                     pupil.insert(Spring::default());
                 } else {
-                    add(h, kit, Shape::Sphere, &black, Vec3::new(side * 0.24, 0.08, -0.17), Vec3::splat(0.11));
-                    add(h, kit, Shape::Sphere, &white, Vec3::new(side * 0.26, 0.11, -0.21), Vec3::splat(0.04));
+                    add(
+                        h,
+                        kit,
+                        Shape::Sphere,
+                        &black,
+                        Vec3::new(side * 0.24, 0.08, -0.17),
+                        Vec3::splat(0.11),
+                    );
+                    add(
+                        h,
+                        kit,
+                        Shape::Sphere,
+                        &white,
+                        Vec3::new(side * 0.26, 0.11, -0.21),
+                        Vec3::splat(0.04),
+                    );
                 }
             }
             hats::wear(h, kit, &wardrobe, look.hat, Vec3::new(0.0, 0.44, 0.0), 1.1);

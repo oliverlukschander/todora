@@ -8,6 +8,8 @@ licenses; see [licensing and credits](LICENSES.md). Forks and modified builds ar
 welcome. Access to the official leaderboard is governed separately by the
 [service's admission rules](docs/online-integrity.md).
 
+**Bonkers Edition (branch `play/bonkers-edition`):** ride a chicken, on hillier circuits, at up to 3.6 times the speed, under neon and techno, with cows on the road. **Settings → Fun → Silliness**, or **F9**, turns it down to Silly (all the looks, and laps still count) or off; Bonkers laps never count. [What it is, what it changes and how it keeps the leaderboard honest](docs/bonkers-edition.md).
+
 **Three endurance additions:** Sarthe Run (Le Mans’ full 24-hour course), Volcano Straight (Fuji Grand Prix, including the Dunlop chicane), and Orange Grove Airfield (Sebring International). Press **T** and search for either the Todora name or the real venue. These join the existing circuit browser, with ghosts, sectors and medal targets in every driving mode. [Geometry sources and validation](docs/track-screening/endurance.md).
 
 **Eight North American additions:** Laguna Seca, Lime Rock, Long Beach, Mid-Ohio, Mosport, Road America, Road Atlanta and VIR inspire another set of Todora circuits. [Names, layouts and sources](docs/track-screening/north-america.md).
@@ -195,6 +197,7 @@ Needs a recent stable Rust (`rustup`, or `omarchy install dev-env rust` on Omarc
 | `src/<feature>.rs` | One plugin per feature (`input`, `camera`, `world`, `lap`, `hud`, `skid`, `pause`, `menu`). |
 | `src/car/` | `physics.rs` is the engine: a pure `step` over a `Car`, its `Handling` (everything that makes one car drive like itself, as a value) and a `Surface`. `garage.rs` is the three cars, each a `Handling` and a colour. `setup.rs` is the slider that leans whichever of them is being driven. `mod.rs` is the entity — the leaning body, the wheels, the paint, and `advance`, which carries `Controls` through the engine in fixed substeps. `driver.rs` is the AI: it laps the circuit in the tests today and drives opponents tomorrow. |
 | `src/track/` | `circuits/` is one file per circuit, each a real trace in real metres plus a line about where it passes over itself, and `circuits/mod.rs` is the list the circuit menu is drawn from; `ribbon.rs` turns a trace into a centreline, opening the corners too tight to loft and exaggerating the ones too shallow to drive, indexes it so that finding the nearest point does not mean reading the whole lap, and measures how much room it has at any point of itself; `markers.rs` places three flat chevron indicators ahead on the outside verge; `profile.rs` is the cross-section — the mesh, the height under a wheel and the grip under it all read from one shape — and fits one to each station of a circuit; `mod.rs` is the `Track` the game asks where the ground is, and the switch that builds whichever one the menu asked for. |
+| `src/fun/` | The Bonkers Edition: mounts, hills, lights, techno and the rest, standing around the engine and never in it. See [docs/bonkers-edition.md](docs/bonkers-edition.md). |
 | `src/ghost/` | `mod.rs` is the replay and the gap to it; `store.rs` is the lap on disk — where it lives, and what a file has to be before it is believed. |
 | `assets/` | Runtime files Bevy loads. glTF lives in `assets/models/`. |
 | `art/` | Source art. Blender files in `art/models/`. |

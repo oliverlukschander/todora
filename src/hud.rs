@@ -63,6 +63,8 @@ pub(crate) struct ClockReadout;
 struct SectorReadout;
 #[derive(Component)]
 struct InvalidReadout;
+/// The invalid readout, and not the sector notice beside it.
+type InvalidOnly = (With<InvalidReadout>, Without<SectorReadout>);
 /// One segment of the sector bar under the clock.
 #[derive(Component)]
 struct SectorSegment(usize);
@@ -296,20 +298,34 @@ fn setup(mut commands: Commands) {
     }, BackgroundColor(PANEL)));
 }
 
+/// What the control hints were last written for.
+type Seen = (
+    bool,
+    &'static str,
+    bool,
+    crate::text::Language,
+    crate::fun::Silliness,
+);
+
 /// Rewritten only when a pad comes or goes, the radio or effects change, or
 /// the language does.
 fn draw_controls(
     pads: Query<&Gamepad>,
     sound: Res<crate::sound::Sound>,
+    fun: Option<Res<crate::fun::Fun>>,
     mut text: Query<&mut Text, With<ControlHints>>,
-    mut seen: Local<Option<(bool, &'static str, bool, crate::text::Language)>>,
+    mut seen: Local<Option<Seen>>,
 ) {
     use crate::text::{t, tf};
+    let level = fun
+        .as_ref()
+        .map_or(crate::fun::Silliness::Serious, |f| f.level);
     let wanted = (
         pads.is_empty(),
         sound.station(),
         sound.effects,
         crate::text::current(),
+        level,
     );
     if *seen == Some(wanted) {
         return;
@@ -321,14 +337,23 @@ fn draw_controls(
     });
     let effects = t(if sound.effects { "word.on" } else { "word.off" }).to_lowercase();
     let radio = t(sound.station()).to_lowercase();
-    let hint = format!("{keys}\n{}", tf("hud.sound", &[&radio, &effects]));
+    let mut hint = format!("{keys}\n{}", tf("hud.sound", &[&radio, &effects]));
+    // The horn, and in the silliest game the hop, for those with a keyboard.
+    if pads.is_empty() && level >= crate::fun::Silliness::Silly {
+        hint.push_str("    ");
+        hint.push_str(t(if level >= crate::fun::Silliness::Bonkers {
+            "hud.fun_keys"
+        } else {
+            "hud.fun_keys_silly"
+        }));
+    }
     if let Ok(mut text) = text.single_mut() {
         *seen = Some(wanted);
         text.0 = hint;
     }
 }
 
-fn show(
+pub(crate) fn show(
     halt: Res<crate::pause::Halt>,
     race: Option<Res<crate::local::LocalRace>>,
     mut instruments: Query<&mut Visibility, With<Instrument>>,
@@ -386,20 +411,26 @@ fn draw_setup(
 
 /// Name the car being driven. It sits over the meter rather than in the menu,
 /// because which car you are in is a thing you want to know while driving it and
-/// the menu is only up when you are not.
+/// the menu is only up when you are not. When it is not a car, it says what it is.
 fn draw_car(
     spec: Res<Spec>,
     mode: Res<Mode>,
+    fun: Option<Res<crate::fun::Fun>>,
     mut readout: Query<&mut Text, With<CarName>>,
-    mut language: Local<Option<crate::text::Language>>,
+    mut shown: Local<Option<(crate::text::Language, crate::fun::Mount)>>,
 ) {
-    let now = crate::text::current();
-    if !spec.is_changed() && !mode.is_changed() && *language == Some(now) {
+    let mount = fun.map_or(crate::fun::Mount::Car, |fun| fun.mount);
+    let now = (crate::text::current(), mount);
+    if !spec.is_changed() && !mode.is_changed() && *shown == Some(now) {
         return;
     }
-    *language = Some(now);
+    *shown = Some(now);
     if let Ok(mut text) = readout.single_mut() {
-        text.0 = format!("{} / {}", spec.name(), mode.shown().to_uppercase());
+        let ride = match mount {
+            crate::fun::Mount::Car => spec.name().to_string(),
+            other => crate::text::t(other.key()).to_uppercase(),
+        };
+        text.0 = format!("{ride} / {}", mode.shown().to_uppercase());
     }
 }
 
@@ -501,6 +532,7 @@ fn draw_clock(timer: Res<LapTimer>, mut readout: Query<&mut Text, With<ClockRead
 /// braking and the climb out of a dip move it up and down.
 fn draw_g_meter(
     settings: Option<Res<crate::settings::Settings>>,
+    fun: Option<Res<crate::fun::Fun>>,
     cars: Query<&Car>,
     mut needle: Query<&mut Node, With<Needle>>,
     mut readout: Query<&mut Text, With<GReadout>>,
@@ -515,14 +547,16 @@ fn draw_g_meter(
         let units = settings.as_ref().map_or(Units::Kmh, |s| s.units);
         text.0 = format!("{:.0}", displayed_speed(car.velocity.length(), units));
     }
-    let reading = (car.g_force / FULL_SCALE).clamp_length_max(1.0) * (METER - NEEDLE) / 2.0;
+    // Read as it would be in the shipped car, however fast this one is going.
+    let g = car.g_force * crate::fun::g_scale(fun.as_deref());
+    let reading = (g / FULL_SCALE).clamp_length_max(1.0) * (METER - NEEDLE) / 2.0;
     if let Ok(mut node) = needle.single_mut() {
         node.left = px((METER - NEEDLE) / 2.0 + reading.x);
         // Screen y grows downward, so accelerating pushes the needle up.
         node.top = px((METER - NEEDLE) / 2.0 - reading.y);
     }
     if let Ok(mut text) = readout.single_mut() {
-        text.0 = format!("{:.2} G", car.g_force.length());
+        text.0 = format!("{:.2} G", g.length());
     }
 }
 
@@ -708,17 +742,28 @@ fn draw_sector(
     timer: Res<LapTimer>,
     settings: Option<Res<crate::settings::Settings>>,
     mut sectors: Query<(&mut Text, &mut TextColor), With<SectorReadout>>,
-    mut invalid: Query<&mut Text, (With<InvalidReadout>, Without<SectorReadout>)>,
+    mut invalid: Query<(&mut Text, &mut TextColor), InvalidOnly>,
 ) {
-    if let Ok(mut text) = invalid.single_mut() {
+    if let Ok((mut text, mut colour)) = invalid.single_mut() {
+        // A Bonkers lap is not a mistake, so it is not shown as one.
+        let bonkers = timer.why == Some(crate::lap::Why::Bonkers);
         let wanted = if timer.invalid {
-            crate::text::t("hud.invalid")
+            crate::text::t(if bonkers {
+                "hud.bonkers"
+            } else {
+                "hud.invalid"
+            })
         } else {
             ""
         };
         if text.0 != wanted {
             text.0 = wanted.into();
         }
+        colour.set_if_neq(TextColor(if bonkers {
+            crate::ui::Palette::STANDARD.purple
+        } else {
+            BEHIND
+        }));
     }
     if let Ok((mut text, mut color)) = sectors.single_mut() {
         let palette = crate::ui::Palette::of(settings.as_deref());

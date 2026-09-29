@@ -23,8 +23,21 @@
 //! from the settings so that nothing else has to look at them.
 
 pub(crate) mod air;
+pub(crate) mod announcer;
+pub(crate) mod awards;
+pub(crate) mod beat;
+pub(crate) mod course;
+mod disco;
+pub(crate) mod events;
+mod horn;
+mod hotkey;
+pub(crate) mod juice;
 pub(crate) mod mount;
+pub(crate) mod pads;
+pub(crate) mod particles;
 pub(crate) mod parts;
+pub(crate) mod props;
+pub(crate) mod quips;
 pub(crate) mod rng;
 pub(crate) mod tweak;
 
@@ -258,7 +271,12 @@ impl Default for Fun {
 impl Fun {
     /// What `settings` come to once the silliness has had its say.
     pub(crate) fn of(settings: &crate::settings::Settings) -> Self {
-        let level = settings.silliness;
+        Self::held_to(settings, settings.silliness)
+    }
+
+    /// As [`Fun::of`], with the silliness taken from somewhere else: what a game
+    /// played with somebody else is held to, whatever the settings say.
+    pub(crate) fn held_to(settings: &crate::settings::Settings, level: Silliness) -> Self {
         let silly = level >= Silliness::Silly;
         let bonkers = level >= Silliness::Bonkers;
         Self {
@@ -266,7 +284,11 @@ impl Fun {
             mount: if silly { settings.mount } else { Mount::Car },
             hat: if silly { settings.hat } else { Hat::Bare },
             eyes: silly && settings.googly_eyes,
-            speed: if bonkers { settings.speed } else { Speed::Normal },
+            speed: if bonkers {
+                settings.speed
+            } else {
+                Speed::Normal
+            },
             wild: if bonkers { settings.wild } else { Wild::Off },
             neon: bonkers && settings.neon,
             techno: bonkers && settings.techno,
@@ -292,6 +314,13 @@ impl Fun {
     }
 }
 
+/// What the engine's g telemetry is multiplied by to read as it would in the
+/// shipped car. A car `k` times as fast pulls `k²` times the g in the same
+/// corner, and the meter, the lean and the camera all want the corner's g.
+pub(crate) fn g_scale(fun: Option<&Fun>) -> f32 {
+    fun.map_or(1.0, |fun| fun.speed.scale().powi(-2))
+}
+
 /// Run condition: the game is at least Silly.
 pub(crate) fn silly(fun: Res<Fun>) -> bool {
     fun.silly()
@@ -302,34 +331,88 @@ pub(crate) fn bonkers(fun: Res<Fun>) -> bool {
     fun.bonkers()
 }
 
+/// The game is being played with somebody else: split-screen (from its lobby,
+/// so the circuit is built once for it and not again as the race starts), or a
+/// shared practice. Everyone there has to be driving the same car on the same
+/// road, so the fun layer stands down until it is over, and comes back after.
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Together(pub bool);
+
 pub struct FunPlugin;
 
 impl Plugin for FunPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Fun>()
+            .init_resource::<Together>()
             .init_resource::<tweak::Boost>()
             .add_systems(Startup, parts::setup)
-            .add_systems(PreUpdate, resolve.before(crate::pause::HaltSet))
-            .add_systems(Update, attach);
+            .add_systems(PreUpdate, resolve.before(crate::pause::HaltSet));
         mount::plugin(app);
-    }
-}
-
-/// Give the player's car somewhere to keep its height off the road.
-fn attach(
-    mut commands: Commands,
-    cars: Query<Entity, (With<crate::car::Player>, Without<air::Air>)>,
-) {
-    for car in &cars {
-        commands.entity(car).insert(air::Air::default());
+        horn::plugin(app);
+        hotkey::plugin(app);
+        beat::plugin(app);
+        tweak::plugin(app);
+        air::plugin(app);
+        events::plugin(app);
+        juice::plugin(app);
+        particles::plugin(app);
+        announcer::plugin(app);
+        awards::plugin(app);
+        course::plugin(app);
+        pads::plugin(app);
+        props::plugin(app);
+        quips::plugin(app);
+        disco::plugin(app);
     }
 }
 
 /// Work out what is in force, once a frame, before anything reads it.
-fn resolve(settings: Option<Res<crate::settings::Settings>>, mut fun: ResMut<Fun>) {
+///
+/// Two things it does on the way that the levels do not say. A circuit that is
+/// being built for company is still being built for company while the loading
+/// screen is up: with the lobby gone from the halt, the request would change its
+/// mind, the build that answered the last one would be thrown away as out of
+/// date, and the wait would begin again for ever. And leaving the drive that
+/// Bonkers made puts the car back on the grid, because it is still going at the
+/// speed Bonkers gave it, and the next lap that starts is one that counts.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn resolve(
+    settings: Option<Res<crate::settings::Settings>>,
+    race: Option<Res<crate::local::LocalRace>>,
+    session: Option<Res<crate::multiplayer::Session>>,
+    halt: Option<Res<crate::pause::Halt>>,
+    mut fun: ResMut<Fun>,
+    mut together: ResMut<Together>,
+    request: Option<ResMut<crate::track::WildRequest>>,
+    mut resets: MessageWriter<crate::Reset>,
+) {
+    use crate::pause::Halt;
+    let halt = halt.map(|halt| *halt);
+    let for_company_now = together.0 && halt == Some(Halt::Loading);
+    let with_others = crate::local::active(race.as_deref())
+        || halt == Some(Halt::LocalLobby)
+        || session.is_some_and(|s| s.active())
+        || for_company_now;
+    together.set_if_neq(Together(with_others));
     if let Some(settings) = settings {
-        let wanted = Fun::of(&settings);
+        let wanted = if with_others {
+            Fun::held_to(&settings, Silliness::Serious)
+        } else {
+            Fun::of(&settings)
+        };
+        if let Some(mut request) = request
+            && halt != Some(Halt::Settings)
+        {
+            // Left alone while the settings page is up: the circuit is built again
+            // once, when the page is closed, and not for every step of the row,
+            // with a loading screen in the middle of the page.
+            request.set_if_neq(crate::track::WildRequest(wanted.wild.level()));
+        }
+        let was = fun.changes_the_drive();
         fun.set_if_neq(wanted);
+        if was && !fun.changes_the_drive() {
+            resets.write(crate::Reset);
+        }
     }
 }
 
@@ -354,6 +437,158 @@ mod tests {
             "nothing survives a Serious game, whatever the rows say"
         );
         assert!(!fun.silly() && !fun.bonkers() && !fun.changes_the_drive());
+    }
+
+    #[test]
+    fn a_game_with_company_is_held_to_serious_whatever_the_settings_say() {
+        let settings = Settings::default();
+        assert!(Fun::of(&settings).bonkers(), "the default is wild");
+        let held = Fun::held_to(&settings, Silliness::Serious);
+        assert!(!held.silly() && !held.changes_the_drive());
+        assert_eq!(
+            (held.mount, held.speed, held.wild),
+            (Mount::Car, Speed::Normal, Wild::Off)
+        );
+        assert!(!held.neon && !held.techno && !held.chaos);
+    }
+
+    #[test]
+    fn the_fun_layer_stands_down_for_company_and_comes_back_after() {
+        use crate::pause::Halt;
+        let mut app = App::new();
+        app.init_resource::<Fun>()
+            .init_resource::<Together>()
+            .init_resource::<crate::local::LocalRace>()
+            .init_resource::<crate::multiplayer::Session>()
+            .init_resource::<crate::track::WildRequest>()
+            .add_message::<crate::Reset>()
+            .insert_resource(Halt::Nothing)
+            .insert_resource(Settings::default())
+            .add_systems(Update, resolve);
+        let now = |app: &App| {
+            (
+                app.world().resource::<Fun>().level,
+                app.world().resource::<Together>().0,
+                app.world().resource::<crate::track::WildRequest>().0,
+            )
+        };
+        app.update();
+        assert_eq!(
+            now(&app),
+            (Silliness::Bonkers, false, 2),
+            "alone, it is wild"
+        );
+        // The lobby counts, so the circuit is built once for the race and not
+        // again when it starts.
+        *app.world_mut().resource_mut::<Halt>() = Halt::LocalLobby;
+        app.update();
+        assert_eq!(now(&app), (Silliness::Serious, true, 0), "in the lobby");
+        // Building the circuit for the lobby puts the loading screen where the
+        // lobby was. The request must hold through it, or what was built is
+        // thrown away for being what was asked for a moment ago, and the
+        // lobby is loaded again for ever.
+        *app.world_mut().resource_mut::<Halt>() = Halt::Loading;
+        for _ in 0..5 {
+            app.update();
+            assert_eq!(now(&app), (Silliness::Serious, true, 0), "loading");
+        }
+        *app.world_mut().resource_mut::<Halt>() = Halt::LocalLobby;
+        app.update();
+        assert_eq!(
+            now(&app),
+            (Silliness::Serious, true, 0),
+            "in the lobby again"
+        );
+        *app.world_mut().resource_mut::<Halt>() = Halt::Nothing;
+        app.world_mut()
+            .resource_mut::<crate::local::LocalRace>()
+            .active = true;
+        app.update();
+        assert_eq!(now(&app), (Silliness::Serious, true, 0), "in the race");
+        app.world_mut()
+            .resource_mut::<crate::local::LocalRace>()
+            .active = false;
+        app.update();
+        assert_eq!(now(&app), (Silliness::Bonkers, false, 2), "and back again");
+        // Loading on its own account, alone, is not company.
+        *app.world_mut().resource_mut::<Halt>() = Halt::Loading;
+        app.update();
+        assert_eq!(now(&app), (Silliness::Bonkers, false, 2), "loading alone");
+    }
+
+    #[test]
+    fn the_circuit_is_built_again_when_the_settings_page_is_closed_and_not_before() {
+        use crate::pause::Halt;
+        let mut app = App::new();
+        app.init_resource::<Fun>()
+            .init_resource::<Together>()
+            .init_resource::<crate::local::LocalRace>()
+            .init_resource::<crate::multiplayer::Session>()
+            .init_resource::<crate::track::WildRequest>()
+            .add_message::<crate::Reset>()
+            .insert_resource(Halt::Settings)
+            .insert_resource(Settings::default())
+            .add_systems(Update, resolve);
+        let asked = |app: &App| app.world().resource::<crate::track::WildRequest>().0;
+        for wild in [Wild::Rolling, Wild::Absurd, Wild::Off, Wild::Rollercoaster] {
+            app.world_mut().resource_mut::<Settings>().wild = wild;
+            app.update();
+            assert_eq!(asked(&app), 0, "{wild:?} asked for under the page");
+        }
+        // Everything else the page changes is at once: that is what shows
+        // behind it.
+        assert!(app.world().resource::<Fun>().bonkers());
+        *app.world_mut().resource_mut::<Halt>() = Halt::Pause;
+        app.update();
+        assert_eq!(asked(&app), 2, "and now, once");
+    }
+
+    /// The resets `resolve` has written so far, counted by a system that reads
+    /// them, after one more frame.
+    fn resets_in(app: &mut App) -> usize {
+        #[derive(Resource, Default)]
+        struct Heard(usize);
+        if app.world().get_resource::<Heard>().is_none() {
+            app.init_resource::<Heard>().add_systems(
+                Update,
+                (|mut resets: MessageReader<crate::Reset>, mut heard: ResMut<Heard>| {
+                    heard.0 += resets.read().count();
+                })
+                .after(resolve),
+            );
+        }
+        app.update();
+        app.world().resource::<Heard>().0
+    }
+
+    #[test]
+    fn leaving_a_drive_that_bonkers_made_puts_the_car_back_and_nothing_else_does() {
+        let mut app = App::new();
+        app.init_resource::<Fun>()
+            .init_resource::<Together>()
+            .init_resource::<crate::local::LocalRace>()
+            .init_resource::<crate::multiplayer::Session>()
+            .init_resource::<crate::track::WildRequest>()
+            .add_message::<crate::Reset>()
+            .insert_resource(crate::pause::Halt::Nothing)
+            .insert_resource(Settings::default())
+            .add_systems(Update, resolve);
+        let set = |app: &mut App, level| {
+            app.world_mut().resource_mut::<Settings>().silliness = level;
+            resets_in(app)
+        };
+        assert_eq!(resets_in(&mut app), 0, "arriving at Bonkers at the start");
+        // Bonkers to Serious: the car still has the speed Bonkers gave it.
+        assert_eq!(set(&mut app, Silliness::Serious), 1);
+        // Serious to Silly and on to Bonkers change nothing about a car that
+        // has only ever been driven as shipped, and the lap clock flags the
+        // one that becomes Bonkers.
+        assert_eq!(set(&mut app, Silliness::Silly), 1, "no more than before");
+        assert_eq!(set(&mut app, Silliness::Bonkers), 1);
+        // Bonkers to Silly leaves it too.
+        assert_eq!(set(&mut app, Silliness::Silly), 2);
+        // And nothing is written while nothing changes.
+        assert_eq!(resets_in(&mut app), 2);
     }
 
     #[test]

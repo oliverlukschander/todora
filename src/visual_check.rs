@@ -9,7 +9,7 @@
 //! TODORA_SPLITS=PGY colours the sector bar (Purple, Green, Yellow, Plain) and
 //! shows the last as the sector notice, 0.18 s off the best lap.
 //! TODORA_SETTINGS='{"tv_margin":true}' starts from those settings.
-//! TODORA_SUMMARY=best|valid|invalid holds the lap summary card up; `best`
+//! TODORA_SUMMARY=best|valid|invalid|bonkers holds the lap summary card up; `best`
 //! also holds the new-best banner and the lit clock.
 //! TODORA_GUIDE=0|1|2 shows a first-drive card; TODORA_DEVICE=pad shows the
 //! pad's buttons on it.
@@ -22,11 +22,17 @@
 //! TODORA_CAM=yaw:pitch:distance holds the camera on an orbit round the car, for
 //! looking at it from all sides: yaw 0 is straight behind, 90 the right, 180
 //! in front; pitch is degrees up; distance is in game units.
+//! TODORA_AT=metres puts the car that far round the lap instead of at
+//! TODORA_PROGRESS, for looking at a particular place.
 //! TODORA_DRIVE=1 puts the game's own AI driver at the wheel from TODORA_PROGRESS
 //! onwards, so that things that move can be looked at moving. TODORA_FRAME=n
 //! takes the picture on that frame instead of the 100th, and
 //! TODORA_BURST=count:interval takes `count` pictures `interval` frames apart,
 //! named `<path>-000.png` onwards.
+//! TODORA_TIME=frames measures the frame rate instead: it prints how long that
+//! many frames take once the first 240 have warmed everything up, with the
+//! display's sync off so that a fast machine shows how fast, and exits. Give it
+//! TODORA_DRIVE=1 to be measured while there is something going on.
 //! TODORA_COUNTDOWN=ready|3|2|1|go freezes the start lights at that moment and,
 //! unless TODORA_PROGRESS is also given, leaves the car on the grid.
 use crate::{
@@ -60,35 +66,70 @@ struct Capture {
     placed: bool,
     load: Option<&'static crate::track::Circuit>,
     loading_frames: u32,
+    /// How many frames to time, and when the timing began.
+    time: Option<u32>,
+    started: Option<std::time::Instant>,
+}
+
+/// Time spent in the game's own schedules, from the first system of a frame to
+/// the last, which is how much of the frame is the game and not the display.
+#[derive(Resource, Default)]
+struct Spent {
+    since: Option<std::time::Instant>,
+    total: f64,
+    frames: u32,
+}
+
+fn clock_in(mut spent: ResMut<Spent>) {
+    spent.since = Some(std::time::Instant::now());
+}
+
+fn clock_out(mut spent: ResMut<Spent>, capture: Res<Capture>) {
+    if let (Some(since), Some(_)) = (spent.since, capture.time)
+        && capture.frame >= 240
+    {
+        spent.total += since.elapsed().as_secs_f64();
+        spent.frames += 1;
+    }
 }
 pub fn configure(app: &mut App) {
     let Ok(path) = std::env::var("TODORA_CAPTURE") else {
         return;
     };
     let circuit = std::env::var("TODORA_CIRCUIT").unwrap_or_else(|_| "suzuka".into());
-    let track = Track::new(
+    // Captures start from the defaults, whatever this machine saved, or from
+    // TODORA_SETTINGS='{"units":"mph"}' when a check needs a setting.
+    let settings = std::env::var("TODORA_SETTINGS")
+        .map(|text| crate::settings::Settings::parse(&text))
+        .unwrap_or_default();
+    // Built as wild as those settings say the circuits are to be.
+    let wild = crate::fun::Fun::of(&settings).wild.level();
+    let track = Track::with_wild(
         all_circuits()
             .iter()
             .find(|c| c.id == circuit)
             .expect("capture circuit"),
+        wild,
     );
+    let track_length = track.length();
     app.insert_resource(track)
+        .insert_resource(crate::track::WildRequest(wild))
         .insert_resource(crate::settings::ReadOnly)
-        // Captures start from the defaults, whatever this machine saved, or
-        // from TODORA_SETTINGS='{"units":"mph"}' when a check needs a setting.
-        .insert_resource(
-            std::env::var("TODORA_SETTINGS")
-                .map(|text| crate::settings::Settings::parse(&text))
-                .unwrap_or_default(),
-        )
+        .insert_resource(settings)
         .insert_resource(crate::car::Spec::default())
         .insert_resource(crate::car::Setup::default())
         .insert_resource(crate::car::Mode::default())
         .insert_resource(Capture {
             path,
-            progress: std::env::var("TODORA_PROGRESS")
+            progress: std::env::var("TODORA_AT")
                 .ok()
-                .and_then(|s| s.parse().ok())
+                .and_then(|s| s.parse::<f32>().ok())
+                .map(|metres| metres / track_length)
+                .or_else(|| {
+                    std::env::var("TODORA_PROGRESS")
+                        .ok()
+                        .and_then(|s| s.parse().ok())
+                })
                 .unwrap_or(0.78),
             wide: std::env::var_os("TODORA_WIDE").is_some(),
             drive: std::env::var_os("TODORA_DRIVE").is_some(),
@@ -122,6 +163,10 @@ pub fn configure(app: &mut App) {
             loading_frames: 0,
             frame: 0,
             preview: std::env::var_os("TODORA_PREVIEW").is_some(),
+            time: std::env::var("TODORA_TIME")
+                .ok()
+                .and_then(|n| n.parse().ok()),
+            started: None,
             countdown: std::env::var("TODORA_COUNTDOWN")
                 .ok()
                 .map(|moment| match moment.as_str() {
@@ -151,6 +196,9 @@ pub fn configure(app: &mut App) {
         .add_systems(PreUpdate, open_screen.after(crate::settings::PageSet))
         .add_systems(PreUpdate, crate::local::preview)
         .add_systems(Update, (hold_summary, show_guide))
+        .init_resource::<Spent>()
+        .add_systems(First, clock_in)
+        .add_systems(Last, clock_out)
         .add_systems(
             PostUpdate,
             capture.before(bevy::transform::TransformSystems::Propagate),
@@ -161,15 +209,43 @@ pub fn configure(app: &mut App) {
 fn ai_drive(
     capture: Res<Capture>,
     track: Res<Track>,
-    mut driver: Local<Option<Box<dyn FnMut(&Track, &crate::car::Handling, &Transform, &Car) -> crate::car::Controls + Send + Sync>>>,
-    mut cars: Query<(&Transform, &Car, &crate::car::Handling, &mut crate::car::Controls), With<Player>>,
+    tweaks: Res<crate::fun::tweak::Tweaks>,
+    mut driver: Local<
+        Option<
+            Box<
+                dyn FnMut(&Track, &crate::car::Handling, &Transform, &Car) -> crate::car::Controls
+                    + Send
+                    + Sync,
+            >,
+        >,
+    >,
+    mut cars: Query<
+        (
+            &Transform,
+            &Car,
+            &crate::car::Handling,
+            &mut crate::car::Controls,
+        ),
+        With<Player>,
+    >,
 ) {
     if !capture.drive || capture.frame < 3 {
         return;
     }
     let driver = driver.get_or_insert_with(|| Box::new(crate::car::ai_driver()));
     for (at, car, handling, mut controls) in &mut cars {
-        *controls = driver(&track, handling, at, car);
+        // The driver is told what the engine is told.
+        *controls = driver(&track, &tweaks.apply(handling), at, car);
+        if capture.frame.is_multiple_of(60) {
+            info!(
+                "frame {}: {:.1} m/s, tweak x{}, throttle {:.2}, brake {:.2}",
+                capture.frame,
+                car.velocity.length(),
+                tweaks.speed,
+                controls.throttle,
+                controls.brake
+            );
+        }
     }
 }
 
@@ -242,8 +318,26 @@ fn capture(
     mut go: MessageWriter<crate::track::GoTo>,
     track: Res<Track>,
     halt: Res<crate::pause::Halt>,
+    spent: Res<Spent>,
 ) {
     capture.frame += 1;
+    if let Some(frames) = capture.time {
+        const WARM: u32 = 240;
+        if capture.frame == WARM {
+            capture.started = Some(std::time::Instant::now());
+        }
+        if capture.frame == WARM + frames {
+            let took = capture.started.map_or(0.0, |at| at.elapsed().as_secs_f32());
+            println!(
+                "TIMED {frames} frames in {took:.2} s: {:.2} ms a frame, {:.0} fps; \
+                 the game's own schedules took {:.2} ms of each",
+                took / frames as f32 * 1000.0,
+                frames as f32 / took,
+                spent.total / f64::from(spent.frames.max(1)) * 1000.0
+            );
+            exit.write(AppExit::Success);
+        }
+    }
     if let Some(circuit) = capture.load {
         if capture.frame == 60 {
             go.write(crate::track::GoTo(circuit));
@@ -278,7 +372,7 @@ fn capture(
         capture.loading_frames == 2 && *halt == crate::pause::Halt::Loading
     } else {
         capture.frame >= capture.shoot
-            && (capture.frame - capture.shoot) % capture.burst.1 == 0
+            && (capture.frame - capture.shoot).is_multiple_of(capture.burst.1)
             && (capture.frame - capture.shoot) / capture.burst.1 < capture.burst.0
     };
     if take_picture {
@@ -445,6 +539,11 @@ fn window_size(mut windows: Query<&mut Window>) {
     if std::env::var_os("TODORA_SMALL").is_some() {
         for mut window in &mut windows {
             window.resolution.set(800.0, 600.0);
+        }
+    }
+    if std::env::var_os("TODORA_TIME").is_some() {
+        for mut window in &mut windows {
+            window.present_mode = bevy::window::PresentMode::AutoNoVsync;
         }
     }
 }

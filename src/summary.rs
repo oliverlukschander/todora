@@ -86,6 +86,13 @@ impl Card {
                 ],
                 ..best
             },
+            "bonkers" => LapReport {
+                valid: false,
+                best: false,
+                why: Some(Why::Bonkers),
+                splits: vec![Split::Plain; 5],
+                ..best
+            },
             "invalid" => LapReport {
                 valid: false,
                 best: false,
@@ -122,7 +129,9 @@ struct SectorSpan(usize);
 pub(crate) fn headline(report: &LapReport) -> String {
     use crate::text::{t, tf};
     let time = format_time(report.time);
-    let meaning = if !report.valid {
+    let meaning = if report.why == Some(Why::Bonkers) {
+        t("card.bonkers").to_string()
+    } else if !report.valid {
         t("card.invalid").to_string()
     } else if report.best {
         match report.previous_best {
@@ -165,6 +174,7 @@ pub(crate) fn reason(why: Option<Why>) -> String {
         Some(Why::OffTrack { sector }) => tf("card.off_track", &[&sector]),
         Some(Why::Rescued { sector }) => tf("card.rescued", &[&sector]),
         Some(Why::Paused) => t("card.paused").into(),
+        Some(Why::Bonkers) => t("card.bonkers_why").into(),
         None => t("card.not_counted").into(),
     }
 }
@@ -416,9 +426,15 @@ fn draw(
     card.fresh = false;
     let palette = crate::ui::Palette::of(settings.as_deref());
     let units = settings.map_or(Units::Kmh, |s| s.units);
+    // A Bonkers lap did not count because it was never going to, which is not a
+    // mistake, and is not in the colour of one: the HUD's purple, as it was on the
+    // clock while it was being driven.
+    let for_glory = report.why == Some(Why::Bonkers);
     if let Ok((mut text, mut colour)) = headlines.single_mut() {
         text.0 = headline(report);
-        colour.0 = if !report.valid {
+        colour.0 = if for_glory {
+            palette.purple
+        } else if !report.valid {
             RED
         } else if report.best {
             AMBER
@@ -432,7 +448,7 @@ fn draw(
             colour.0 = AMBER_DIM;
         } else {
             text.0 = reason(report.why);
-            colour.0 = RED;
+            colour.0 = if for_glory { palette.purple } else { RED };
         }
     }
     if let Ok((mut text, mut colour)) = medals.single_mut() {

@@ -21,7 +21,8 @@ pub(super) fn part(
     match part {
         Part::Hip(_, phase) => {
             let swing = 0.66 * run * (s + phase).sin();
-            let swing = swing * (1.0 - air) + 0.75 * air * (1.0 + 0.25 * (pose.flap_phase + phase).sin());
+            let swing =
+                swing * (1.0 - air) + 0.75 * air * (1.0 + 0.25 * (pose.flap_phase + phase).sin());
             out.rotation = Quat::from_rotation_x(swing);
         }
         Part::Knee(_, phase) => {
@@ -42,7 +43,11 @@ pub(super) fn part(
                 + pose.lean.y * 0.10;
             out.rotation = Quat::from_rotation_x(pitch);
             out.translation = rest.translation
-                + Vec3::new(0.0, 0.03 * run * (2.0 * s).cos(), thrust - 0.18 * pose.boost);
+                + Vec3::new(
+                    0.0,
+                    0.03 * run * (2.0 * s).cos(),
+                    thrust - 0.18 * pose.boost,
+                );
         }
         Part::Head => {
             // The head stays level whatever the neck does, and looks where the
@@ -57,9 +62,14 @@ pub(super) fn part(
         }
         Part::Comb | Part::Wattle => {
             if let Some(mut spring) = spring {
-                let drive = Vec3::new(-pose.lean.x * 0.35, 0.0, pose.lean.y * 0.25 + 0.12 * run * (2.0 * s).cos());
+                let drive = Vec3::new(
+                    -pose.lean.x * 0.35,
+                    0.0,
+                    pose.lean.y * 0.25 + 0.12 * run * (2.0 * s).cos(),
+                );
                 spring.chase(drive, 140.0, 7.0, dt);
-                out.rotation = Quat::from_rotation_z(spring.pos.x) * Quat::from_rotation_x(spring.pos.z);
+                out.rotation =
+                    Quat::from_rotation_z(spring.pos.x) * Quat::from_rotation_x(spring.pos.z);
             }
         }
         Part::Pupil(_) => {
@@ -88,7 +98,9 @@ pub(super) fn part(
             let sway = 0.10 * (t * 6.0 + f * 0.8).sin() * (0.25 + run) + pose.lean.y * 0.08;
             let fan = 1.0 + 0.55 * pose.boost + 0.3 * pose.honk;
             let spread = (f - 3.0) * 0.30 * (fan - 1.0);
-            out.rotation = rest.rotation * Quat::from_rotation_z(spread) * Quat::from_rotation_x(sway - 0.25 * pose.boost);
+            out.rotation = rest.rotation
+                * Quat::from_rotation_z(spread)
+                * Quat::from_rotation_x(sway - 0.25 * pose.boost);
         }
         Part::Tail => {
             out.rotation = Quat::from_rotation_x(-pose.lean.y * 0.25 + 0.25 * air);
@@ -138,7 +150,8 @@ pub(super) fn part(
         }
         Part::Wheel(steers) => {
             let steer = if steers > 0.5 { pose.steer } else { 0.0 };
-            out.rotation = rest.rotation * Quat::from_rotation_y(steer) * Quat::from_rotation_x(pose.wheel);
+            out.rotation =
+                rest.rotation * Quat::from_rotation_y(steer) * Quat::from_rotation_x(pose.wheel);
         }
         Part::Chassis => {
             let jolt = 0.02 * run * (2.0 * s).sin() + pose.squash * 0.0;
@@ -146,7 +159,8 @@ pub(super) fn part(
         }
         Part::Slosh => {
             let wobble = 0.03 * (t * 5.0).sin() + pose.lean.x * 0.05;
-            out.rotation = Quat::from_rotation_z(wobble) * Quat::from_rotation_x(pose.lean.y * 0.05);
+            out.rotation =
+                Quat::from_rotation_z(wobble) * Quat::from_rotation_x(pose.lean.y * 0.05);
         }
     }
     out

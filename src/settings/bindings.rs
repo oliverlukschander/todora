@@ -1,6 +1,6 @@
 //! Which key and which pad button does what.
 //!
-//! Nine actions each have a key and a pad button, stored by name in the
+//! Eleven actions each have a key and (all but one) a pad button, stored by name in the
 //! settings. The arrow keys, Shift for the brake, the sticks and the analogue
 //! triggers always work as well, and Escape, Enter and Start are the menus', so
 //! none of those can be given away. Binding a key or button that another action
@@ -20,10 +20,12 @@ pub(crate) enum Act {
     Ghost,
     Camera,
     Board,
+    Horn,
+    Hop,
 }
 
 impl Act {
-    pub(crate) const ALL: [Self; 9] = [
+    pub(crate) const ALL: [Self; 11] = [
         Self::Throttle,
         Self::Brake,
         Self::Left,
@@ -33,6 +35,8 @@ impl Act {
         Self::Ghost,
         Self::Camera,
         Self::Board,
+        Self::Horn,
+        Self::Hop,
     ];
 
     pub(crate) fn name(self) -> &'static str {
@@ -46,6 +50,8 @@ impl Act {
             Self::Ghost => "act.ghost",
             Self::Camera => "act.camera",
             Self::Board => "act.board",
+            Self::Horn => "act.horn",
+            Self::Hop => "act.hop",
         })
     }
 }
@@ -75,6 +81,14 @@ pub(crate) struct Bindings {
     pub ghost: Binding,
     pub camera: Binding,
     pub board: Binding,
+    /// The horn, and the hop. Neither is in the shipped game's controls, so an
+    /// older settings file simply gets these defaults. Neither starts with a pad
+    /// button: every face button, both triggers and the pad's directions already
+    /// mean something, and the right stick's click starts a shared practice in the
+    /// builds that have one, and a button that means two things is worse than
+    /// none. Both can be given one on the Keys tab.
+    pub horn: Binding,
+    pub hop: Binding,
 }
 
 impl Default for Bindings {
@@ -89,6 +103,8 @@ impl Default for Bindings {
             ghost: bind("KeyG", "North"),
             camera: bind("KeyV", "DPadUp"),
             board: bind("KeyL", "LeftThumb"),
+            horn: bind("KeyH", ""),
+            hop: bind("KeyE", ""),
         }
     }
 }
@@ -193,6 +209,8 @@ impl Bindings {
             Act::Ghost => &self.ghost,
             Act::Camera => &self.camera,
             Act::Board => &self.board,
+            Act::Horn => &self.horn,
+            Act::Hop => &self.hop,
         }
     }
 
@@ -207,6 +225,8 @@ impl Bindings {
             Act::Ghost => &mut self.ghost,
             Act::Camera => &mut self.camera,
             Act::Board => &mut self.board,
+            Act::Horn => &mut self.horn,
+            Act::Hop => &mut self.hop,
         }
     }
 
@@ -234,7 +254,31 @@ impl Bindings {
         format!("{key}   ·   {pad}")
     }
 
-    /// Give `act` this key, if it may be bound; whoever had it gets `act`'s.
+    /// The horn and the hop came after everything else. Where a settings file that
+    /// knew nothing of them has been given theirs by default and something it did
+    /// know is already on the same key or button, it is the newcomer that does
+    /// without, so that one press is never two things.
+    pub(crate) fn settled(mut self) -> Self {
+        for act in [Act::Horn, Act::Hop] {
+            let taken = |mine: &str, of: fn(&Binding) -> &String, bindings: &Self| {
+                !mine.is_empty()
+                    && Act::ALL
+                        .into_iter()
+                        .any(|other| other != act && of(bindings.of(other)) == mine)
+            };
+            let (key, pad) = (self.of(act).key.clone(), self.of(act).pad.clone());
+            if taken(&key, |b| &b.key, &self) {
+                self.of_mut(act).key = String::new();
+            }
+            if taken(&pad, |b| &b.pad, &self) {
+                self.of_mut(act).pad = String::new();
+            }
+        }
+        self
+    }
+
+    /// Give `act` this key, if it may be bound; whoever had it gets `act`'s. Not
+    /// if that would leave them with none: every action that has a key keeps one.
     pub(crate) fn bind_key(&mut self, act: Act, key: KeyCode) -> bool {
         let Some((name, _, _)) = KEYS.iter().find(|(_, _, k)| *k == key) else {
             return false;
@@ -244,13 +288,18 @@ impl Bindings {
             .into_iter()
             .find(|a| *a != act && self.of(*a).key == *name)
         {
+            if old.is_empty() {
+                return false;
+            }
             self.of_mut(other).key = old;
         }
         self.of_mut(act).key = (*name).into();
         true
     }
 
-    /// Give `act` this button, the same way.
+    /// Give `act` this button, the same way. An action that starts with none, as
+    /// the horn and the hop do, can take a button nobody has but not one that is
+    /// somebody's, which would leave them with none.
     pub(crate) fn bind_pad(&mut self, act: Act, button: GamepadButton) -> bool {
         let Some((name, _, _)) = PADS.iter().find(|(_, _, b)| *b == button) else {
             return false;
@@ -260,6 +309,9 @@ impl Bindings {
             .into_iter()
             .find(|a| *a != act && self.of(*a).pad == *name)
         {
+            if old.is_empty() {
+                return false;
+            }
             self.of_mut(other).pad = old;
         }
         self.of_mut(act).pad = (*name).into();
@@ -290,9 +342,51 @@ mod tests {
         let b = Bindings::default();
         let keys: std::collections::HashSet<_> =
             Act::ALL.iter().map(|a| b.key(*a).unwrap()).collect();
-        let pads: std::collections::HashSet<_> =
-            Act::ALL.iter().map(|a| b.pad(*a).unwrap()).collect();
-        assert_eq!((keys.len(), pads.len()), (9, 9));
+        // The horn and the hop have no pad button until one is chosen for them.
+        let pads: std::collections::HashSet<_> = Act::ALL
+            .iter()
+            .filter(|a| !matches!(**a, Act::Hop | Act::Horn))
+            .map(|a| b.pad(*a).unwrap())
+            .collect();
+        assert_eq!((keys.len(), pads.len()), (11, 9));
+        assert_eq!((b.pad(Act::Hop), b.pad(Act::Horn)), (None, None));
+    }
+
+    #[test]
+    fn an_older_file_that_used_the_horns_key_keeps_it_and_the_horn_goes_without() {
+        // A file from before the horn: Restart on H, Throttle on E, Ghost on R3.
+        let mut old = Bindings::default();
+        old.restart.key = "KeyH".into();
+        old.throttle.key = "KeyE".into();
+        old.ghost.pad = "RightThumb".into();
+        // What reading it gives is the defaults for what it did not say.
+        old.horn = Bindings::default().horn;
+        old.hop = Bindings::default().hop;
+        old.horn.pad = "RightThumb".into();
+        let settled = old.settled();
+        assert_eq!(settled.key(Act::Restart), Some(KeyCode::KeyH));
+        assert_eq!(settled.key(Act::Throttle), Some(KeyCode::KeyE));
+        assert_eq!(settled.key(Act::Horn), None, "the horn had H taken");
+        assert_eq!(settled.key(Act::Hop), None, "and the hop had E");
+        assert_eq!(settled.pad(Act::Ghost), Some(GamepadButton::RightThumb));
+        assert_eq!(settled.pad(Act::Horn), None);
+        // And a file with nothing in the way is left as it was.
+        assert_eq!(Bindings::default().settled(), Bindings::default());
+    }
+
+    #[test]
+    fn an_action_with_no_button_takes_a_free_one_and_never_somebodys_last() {
+        let mut b = Bindings::default();
+        // B is the handbrake's: taking it would leave the handbrake with none.
+        assert!(!b.bind_pad(Act::Hop, GamepadButton::East));
+        assert_eq!(b.pad(Act::Handbrake), Some(GamepadButton::East));
+        assert_eq!(b.pad(Act::Hop), None);
+        // LB is nobody's.
+        assert!(b.bind_pad(Act::Hop, GamepadButton::LeftTrigger));
+        assert_eq!(b.pad(Act::Hop), Some(GamepadButton::LeftTrigger));
+        // Now it has one, it swaps like the rest.
+        assert!(b.bind_pad(Act::Hop, GamepadButton::East));
+        assert_eq!(b.pad(Act::Handbrake), Some(GamepadButton::LeftTrigger));
     }
 
     #[test]

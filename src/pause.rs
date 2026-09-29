@@ -29,6 +29,10 @@ use crate::hud::{AMBER, AMBER_DIM, FRONT};
 use crate::sound::SoundToggle;
 use crate::ui::Navigation;
 
+/// The size of the pause's title. The Bonkers Edition puts a joke in its place, in
+/// a smaller size that fits the panel, and needs to put this one back.
+pub(crate) const TITLE_SIZE: f32 = 36.0;
+
 /// What is standing in front of the game, if anything.
 #[derive(Resource, Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub(crate) enum Halt {
@@ -185,7 +189,7 @@ fn setup(mut commands: Commands) {
                 ))
                 .with_children(|panel| {
                     panel.spawn(crate::text::label("pause.label", 12.0, AMBER));
-                    panel.spawn(crate::text::label("pause.title", 36.0, TEXT));
+                    panel.spawn(crate::text::label("pause.title", TITLE_SIZE, TEXT));
                     panel.spawn((
                         PauseNote,
                         label(crate::text::t("pause.note"), 17.0, AMBER_DIM),

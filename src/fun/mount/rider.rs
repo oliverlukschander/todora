@@ -64,9 +64,30 @@ pub(super) fn seat(
     let mut rider = hinge(rig, seat, Part::Rider);
     rider.with_children(|r| {
         // Hips, a belt, and a torso leaning into the wind.
-        add(r, kit, Shape::Sphere, suit, Vec3::new(0.0, 0.08, 0.0), Vec3::new(0.56, 0.34, 0.50));
-        add(r, kit, Shape::Cylinder, orange, Vec3::new(0.0, 0.22, -0.02), Vec3::new(0.535, 0.07, 0.50));
-        limb(r, kit, suit, Vec3::new(0.0, 0.16, 0.02), Vec3::new(0.0, 0.50, -0.10), 0.52);
+        add(
+            r,
+            kit,
+            Shape::Sphere,
+            suit,
+            Vec3::new(0.0, 0.08, 0.0),
+            Vec3::new(0.56, 0.34, 0.50),
+        );
+        add(
+            r,
+            kit,
+            Shape::Cylinder,
+            orange,
+            Vec3::new(0.0, 0.22, -0.02),
+            Vec3::new(0.535, 0.07, 0.50),
+        );
+        limb(
+            r,
+            kit,
+            suit,
+            Vec3::new(0.0, 0.16, 0.02),
+            Vec3::new(0.0, 0.50, -0.10),
+            0.52,
+        );
         // A stripe down the chest.
         add_turned(
             r,
@@ -77,15 +98,36 @@ pub(super) fn seat(
             Vec3::new(0.10, 0.36, 0.10),
             Quat::from_rotation_x(-0.30),
         );
-        add(r, kit, Shape::Sphere, skin, Vec3::new(0.0, 0.62, -0.14), Vec3::splat(0.18));
+        add(
+            r,
+            kit,
+            Shape::Sphere,
+            skin,
+            Vec3::new(0.0, 0.62, -0.14),
+            Vec3::splat(0.18),
+        );
 
         // The head: a face, a helmet over it, a visor across the front.
         let mut head = hinge(r, Vec3::new(0.0, 0.84, -0.18), Part::RiderHead);
         head.insert(Spring::default());
         head.with_children(|h| {
             add(h, kit, Shape::Sphere, skin, Vec3::ZERO, Vec3::splat(0.46));
-            add(h, kit, Shape::Sphere, helmet, Vec3::new(0.0, 0.06, 0.03), Vec3::new(0.70, 0.66, 0.72));
-            add(h, kit, Shape::Sphere, visor, Vec3::new(0.0, 0.0, -0.25), Vec3::new(0.56, 0.29, 0.32));
+            add(
+                h,
+                kit,
+                Shape::Sphere,
+                helmet,
+                Vec3::new(0.0, 0.06, 0.03),
+                Vec3::new(0.70, 0.66, 0.72),
+            );
+            add(
+                h,
+                kit,
+                Shape::Sphere,
+                visor,
+                Vec3::new(0.0, 0.0, -0.25),
+                Vec3::new(0.56, 0.29, 0.32),
+            );
             add_turned(
                 h,
                 kit,
@@ -97,7 +139,14 @@ pub(super) fn seat(
             );
             // Two little ear-pods, because helmets have them.
             for side in [-1.0, 1.0] {
-                add(h, kit, Shape::Sphere, orange, Vec3::new(side * 0.32, 0.02, 0.05), Vec3::new(0.06, 0.15, 0.15));
+                add(
+                    h,
+                    kit,
+                    Shape::Sphere,
+                    orange,
+                    Vec3::new(side * 0.32, 0.02, 0.05),
+                    Vec3::new(0.06, 0.15, 0.15),
+                );
             }
         });
 
@@ -115,7 +164,14 @@ pub(super) fn seat(
             let foot = Vec3::new(side * 0.60, -0.40, -0.24);
             limb(r, kit, suit, hip, knee, 0.20);
             limb(r, kit, suit, knee, foot, 0.18);
-            add(r, kit, Shape::Sphere, boot, foot + Vec3::new(0.0, -0.04, -0.06), Vec3::new(0.20, 0.17, 0.34));
+            add(
+                r,
+                kit,
+                Shape::Sphere,
+                boot,
+                foot + Vec3::new(0.0, -0.04, -0.06),
+                Vec3::new(0.20, 0.17, 0.34),
+            );
         }
 
         // The scarf: a chain of hinges, each a little further down the wind.
@@ -135,7 +191,7 @@ fn chain(
 ) {
     let at = *section;
     let length = 0.22;
-    let paint = if at % 2 == 0 { orange } else { suit };
+    let paint = if at.is_multiple_of(2) { orange } else { suit };
     add(
         parent,
         kit,

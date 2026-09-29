@@ -168,7 +168,38 @@ fn setup(mut commands: Commands) {
             Visibility::Hidden,
         ))
         .with_children(|panel| {
-            panel.spawn(label("TODORA", 72.0, TEXT));
+            panel.spawn((
+                crate::fun::quips::Logo,
+                UiTransform::default(),
+                label("TODORA", 72.0, TEXT),
+            ));
+            // A sticker, for editions that are not the plain one.
+            panel
+                .spawn((
+                    crate::fun::quips::Sticker,
+                    UiTransform::default(),
+                    Node {
+                        display: Display::None,
+                        margin: UiRect::new(px(4), px(0), px(-6), px(6)),
+                        align_self: AlignSelf::FlexStart,
+                        padding: UiRect::axes(px(12), px(4)),
+                        border_radius: BorderRadius::all(px(6)),
+                        ..default()
+                    },
+                    BackgroundColor(crate::ui::ACCENT),
+                ))
+                .with_children(|sticker| {
+                    sticker.spawn((
+                        Text::new(crate::text::t("title.sticker")),
+                        crate::text::Tr("title.sticker"),
+                        TextFont {
+                            font_size: FontSize::Px(20.0),
+                            weight: FontWeight::BLACK,
+                            ..default()
+                        },
+                        TextColor(crate::ui::SURFACE),
+                    ));
+                });
             panel.spawn((
                 Subtitle,
                 label("", 20.0, AMBER_DIM),
@@ -358,6 +389,8 @@ fn orbit(
 fn draw(
     halt: Res<Halt>,
     title: Res<Title>,
+    fun: Option<Res<crate::fun::Fun>>,
+    mut tagline: Local<Option<usize>>,
     mut panels: Query<&mut Visibility, With<Panel>>,
     mut buttons: Query<(&Button, &mut BackgroundColor, &mut BorderColor)>,
     mut subtitles: Query<&mut Text, With<Subtitle>>,
@@ -373,11 +406,18 @@ fn draw(
     if !open {
         return;
     }
+    let circuits = crate::track::all_circuits().len();
+    // A different tagline each time the game is opened, and the plain one when
+    // it is not that kind of game.
+    let pick = *tagline
+        .get_or_insert_with(|| crate::fun::rng::Rng::random().below(crate::fun::quips::TITLE));
     for mut subtitle in &mut subtitles {
-        subtitle.set_if_neq(Text::new(crate::text::tf(
-            "title.subtitle",
-            &[&crate::track::all_circuits().len()],
-        )));
+        let words = if fun.as_ref().is_some_and(|fun| fun.silly()) {
+            crate::fun::quips::tagline(circuits, pick)
+        } else {
+            crate::text::tf("title.subtitle", &[&circuits])
+        };
+        subtitle.set_if_neq(Text::new(words));
     }
     for (button, mut colour, mut border) in &mut buttons {
         let active = button.0 == title.at;
