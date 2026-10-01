@@ -1,16 +1,16 @@
 //! The game's opinions.
 //!
-//! Where the shipped game says something dry, this one says something else: a
-//! new tagline under the title every time it is opened, a remark when the game
-//! is paused, a different reason for each wait while a circuit loads, the logo
-//! going through the rainbow and bouncing on the beat, an edition sticker, and a
-//! reminder of where the horn is. Serious gets the dry words, unchanged.
+//! Where the shipped game says something dry, Bonkers says something else: a
+//! remark when the game is paused, a different reason for each wait while a
+//! circuit loads, and on the title, while its Bonkers button is the one chosen,
+//! a tagline, the logo going through the rainbow and bouncing on the beat, and a
+//! sticker. The plain game gets the dry words, unchanged.
 
 use bevy::prelude::*;
 
+use super::Fun;
 use super::beat::Beat;
 use super::parts::rainbow;
-use super::{Fun, Silliness};
 use crate::pause::Halt;
 use crate::text::{Tr, t, tf};
 
@@ -24,7 +24,8 @@ pub(crate) fn line(pool: &str, count: usize, pick: usize) -> &'static str {
     t(&format!("quip.{pool}.{}", pick % count))
 }
 
-/// The title's tagline, with the number of circuits where it wants one.
+/// The title's tagline, with the number of circuits where it wants one: shown
+/// while its Bonkers button is chosen.
 pub(crate) fn tagline(circuits: usize, pick: usize) -> String {
     tf(&format!("quip.title.{}", pick % TITLE), &[&circuits])
 }
@@ -33,7 +34,7 @@ pub(crate) fn tagline(circuits: usize, pick: usize) -> String {
 #[derive(Component)]
 pub(crate) struct Logo;
 
-/// The edition sticker next to it.
+/// The sticker next to it, that says which mode that is.
 #[derive(Component)]
 pub(crate) struct Sticker;
 
@@ -49,16 +50,16 @@ pub(super) fn plugin(app: &mut App) {
     );
 }
 
-/// The HUD's top line says which edition this is.
+/// The HUD's top line says which mode this is.
 fn retitle(fun: Res<Fun>, mut labels: Query<(&Tr, &mut Text)>) {
     for (tr, mut text) in &mut labels {
         if tr.0 != "hud.free_drive" {
             continue;
         }
-        let wanted = match fun.level {
-            Silliness::Bonkers => t("hud.edition_bonkers"),
-            Silliness::Silly => t("hud.edition_silly"),
-            Silliness::Serious => t("hud.free_drive"),
+        let wanted = if fun.bonkers() {
+            t("hud.edition_bonkers")
+        } else {
+            t("hud.free_drive")
         };
         if text.0 != wanted {
             text.0 = wanted.into();
@@ -71,7 +72,7 @@ fn retitle(fun: Res<Fun>, mut labels: Query<(&Tr, &mut Text)>) {
 const JOKE_SIZE: f32 = 22.0;
 
 /// A remark on the way into the pause, and a reason for each wait. Put right
-/// again when the game stops being silly, or the language changes, while it is
+/// again when the game stops being Bonkers, or the language changes, while it is
 /// up: whatever was written there would otherwise stay until the next.
 fn comment(
     fun: Res<Fun>,
@@ -79,7 +80,7 @@ fn comment(
     mut last: Local<Option<(Halt, bool, crate::text::Language)>>,
     mut labels: Query<(&Tr, &mut Text, &mut TextFont)>,
 ) {
-    let now = (*halt, fun.silly(), crate::text::current());
+    let now = (*halt, fun.bonkers(), crate::text::current());
     if last.replace(now) == Some(now) {
         return;
     }
@@ -93,7 +94,7 @@ fn comment(
         if tr.0 != key {
             continue;
         }
-        let joke = fun.silly();
+        let joke = fun.bonkers();
         text.0 = if joke {
             line(pool, count, pick)
         } else {
@@ -111,19 +112,24 @@ fn comment(
     }
 }
 
-/// The logo goes through the rainbow and bounces to the beat.
+/// The logo goes through the rainbow and bounces to the beat: in Bonkers, and
+/// on the title while its Bonkers button is chosen, which is what it shows of
+/// the mode before the mode is driven.
 fn logo(
     fun: Res<Fun>,
     beat: Res<Beat>,
     time: Res<Time<Real>>,
+    halt: Res<Halt>,
+    title: Option<Res<crate::title::Title>>,
     mut logos: Query<(&mut TextColor, &mut UiTransform, &mut TextFont), With<Logo>>,
     mut stickers: Query<(&mut Node, &mut UiTransform), StickerOnly>,
 ) {
     let t = time.elapsed_secs();
+    let party = fun.bonkers() || crate::title::Title::tempting(title.as_deref(), *halt);
     for (mut colour, mut transform, mut font) in &mut logos {
         // Written only when it is not so already: a text that is written to is a
         // text that is laid out again, and this one would be, every frame.
-        let weight = if fun.silly() {
+        let weight = if party {
             FontWeight::BLACK
         } else {
             FontWeight::NORMAL
@@ -131,7 +137,7 @@ fn logo(
         if font.weight != weight {
             font.weight = weight;
         }
-        if fun.silly() {
+        if party {
             let kick = if fun.calm { 0.0 } else { beat.kick() };
             colour.0 = rainbow(if fun.calm { 0.1 } else { t * 0.15 }, 0.66);
             transform.scale = Vec2::splat(1.0 + 0.07 * kick);
@@ -143,11 +149,7 @@ fn logo(
         }
     }
     for (mut node, mut transform) in &mut stickers {
-        let display = if fun.silly() {
-            Display::Flex
-        } else {
-            Display::None
-        };
+        let display = if party { Display::Flex } else { Display::None };
         if node.display != display {
             node.display = display;
         }
@@ -186,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn the_pause_says_a_joke_small_and_takes_it_back_when_the_game_is_not_silly() {
+    fn the_pause_says_a_joke_small_and_takes_it_back_when_the_game_is_not_bonkers() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<Fun>()
@@ -212,14 +214,14 @@ mod tests {
         };
         app.update();
         assert_eq!(seen(&app).0, t("pause.title"), "a serious pause is plain");
-        // The game becomes silly while the pause is up, as F9 does.
-        app.world_mut().resource_mut::<Fun>().level = super::super::Silliness::Bonkers;
+        // The game becomes Bonkers while the pause is up, as F9 does.
+        app.world_mut().resource_mut::<Fun>().on = true;
         app.update();
         let (words, size) = seen(&app);
         assert_ne!(words, t("pause.title"), "no joke");
         assert_eq!(size, FontSize::Px(JOKE_SIZE));
-        // And serious again: the title, at its own size.
-        app.world_mut().resource_mut::<Fun>().level = super::super::Silliness::Serious;
+        // And plain again: the title, at its own size.
+        app.world_mut().resource_mut::<Fun>().on = false;
         app.update();
         assert_eq!(
             seen(&app),

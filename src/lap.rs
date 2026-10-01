@@ -915,28 +915,26 @@ mod tests {
     }
 
     /// A lap driven under a drive the fun layer has changed never counts, however
-    /// the level came to change and whichever step of the lap it changed on: from
+    /// Bonkers came to be switched on and whichever step of the lap it was: from
     /// the start, half way, or on the very step that finishes it.
     #[test]
     fn a_lap_that_bonkers_had_a_hand_in_never_counts() {
-        use crate::fun::{Fun, Silliness};
+        use crate::fun::Fun;
         #[derive(Resource, Default)]
         struct Heard(Vec<LapFinished>);
         fn collect(mut laps: MessageReader<LapFinished>, mut heard: ResMut<Heard>) {
             heard.0.extend(laps.read().copied());
         }
-        let level = |level| Fun {
-            level,
+        let level = |on| Fun {
+            on,
             ..Fun::default()
         };
-        // (the level the lap starts in, and the one it is switched to a metre
-        // before the line, if any; whether the lap that finishes counts)
+        // (whether the lap starts in Bonkers, and whether it is switched to it
+        // a metre before the line; whether the lap that finishes counts)
         for (start, later, counts) in [
-            (Silliness::Serious, None, true),
-            (Silliness::Silly, None, true),
-            (Silliness::Bonkers, None, false),
-            (Silliness::Serious, Some(Silliness::Bonkers), false),
-            (Silliness::Silly, Some(Silliness::Bonkers), false),
+            (false, None, true),
+            (true, None, false),
+            (false, Some(true), false),
         ] {
             let track = Track::any();
             let mut app = App::new();

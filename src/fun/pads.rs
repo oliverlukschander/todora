@@ -23,6 +23,7 @@ use bevy::{
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
 
+use super::Fun;
 use super::air::{Air, Launched};
 use super::announcer::{Announce, Points};
 use super::course::{Layout, PadKind, PadSpot};
@@ -30,7 +31,6 @@ use super::juice::Jolt;
 use super::particles::{Burst, Kind, Tint};
 use super::parts::{Kit, Shape, rainbow};
 use super::tweak::Boost;
-use super::{Fun, Silliness};
 use crate::car::{Car, Player, level, step_seconds};
 use crate::sound::{Sfx, SfxKind};
 use crate::track::Track;
@@ -44,17 +44,18 @@ const JUMP_REACH: (f32, f32) = (1.8, 1.7);
 /// Above the road, clear of it and of the rails.
 const LIFT: f32 = 0.04;
 /// Seconds before a pad works again.
-const REARM: f32 = 1.4;
+pub(super) const REARM: f32 = 1.4;
 /// A box's reach, and how long before it comes back.
 const BOX_REACH: f32 = 0.85;
 const BOX_RETURNS: f32 = 16.0;
 /// Boost: what it adds to the speed at once (at the shipped car's pace), how
 /// hard the engine is pushed and for how long.
-const KICK: f32 = 5.5;
-const BOOST_POWER: f32 = 1.0;
-const BOOST_FOR: f32 = 1.8;
-/// Jump: the launch speed, at the shipped car's pace.
-const LAUNCH: f32 = 9.6;
+pub(super) const KICK: f32 = 5.5;
+pub(super) const BOOST_POWER: f32 = 1.0;
+pub(super) const BOOST_FOR: f32 = 1.8;
+/// Jump: the launch speed, at the shipped car's pace. At that pace it is two
+/// seconds in the air, four metres up, which is a long time without brakes.
+pub(super) const LAUNCH: f32 = 7.5;
 
 /// The chevrons and the ring, painted once, and the paint that wears them.
 #[derive(Resource, Default)]
@@ -400,6 +401,15 @@ fn covers(pad: &PadSpot, car: Vec3, reach: (f32, f32)) -> bool {
     d.dot(pad.tangent).abs() < reach.0 && d.dot(pad.right).abs() < reach.1
 }
 
+/// Whether a car at `car` is on `pad`, as far as that kind of pad reaches.
+pub(super) fn under(pad: &PadSpot, car: Vec3) -> bool {
+    let reach = match pad.kind {
+        PadKind::Boost => BOOST_REACH,
+        PadKind::Jump => JUMP_REACH,
+    };
+    covers(pad, car, reach)
+}
+
 /// Boost and jump.
 #[allow(clippy::too_many_arguments)]
 fn drive_over(
@@ -415,6 +425,7 @@ fn drive_over(
     mut bursts: MessageWriter<Burst>,
     mut jolts: MessageWriter<Jolt>,
     mut sounds: MessageWriter<Sfx>,
+    tweaks: Res<super::tweak::Tweaks>,
 ) {
     if !crate::local::solo(race) || cooling.0.len() != layout.course.pads.len() {
         return;
@@ -423,7 +434,8 @@ fn drive_over(
     for cool in &mut cooling.0 {
         *cool = (*cool - dt).max(0.0);
     }
-    let k = fun.speed.scale();
+    // The speed in force, hyperdrive and all.
+    let k = tweaks.speed;
     let Ok((at, mut car, mut air)) = cars.single_mut() else {
         return;
     };
@@ -431,12 +443,7 @@ fn drive_over(
         return;
     }
     for (i, pad) in layout.course.pads.iter().enumerate() {
-        let reach = match pad.kind {
-            PadKind::Boost => BOOST_REACH,
-            PadKind::Jump => JUMP_REACH,
-        };
-        if cooling.0[i] > 0.0 || car.velocity.length() < 2.0 || !covers(pad, at.translation, reach)
-        {
+        if cooling.0[i] > 0.0 || car.velocity.length() < 2.0 || !under(pad, at.translation) {
             continue;
         }
         cooling.0[i] = REARM;
@@ -497,7 +504,7 @@ fn open_boxes(
     mut bursts: MessageWriter<Burst>,
     mut sounds: MessageWriter<Sfx>,
 ) {
-    if fun.level < Silliness::Bonkers {
+    if !fun.bonkers() {
         return;
     }
     let Ok((at, air)) = cars.single() else {
@@ -550,7 +557,10 @@ mod tests {
     fn a_box_is_opened_by_a_car_that_reaches_it_and_not_by_one_flying_over() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .insert_resource(Fun::of(&crate::settings::Settings::default()))
+            .insert_resource(Fun::of(&crate::settings::Settings {
+                bonkers: true,
+                ..crate::settings::Settings::default()
+            }))
             .add_message::<Opened>()
             .add_message::<Points>()
             .add_message::<Burst>()

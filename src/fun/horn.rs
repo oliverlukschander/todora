@@ -20,7 +20,7 @@ const REPEAT: f64 = 0.34;
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(
         Update,
-        honk.run_if(super::silly)
+        honk.run_if(super::bonkers)
             .run_if(crate::pause::running)
             .run_if(crate::local::solo),
     );

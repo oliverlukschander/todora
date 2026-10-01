@@ -29,7 +29,7 @@ use crate::hud::{AMBER, AMBER_DIM, FRONT};
 use crate::sound::SoundToggle;
 use crate::ui::Navigation;
 
-/// The size of the pause's title. The Bonkers Edition puts a joke in its place, in
+/// The size of the pause's title. Bonkers mode puts a joke in its place, in
 /// a smaller size that fits the panel, and needs to put this one back.
 pub(crate) const TITLE_SIZE: f32 = 36.0;
 

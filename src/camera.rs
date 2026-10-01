@@ -266,11 +266,20 @@ pub(crate) fn clearance(
     let beneath = track.ground_from(camera, along).height;
     let mut rise = beneath + ABOVE_GROUND * zoom.min(1.0);
     let reach = (target - camera).reject_from(Vec3::Y).length() * SIGHT_REACH;
-    let samples = ((reach / SIGHT_STEP).ceil() as usize).clamp(4, SIGHT_SAMPLES);
+    // On a road the fun layer has made hills for, the ground is looked at twice
+    // as closely: a ridge between two checks can stand above the line between
+    // them without either of them seeing it. The circuits as surveyed have none,
+    // and their camera is exactly the one that shipped.
+    let fine = track.wild_used() > 0;
+    let (step, most) = if fine {
+        (SIGHT_STEP / 2.0, SIGHT_SAMPLES * 2)
+    } else {
+        (SIGHT_STEP, SIGHT_SAMPLES)
+    };
+    let samples = ((reach / step).ceil() as usize).clamp(4, most);
     // The height at the camera that puts the line through a ground `height`,
     // plus the margin, at fraction `f` of the way to the target.
     let needs = |f: f32, height: f32| (height + SIGHT_CLEAR - f * target.y) / (1.0 - f);
-    let fine = track.wild_used() > 0;
     let mut before: Option<(f32, f32)> = None;
     for k in 1..=samples {
         let f = SIGHT_REACH * k as f32 / samples as f32;
@@ -278,9 +287,8 @@ pub(crate) fn clearance(
         rise = rise.max(needs(f, ground));
         // A cliff between two samples has its top between them, which is the
         // one place neither sample can see: the edge of a ridge the road runs
-        // along. Look again, closer, wherever the ground changes that much. Only on
-        // a road the fun layer has made hills for: the circuits as surveyed have
-        // none, and their camera is exactly the one that shipped.
+        // along. Look again, closer, wherever the ground changes that much, on
+        // a road with hills.
         if fine
             && let Some((behind, then)) = before
             && (ground - then).abs() > SIGHT_JUMP

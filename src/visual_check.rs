@@ -8,14 +8,16 @@
 //! metres behind the car in plan, as the follow lag does at speed.
 //! TODORA_SPLITS=PGY colours the sector bar (Purple, Green, Yellow, Plain) and
 //! shows the last as the sector notice, 0.18 s off the best lap.
-//! TODORA_SETTINGS='{"tv_margin":true}' starts from those settings.
+//! TODORA_SETTINGS='{"tv_margin":true}' starts from those settings, and
+//! TODORA_BONKERS=1 in Bonkers mode, which the settings file never says.
 //! TODORA_SUMMARY=best|valid|invalid|bonkers holds the lap summary card up; `best`
 //! also holds the new-best banner and the lit clock.
 //! TODORA_GUIDE=0|1|2 shows a first-drive card; TODORA_DEVICE=pad shows the
 //! pad's buttons on it.
 //! TODORA_SCREEN=board opens the leaderboard on TODORA_VIEW=0..5 (3 this week, 4 records, 5 awards).
-//! TODORA_SCREEN=settings opens the settings page, on TODORA_TAB=0..3 and
-//! TODORA_ROW=n.
+//! TODORA_SCREEN=settings opens the settings page, on TODORA_TAB=0..6 and
+//! TODORA_ROW=n; TODORA_SCREEN=title TODORA_ROW=n puts the title's choice on its
+//! nth button (1 is Bonkers mode).
 //! TODORA_SCREEN=title|replay|offer|circuits|garage opens that screen, and
 //! TODORA_EXAMPLE=21 fills the leaderboard as if you were 21st of 300.
 //! TODORA_COLLECTION=0..4 chooses All, DHH ’14, Endurance, Grand Prix or Heritage.
@@ -99,9 +101,10 @@ pub fn configure(app: &mut App) {
     let circuit = std::env::var("TODORA_CIRCUIT").unwrap_or_else(|_| "suzuka".into());
     // Captures start from the defaults, whatever this machine saved, or from
     // TODORA_SETTINGS='{"units":"mph"}' when a check needs a setting.
-    let settings = std::env::var("TODORA_SETTINGS")
+    let mut settings: crate::settings::Settings = std::env::var("TODORA_SETTINGS")
         .map(|text| crate::settings::Settings::parse(&text))
         .unwrap_or_default();
+    settings.bonkers = std::env::var_os("TODORA_BONKERS").is_some();
     // Built as wild as those settings say the circuits are to be.
     let wild = crate::fun::Fun::of(&settings).wild.level();
     let track = Track::with_wild(
@@ -474,6 +477,15 @@ fn open_screen(
         if *frames > 1 && *halt != wanted {
             *halt = wanted;
             title.active = wanted == crate::pause::Halt::Title;
+        }
+        // TODORA_ROW=1 is the title with Bonkers mode chosen.
+        if *frames == 3
+            && wanted == crate::pause::Halt::Title
+            && let Some(at) = std::env::var("TODORA_ROW")
+                .ok()
+                .and_then(|s| s.parse().ok())
+        {
+            title.point_at(at);
         }
     }
     if screen == "circuits" || screen == "garage" {

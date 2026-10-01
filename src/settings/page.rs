@@ -1,4 +1,4 @@
-//! The settings page: four tabs of rows, driven like the pause menu.
+//! The settings page: tabs of rows, driven like the pause menu.
 //!
 //! Up and down choose a row, left and right change its value (Enter or A
 //! steps it forward too, which is how a switch is flipped), LB and RB or Q and
@@ -15,44 +15,43 @@ use crate::ui::{LINE, Navigation, SURFACE, TEXT, label};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Tab {
-    Fun,
     Audio,
     Display,
     Hud,
     Controls,
     Keys,
     Online,
+    Bonkers,
 }
 
 impl Tab {
     fn key(self) -> &'static str {
         match self {
-            Self::Fun => "tab.fun",
             Self::Audio => "tab.audio",
             Self::Display => "tab.display",
             Self::Hud => "tab.hud",
             Self::Controls => "tab.controls",
             Self::Keys => "tab.keys",
             Self::Online => "tab.online",
+            Self::Bonkers => "tab.bonkers",
         }
     }
 
+    /// Bonkers last: it is the second way to play, and the page opens on the
+    /// first tab.
     const ALL: [Self; 7] = [
-        Self::Fun,
         Self::Audio,
         Self::Display,
         Self::Hud,
         Self::Controls,
         Self::Keys,
         Self::Online,
+        Self::Bonkers,
     ];
 
     fn rows(self) -> &'static [Row] {
         use Row::*;
         match self {
-            Self::Fun => &[
-                Silliness, Mount, Hat, Eyes, Speed, Wild, Neon, Techno, Chaos,
-            ],
             Self::Audio => &[Music, MusicVolume, Effects, EffectsVolume, EngineVolume],
             Self::Display => &[
                 Fullscreen,
@@ -92,6 +91,7 @@ impl Tab {
                 Defaults,
             ],
             Self::Online => &[Online, Name, Country, Pending, Forget],
+            Self::Bonkers => &[Bonkers, Mount, Hat, Eyes, Speed, Wild, Neon, Techno, Chaos],
         }
     }
 }
@@ -99,7 +99,7 @@ impl Tab {
 /// One line of the page: what it is called, what it says now, how it moves.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Row {
-    Silliness,
+    Bonkers,
     Mount,
     Hat,
     Eyes,
@@ -177,23 +177,25 @@ fn cycle<T: PartialEq + Copy>(options: &[T], now: T, dir: i32) -> T {
 }
 
 impl Row {
-    /// Whether the row changes nothing at the silliness the game is at: the ride
-    /// and its trimmings when it is Serious, and the rest of what Bonkers does
-    /// when it is anything less.
+    /// Whether the row changes nothing in the game being played: what Bonkers
+    /// is like, while it is not Bonkers that is being played.
     fn idle(self, settings: &Settings) -> bool {
-        use crate::fun::Silliness;
         match self {
-            Self::Mount | Self::Hat | Self::Eyes => settings.silliness < Silliness::Silly,
-            Self::Speed | Self::Wild | Self::Neon | Self::Techno | Self::Chaos => {
-                settings.silliness < Silliness::Bonkers
-            }
+            Self::Mount
+            | Self::Hat
+            | Self::Eyes
+            | Self::Speed
+            | Self::Wild
+            | Self::Neon
+            | Self::Techno
+            | Self::Chaos => !settings.bonkers,
             _ => false,
         }
     }
 
     fn name(self) -> &'static str {
         match self {
-            Self::Silliness => crate::text::t("row.silliness"),
+            Self::Bonkers => crate::text::t("row.bonkers"),
             Self::Mount => crate::text::t("row.mount"),
             Self::Hat => crate::text::t("row.hat"),
             Self::Eyes => crate::text::t("row.eyes"),
@@ -242,7 +244,7 @@ impl Row {
 
     pub(crate) fn value(self, s: &Settings) -> String {
         match self {
-            Self::Silliness => crate::text::t(s.silliness.key()).into(),
+            Self::Bonkers => on_off(s.bonkers),
             Self::Mount => crate::text::t(s.mount.key()).into(),
             Self::Hat => crate::text::t(s.hat.key()).into(),
             Self::Eyes => on_off(s.googly_eyes),
@@ -320,9 +322,7 @@ impl Row {
     /// Move the value one step; `dir` is -1 or 1. A switch flips either way.
     pub(crate) fn change(self, s: &mut Settings, dir: i32) {
         match self {
-            Self::Silliness => {
-                s.silliness = cycle(&crate::fun::Silliness::ALL, s.silliness, dir);
-            }
+            Self::Bonkers => s.bonkers = !s.bonkers,
             Self::Mount => s.mount = cycle(&crate::fun::Mount::ALL, s.mount, dir),
             Self::Hat => s.hat = cycle(&crate::fun::Hat::ALL, s.hat, dir),
             Self::Eyes => s.googly_eyes = !s.googly_eyes,
@@ -785,38 +785,41 @@ mod tests {
                 settings.forget_presses = 0;
                 settings.pending = 0;
                 settings.online_note.clear();
+                settings.bonkers = false;
                 assert_eq!(Settings::parse(&text), settings, "{row:?} left the range");
             }
         }
     }
 
     #[test]
-    fn a_row_is_idle_exactly_when_the_level_leaves_it_nothing_to_do() {
-        use crate::fun::Silliness;
-        let at = |level| Settings {
-            silliness: level,
+    fn what_bonkers_is_like_is_dimmed_while_it_is_not_bonkers_being_played() {
+        let at = |bonkers| Settings {
+            bonkers,
             ..Settings::default()
         };
-        let idle = |level| {
-            Tab::Fun
+        let idle = |bonkers| {
+            Tab::Bonkers
                 .rows()
                 .iter()
-                .filter(|row| row.idle(&at(level)))
+                .filter(|row| row.idle(&at(bonkers)))
                 .count()
         };
-        // Serious keeps only the level itself; Silly the looks; Bonkers all.
+        // In the plain game every row but the switch itself; in Bonkers none.
         assert_eq!(
-            (
-                idle(Silliness::Serious),
-                idle(Silliness::Silly),
-                idle(Silliness::Bonkers)
-            ),
-            (8, 5, 0)
+            (idle(false), idle(true)),
+            (Tab::Bonkers.rows().len() - 1, 0)
         );
-        assert!(!Row::Silliness.idle(&at(Silliness::Serious)));
-        assert!(
-            !Row::Music.idle(&at(Silliness::Serious)),
-            "nothing outside the tab"
+        assert_eq!(
+            Tab::Bonkers.rows()[0],
+            Row::Bonkers,
+            "the switch comes first"
+        );
+        assert!(!Row::Bonkers.idle(&at(false)));
+        assert!(!Row::Music.idle(&at(false)), "nothing outside the tab");
+        assert_eq!(
+            Tab::ALL[0],
+            Tab::Audio,
+            "the page opens on the plain game's"
         );
     }
 

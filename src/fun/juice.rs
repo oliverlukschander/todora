@@ -107,7 +107,7 @@ fn feel(
 }
 
 /// The field of view: the driver's own, and wider the faster the car goes.
-/// When the game stops being silly it is the driver's own again, put back the
+/// When the game stops being Bonkers it is the driver's own again, put back the
 /// once: nothing else writes it unless the setting is changed.
 fn lens(
     fun: Res<Fun>,
@@ -123,7 +123,7 @@ fn lens(
         *halt,
         crate::pause::Halt::Title | crate::pause::Halt::Replay
     );
-    let kick = if fun.silly() && !elsewhere {
+    let kick = if fun.bonkers() && !elsewhere {
         let top = 24.0 * fun.speed.scale();
         let quick = (pose.speed.abs() / top).clamp(0.0, 1.3).powf(1.4);
         (WIDEN * quick + WIDEN_BOOST * boost.strength()) * if fun.calm { 0.35 } else { 1.0 }
@@ -156,7 +156,7 @@ fn shake(
     mut cameras: Query<&mut Transform, With<FollowCam>>,
 ) {
     // The replay and the title place the camera themselves.
-    if halt.stopped() || !fun.silly() {
+    if halt.stopped() || !fun.bonkers() {
         return;
     }
     let dt = time.delta_secs();
@@ -193,7 +193,10 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(crate::settings::Settings::default())
-            .insert_resource(Fun::of(&crate::settings::Settings::default()))
+            .insert_resource(Fun::of(&crate::settings::Settings {
+                bonkers: true,
+                ..crate::settings::Settings::default()
+            }))
             .init_resource::<Pose>()
             .init_resource::<Boost>()
             .init_resource::<crate::pause::Halt>()
@@ -217,7 +220,7 @@ mod tests {
         app.update();
         assert!(fov(&app) > own + 0.1, "the lens did not open at speed");
         // Leaving the fun behind, as F9 does, at speed.
-        app.world_mut().resource_mut::<Fun>().level = super::super::Silliness::Serious;
+        app.world_mut().resource_mut::<Fun>().on = false;
         app.update();
         assert_eq!(fov(&app), own, "the field of view was left wide");
         // And with nothing to undo it does not touch the camera again.
@@ -249,7 +252,7 @@ mod tests {
             .add_message::<Jolt>()
             .init_resource::<Shake>()
             .add_systems(Update, (feel, shake).chain());
-        app.world_mut().resource_mut::<Fun>().level = super::super::Silliness::Silly;
+        app.world_mut().resource_mut::<Fun>().on = true;
         for _ in 0..3 {
             app.world_mut().write_message(Jolt(0.2));
         }

@@ -18,7 +18,15 @@
 //!
 //! **Gravity scales with the speed.** A car `k` times as fast is asked to make
 //! the same jumps in `1/k` of the time, which is `k²` times the gravity. The
-//! shape of a jump in space is then the shape it always was.
+//! shape of a jump in space is then the shape it always was. The road is read
+//! over a distance for the same reason, and not over a number of steps.
+//!
+//! **In the air there is some steering.** No pedals, which have nothing to push
+//! on, and a third of the grip, which is what every arcade racer gives a car in
+//! the air so that a hop on the way into a bend comes down on the road; and a
+//! crest on a bend that grip could not follow is driven over and not left. The
+//! moon makes a flight longer and higher, and leaves no more crests than the
+//! world's gravity would.
 //!
 //! The arithmetic is a plain function of the road and the clock so that it can
 //! be tested against roads made up for the purpose.
@@ -34,12 +42,67 @@ use crate::track::Track;
 pub(crate) const FLOATINESS: f32 = 0.72;
 /// A hop's launch speed, in metres a second at the shipped car's pace.
 const HOP: f32 = 4.4;
-/// Seconds after landing before the next crest can launch.
-const SETTLE: f32 = 0.18;
+/// Metres of road after landing before the next crest can launch: a distance,
+/// like the reading of the road, so that a slow car settles over the same ground
+/// as a fast one and does not bounce from crest to crest.
+const SETTLE: f32 = 7.0;
 /// How long a hop pressed a moment too early is remembered.
 const BUFFER: f32 = 0.16;
 /// A chicken that holds the hop key falls this much more slowly.
 const GLIDE: f32 = 0.32;
+/// Slower than this, in metres a second at the shipped car's pace, and no crest
+/// is steep enough to leave.
+pub(crate) const CREST_FROM: f32 = 4.0;
+/// The pull round a bend, in metres a second squared at the shipped car's pace,
+/// that a car in the air can still follow with the grip it keeps there (see
+/// [`super::tweak::AIR_GRIP`]). A crest with a bend that asks for more on it or
+/// just past it, at the speed the car is going, is driven over and not left: in
+/// the air the car would carry on and the bend would not, and with no brakes up
+/// there either, on the narrow roads where the surveyed hills come just before
+/// the corners, Monaco's above all, that was a car in the wall.
+pub(crate) const FOLLOWS_IN_THE_AIR: f32 = 4.5;
+/// How much road past a crest, in metres, a car that leaves it may come down on,
+/// and so must be able to follow from the air: a distance, because a jump is the
+/// same shape in space at every speed.
+const LOOKS_AHEAD: f32 = 12.0;
+
+/// How much road, in metres, the rise of the road and the change in that rise are
+/// each read over. A distance and not a number of steps: the centreline is
+/// straight between stations 0.4 m apart, and a window of steps is a few
+/// centimetres of road at a walk, which reads every bend between two stations as
+/// a crest. At the shipped speed that was a launch every few seconds on circuits
+/// with no hills at all.
+const READ_RISE_OVER: f32 = 0.6;
+const READ_BEND_OVER: f32 = 1.6;
+
+/// Gravity for a car `k` times as fast as the shipped one, before the moon or a
+/// glide has a say: `k²` times the world's, a little lightened, so that a jump
+/// has the same shape in space at every speed.
+pub(crate) fn gravity(k: f32) -> f32 {
+    9.81 * FLOATINESS * k * k
+}
+
+/// The slowest a car `k` times as fast as the shipped one leaves a crest at,
+/// going `speed` into a bend of `curvature` (see [`bend_ahead`]): [`CREST_FROM`],
+/// or never, on a bend it could not follow from the air.
+pub(crate) fn crest_from(k: f32, speed: f32, curvature: f32) -> f32 {
+    if (speed / k).powi(2) * curvature.abs() > FOLLOWS_IN_THE_AIR {
+        f32::MAX
+    } else {
+        CREST_FROM * k
+    }
+}
+
+/// The sharpest the road bends from `ground` to [`LOOKS_AHEAD`] further on.
+pub(crate) fn bend_ahead(track: &Track, ground: &crate::track::Ground) -> f32 {
+    (0..=6)
+        .map(|i| {
+            track
+                .curvature_ahead(ground, LOOKS_AHEAD * i as f32 / 6.0)
+                .abs()
+        })
+        .fold(0.0, f32::max)
+}
 
 /// The player's car, when it is being driven and not held on the grid.
 type Driven = (With<Player>, Without<crate::countdown::Held>);
@@ -60,7 +123,7 @@ pub(crate) struct Air {
     pub peak: f32,
     /// Hop keys pressed and not yet acted on, as seconds of memory left.
     pub asked: f32,
-    /// Seconds before another launch from a crest.
+    /// Metres before another launch from a crest.
     settle: f32,
     /// The body's height in the world while it flies.
     y: f32,
@@ -151,12 +214,13 @@ impl Air {
                 self.road_vy = raw;
             } else {
                 let accel = (raw - self.road_vy_raw) / dt;
-                self.road_vy += (raw - self.road_vy) * 0.30;
-                self.road_ay += (accel - self.road_ay) * 0.12;
+                let along = speed * dt;
+                self.road_vy += (raw - self.road_vy) * (1.0 - (-along / READ_RISE_OVER).exp());
+                self.road_ay += (accel - self.road_ay) * (1.0 - (-along / READ_BEND_OVER).exp());
             }
             self.road_vy_raw = raw;
         }
-        self.settle = (self.settle - dt).max(0.0);
+        self.settle = (self.settle - speed * dt).max(0.0);
 
         if !self.flying {
             self.height = 0.0;
@@ -242,11 +306,21 @@ fn ask(
     }
 }
 
-/// In the air the driver has nothing to steer with.
+/// What of `controls` reaches a car in the air: the steering, which has the
+/// little grip the air leaves it (see [`super::tweak::AIR_GRIP`]), and not the
+/// pedals or the handbrake, which have nothing to push on until it is down.
+pub(crate) fn aloft(controls: Controls) -> Controls {
+    Controls {
+        steer: controls.steer,
+        ..Controls::default()
+    }
+}
+
+/// In the air the driver has only the steering.
 fn tamper(mut cars: Query<(&mut Controls, &Air), With<Player>>) {
     for (mut controls, air) in &mut cars {
         if air.flying {
-            *controls = Controls::default();
+            *controls = aloft(*controls);
         }
     }
 }
@@ -261,12 +335,14 @@ fn fly(
     pads: Query<&Gamepad>,
     settings: Option<Res<crate::settings::Settings>>,
     moon: Option<Res<super::events::Gravity>>,
+    tweaks: Res<super::tweak::Tweaks>,
     mut cars: Query<(&Transform, &Car, &mut Air), Driven>,
     mut launched: MessageWriter<Launched>,
     mut landed: MessageWriter<Landed>,
 ) {
     let active = fun.bonkers() && crate::local::solo(race);
-    let k = fun.speed.scale();
+    // The speed in force, hyperdrive and all: the same jumps at any speed.
+    let k = tweaks.speed;
     let dt = step_seconds();
     let low = moon.map_or(1.0, |m| m.factor());
     for (at, car, mut air) in &mut cars {
@@ -284,9 +360,19 @@ fn fly(
         // A chicken that keeps hold of the hop key and is on its way down
         // flaps, and does not fall so fast.
         let glide = fun.mount == Mount::Chicken && held && air.flying && air.vy < 0.5;
-        let g = 9.81 * FLOATINESS * k * k * low * if glide { GLIDE } else { 1.0 };
+        // The moon and a glide hold up a car that is flying; whether a crest is
+        // left is judged against the world's gravity, so that on the moon every
+        // jump goes higher and lasts longer and there are no more of them.
+        let g = gravity(k) * if air.flying { low } else { 1.0 } * if glide { GLIDE } else { 1.0 };
         let speed = car.velocity.length();
-        let event = air.step(dt, g, ground.centre.y, at.translation.y, speed, 4.0 * k);
+        let event = air.step(
+            dt,
+            g,
+            ground.centre.y,
+            at.translation.y,
+            speed,
+            crest_from(k, speed, bend_ahead(&track, &ground)),
+        );
         if !air.flying && air.asked > 0.0 {
             // A hop, from the ground.
             air.launch(at.translation.y, HOP * k);
@@ -404,6 +490,20 @@ mod tests {
     }
 
     #[test]
+    fn a_crest_is_left_on_a_straight_and_driven_over_on_a_bend_the_air_cannot_follow() {
+        assert_eq!(crest_from(1.0, 20.0, 0.0), CREST_FROM, "a straight");
+        // A 40 m bend at 20 m/s asks for 10 m/s², which the air does not have.
+        assert_eq!(crest_from(1.0, 20.0, 1.0 / 40.0), f32::MAX);
+        assert_eq!(crest_from(1.0, 20.0, -1.0 / 40.0), f32::MAX, "either way");
+        // The same bend at a crawl, or a gentle one at speed, the air can follow.
+        assert_eq!(crest_from(1.0, 6.0, 1.0 / 40.0), CREST_FROM);
+        assert_eq!(crest_from(1.0, 20.0, 1.0 / 200.0), CREST_FROM);
+        // And the same corner at k times the speed is the same corner.
+        assert_eq!(crest_from(1.5, 30.0, 1.0 / 40.0), f32::MAX);
+        assert_eq!(crest_from(1.5, 9.0, 1.0 / 40.0), CREST_FROM * 1.5);
+    }
+
+    #[test]
     fn a_car_carried_somewhere_else_is_not_a_launch() {
         let mut air = Air::default();
         for i in 0..200 {
@@ -436,7 +536,10 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<ButtonInput<KeyCode>>()
             .insert_resource(crate::pause::Halt::Settings)
-            .insert_resource(Fun::of(&crate::settings::Settings::default()))
+            .insert_resource(Fun::of(&crate::settings::Settings {
+                bonkers: true,
+                ..crate::settings::Settings::default()
+            }))
             .add_systems(Update, ask);
         let car = app.world_mut().spawn((Player, Air::default())).id();
         let asked = |app: &App| app.world().get::<Air>(car).unwrap().asked;

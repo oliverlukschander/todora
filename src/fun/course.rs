@@ -24,6 +24,11 @@ pub(crate) const BEFORE_LINE: f32 = 45.0;
 /// How straight a stretch has to be for a pad to go on it: the largest
 /// curvature, in 1/m, that is allowed anywhere on it.
 const STRAIGHT: f32 = 0.032;
+/// And for a jump pad, from the run-up to well past where the car comes down,
+/// because a car in the air has only a little grip to follow the road with (see
+/// [`super::tweak::AIR_GRIP`]): a radius of 125 m, which is about what that grip
+/// can follow at full speed.
+const STRAIGHT_FOR_A_JUMP: f32 = 0.008;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PadKind {
@@ -148,9 +153,9 @@ pub(crate) fn plan(track: &Track) -> Course {
     // Pads first, because they need the straightest ground.
     let boosts = ((lap / 260.0).round() as usize).clamp(2, 8);
     let jumps = ((lap / 560.0).round() as usize).clamp(1, 3);
-    for (kind, count, before, after) in [
-        (PadKind::Jump, jumps, 24.0, 85.0),
-        (PadKind::Boost, boosts, 18.0, 42.0),
+    for (kind, count, before, after, straight) in [
+        (PadKind::Jump, jumps, 24.0, 85.0, STRAIGHT_FOR_A_JUMP),
+        (PadKind::Boost, boosts, 18.0, 42.0, STRAIGHT),
     ] {
         for slot in 0..count {
             // The straightest place near where this slot would put it.
@@ -166,7 +171,7 @@ pub(crate) fn plan(track: &Track) -> Course {
                     continue;
                 }
                 let bend = worst_bend(track, s - before, s + after);
-                if bend > STRAIGHT {
+                if bend > straight {
                     continue;
                 }
                 if best.is_none_or(|(b, _)| bend < b) {
@@ -395,7 +400,7 @@ pub(super) fn plugin(app: &mut App) {
 /// Plan the course for the circuit in hand, once per circuit and wildness.
 fn replan(fun: Res<super::Fun>, track: Res<Track>, mut layout: ResMut<Layout>) {
     let want = fun
-        .silly()
+        .bonkers()
         .then(|| (track.circuit().id.to_string(), track.wild_used()));
     let have = layout
         .made_for
@@ -553,6 +558,14 @@ mod tests {
             for pad in &course.pads {
                 let bend = worst_bend(track, pad.s - 18.0, pad.s + 42.0);
                 assert!(bend <= STRAIGHT + 1e-4, "{name}: a pad on a bend of {bend}");
+                // A jump comes down on a road it can follow from the air.
+                if pad.kind == PadKind::Jump {
+                    let bend = worst_bend(track, pad.s - 24.0, pad.s + 85.0);
+                    assert!(
+                        bend <= STRAIGHT_FOR_A_JUMP + 1e-4,
+                        "{name}: a jump that comes down on a bend of {bend}"
+                    );
+                }
             }
             let mut spots: Vec<f32> = course.pads.iter().map(|p| p.s).collect();
             spots.sort_by(f32::total_cmp);

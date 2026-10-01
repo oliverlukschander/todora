@@ -19,6 +19,7 @@
 
 use bevy::{ecs::system::SystemParam, prelude::*};
 
+use super::Fun;
 use super::air::Air;
 use super::announcer::{Announce, Points};
 use super::course::{Layout, ManSpot, PropKind, PropSpot};
@@ -26,7 +27,6 @@ use super::juice::Jolt;
 use super::particles::{Burst, Kind, Tint};
 use super::parts::{Kit, PARTY, Shape, add, add_turned, rainbow};
 use super::rng::Rng;
-use super::{Fun, Silliness};
 use crate::car::{Car, Player, level};
 use crate::lap::LapFinished;
 use crate::sound::{Sfx, SfxKind};
@@ -84,10 +84,10 @@ struct Wave {
 #[derive(Resource, Default)]
 struct Alley(Vec<(u16, u8, f32)>);
 
-/// What the props were last built for: the course, whether the game was silly
-/// enough for props or only for scenery, and how many props that put on the road.
+/// What the props were last built for: the course, and how many props that put
+/// on the road.
 #[derive(Resource, Default)]
-struct Built(u32, bool, usize);
+struct Built(u32, usize);
 
 /// A cow that fell out of the sky. It is on the road for a while and not for good:
 /// there is nothing else to take it off, and a game that is left running would
@@ -109,8 +109,8 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                (build, rebuild_on_lap).chain().run_if(super::silly),
-                clear.run_if(not(super::silly)),
+                (build, rebuild_on_lap).chain().run_if(super::bonkers),
+                clear.run_if(not(super::bonkers)),
                 (rain, retire_rain, fly).chain().run_if(super::bonkers),
                 sway,
             )
@@ -124,7 +124,6 @@ pub(super) fn plugin(app: &mut App) {
 fn build(
     mut commands: Commands,
     layout: Res<Layout>,
-    fun: Res<Fun>,
     track: Res<Track>,
     kit: Option<ResMut<Kit>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -135,36 +134,25 @@ fn build(
     let Some(mut kit) = kit else {
         return;
     };
-    let bonkers = fun.level >= Silliness::Bonkers;
-    if built.0 == layout.edition && built.1 == bonkers {
+    if built.0 == layout.edition {
         return;
     }
-    *built = Built(
-        layout.edition,
-        bonkers,
-        if bonkers {
-            layout.course.props.len()
-        } else {
-            0
-        },
-    );
+    *built = Built(layout.edition, layout.course.props.len());
     alley.0.clear();
     for entity in &old {
         commands.entity(entity).despawn();
     }
     let mut rng = Rng::of(track.circuit().id, 0x9A_11);
-    if bonkers {
-        for spot in &layout.course.props {
-            spawn_prop(
-                &mut commands,
-                &mut kit,
-                &mut materials,
-                &track,
-                spot,
-                &mut rng,
-                None,
-            );
-        }
+    for spot in &layout.course.props {
+        spawn_prop(
+            &mut commands,
+            &mut kit,
+            &mut materials,
+            &track,
+            spot,
+            &mut rng,
+            None,
+        );
     }
     for man in &layout.course.men {
         spawn_man(&mut commands, &mut kit, &mut materials, &track, man);
@@ -181,7 +169,7 @@ type Striker = (With<Player>, Without<Prop>);
 /// Everything this module put on the road.
 type Scenery = Or<(With<Prop>, With<TubeMan>)>;
 
-/// A game that is not silly has none of this on the road.
+/// The plain game has none of this on the road.
 fn clear(mut commands: Commands, mut built: ResMut<Built>, old: Query<Entity, Scenery>) {
     if old.is_empty() {
         built.0 = 0;
@@ -208,7 +196,7 @@ fn rebuild_on_lap(
             .filter(|(prop, rained)| !rained && matches!(prop.state, State::Standing))
             .count();
         let rained = props.iter().any(|(_, rained)| rained);
-        if standing != built.2 || rained {
+        if standing != built.1 || rained {
             built.0 = 0;
         }
     }
@@ -1274,7 +1262,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<LapFinished>()
             .add_message::<crate::Reset>()
-            .insert_resource(Built(7, true, 3))
+            .insert_resource(Built(7, 3))
             .add_systems(Update, rebuild_on_lap);
         let mut ids = Vec::new();
         for i in 0..3 {
@@ -1290,7 +1278,7 @@ mod tests {
         app.update();
         assert_eq!(app.world().resource::<Built>().0, 0, "one was");
         // A cow that fell out of the sky is not part of what was built either.
-        app.insert_resource(Built(8, true, 2));
+        app.insert_resource(Built(8, 2));
         app.update();
         assert_eq!(app.world().resource::<Built>().0, 8);
         let (prop, at) = standing(PropKind::Cow, Vec3::new(9.0, 0.0, 0.0));

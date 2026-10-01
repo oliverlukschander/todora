@@ -28,7 +28,7 @@ pub(crate) use page::{Page, PageSet};
 
 /// Bumped when a field changes meaning; [`Settings::migrate`] then says how
 /// to read the old one.
-pub(crate) const VERSION: u32 = 2;
+pub(crate) const VERSION: u32 = 3;
 const FILE: &str = "settings.json";
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -139,9 +139,11 @@ pub(crate) struct Settings {
     pub rumble: bool,
     /// Which key and pad button does what; added in version 2.
     pub bindings: bindings::Bindings,
-    // Fun. See [`crate::fun`]: the silliness says how much of the rest may
-    // happen, and the rows below it say which.
-    pub silliness: crate::fun::Silliness,
+    // Bonkers mode. See [`crate::fun`]: whether it is what is being played, which
+    // is chosen on the title and never saved, so the game always opens on the
+    // plain one; and what it is like, which is.
+    #[serde(skip)]
+    pub bonkers: bool,
     pub mount: crate::fun::Mount,
     pub hat: crate::fun::Hat,
     pub googly_eyes: bool,
@@ -219,7 +221,7 @@ impl Default for Settings {
             deadzone: 0.12,
             rumble: true,
             bindings: bindings::Bindings::default(),
-            silliness: crate::fun::Silliness::default(),
+            bonkers: false,
             mount: crate::fun::Mount::default(),
             hat: crate::fun::Hat::default(),
             googly_eyes: true,
@@ -262,11 +264,16 @@ impl Settings {
     }
 
     /// Bring a file written by an older version up to this one. Version 1 had
-    /// no key bindings, which the defaults fill in; a change of meaning goes in
-    /// here as a match arm.
+    /// no key bindings, which the defaults fill in. Version 2's Bonkers speeds
+    /// went to 3.6 times the shipped car's, which nobody could steer, and the
+    /// same names are much slower now: a file that chose one of those starts again
+    /// from the default. A change of meaning goes in here as a match arm.
     fn migrate(mut self) -> Self {
         if self.version < 2 {
             self.bindings = bindings::Bindings::default();
+        }
+        if self.version < 3 {
+            self.speed = crate::fun::Speed::default();
         }
         self.version = VERSION;
         self

@@ -1,4 +1,4 @@
-//! The words of the fun layer, in English, German, French, Spanish and Italian.
+//! The words of Bonkers mode, in English, German, French, Spanish and Italian.
 //!
 //! Key, then the five languages in that order, exactly like [`super::TABLE`]:
 //! the same tests hold both to a string in every language, the same holes in
@@ -8,9 +8,12 @@ use super::Entry;
 
 #[rustfmt::skip]
 pub(super) const FUN: &[Entry] = &[
-    // The settings page.
-    ("tab.fun", ["Fun", "Spaß", "Folie", "Locura", "Follia"]),
-    ("row.silliness", ["Silliness", "Albernheit", "Niveau de folie", "Nivel de locura", "Livello di follia"]),
+    // The title, the settings page and F9.
+    ("title.bonkers", ["Bonkers mode", "Verrückter Modus", "Mode dingue", "Modo loco", "Modalità folle"]),
+    ("tab.bonkers", ["Bonkers", "Verrückt", "Dingue", "Locura", "Follia"]),
+    ("row.bonkers", ["Bonkers mode", "Verrückter Modus", "Mode dingue", "Modo loco", "Modalità folle"]),
+    ("fun.on", ["BONKERS MODE!", "VERRÜCKTER MODUS!", "MODE DINGUE !", "¡MODO LOCO!", "MODALITÀ FOLLE!"]),
+    ("fun.off", ["Normal mode", "Normaler Modus", "Mode normal", "Modo normal", "Modalità normale"]),
     ("row.mount", ["Ride", "Reittier", "Monture", "Montura", "Cavalcatura"]),
     ("row.hat", ["Hat", "Hut", "Chapeau", "Sombrero", "Cappello"]),
     ("row.eyes", ["Googly eyes", "Wackelaugen", "Yeux mobiles", "Ojos saltones", "Occhi mobili"]),
@@ -19,10 +22,6 @@ pub(super) const FUN: &[Entry] = &[
     ("row.neon", ["Neon", "Neon", "Néon", "Neón", "Neon"]),
     ("row.techno", ["Techno", "Techno", "Techno", "Techno", "Techno"]),
     ("row.chaos", ["Chaos events", "Chaos-Ereignisse", "Événements chaos", "Eventos de caos", "Eventi caos"]),
-    ("fun.now", ["Silliness: {}", "Albernheit: {}", "Niveau de folie : {}", "Nivel de locura: {}", "Livello di follia: {}"]),
-    ("fun.serious", ["Serious", "Ernst", "Sérieux", "Serio", "Serio"]),
-    ("fun.silly", ["Silly", "Albern", "Rigolo", "Payaso", "Buffo"]),
-    ("fun.bonkers", ["Bonkers", "Verrückt", "Dingue", "Loco", "Folle"]),
     ("mount.car", ["Car", "Auto", "Voiture", "Coche", "Auto"]),
     ("mount.chicken", ["Chicken", "Huhn", "Poulet", "Gallina", "Gallina"]),
     ("mount.duck", ["Rubber duck", "Quietscheente", "Canard en plastique", "Patito de goma", "Paperella di gomma"]),
@@ -47,7 +46,7 @@ pub(super) const FUN: &[Entry] = &[
     ("wild.absurd", ["Absurd", "Absurd", "Absurde", "Absurdo", "Assurdo"]),
     ("hud.bonkers", ["BONKERS LAP  ·  FOR GLORY", "VERRÜCKTE RUNDE  ·  FÜR DEN RUHM", "TOUR DINGUE  ·  POUR LA GLOIRE", "VUELTA LOCA  ·  POR LA GLORIA", "GIRO FOLLE  ·  PER LA GLORIA"]),
     ("card.bonkers", ["BONKERS!", "VERRÜCKT!", "DINGUE !", "¡LOCURA!", "FOLLE!"]),
-    ("card.bonkers_why", ["For glory only. Silly and Serious laps count.", "Nur für den Ruhm. Gezählt wird in Albern und Ernst.", "Pour la gloire. Rigolo et Sérieux comptent.", "Por la gloria. En Payaso y Serio sí cuentan.", "Per la gloria. Buffo e Serio contano."]),
+    ("card.bonkers_why", ["For glory only. Laps count in normal mode.", "Nur für den Ruhm. Gezählt wird im normalen Modus.", "Pour la gloire. Les tours comptent en mode normal.", "Por la gloria. En modo normal, las vueltas cuentan.", "Per la gloria. I giri contano in modalità normale."]),
     ("radio.techno", ["techno", "Techno", "techno", "techno", "techno"]),
     // The announcer and the score.
     ("score.label", ["FUN SCORE", "SPASS-PUNKTE", "POINTS DE FUN", "PUNTOS DE DIVERSIÓN", "PUNTI DIVERTIMENTO"]),
@@ -81,7 +80,6 @@ pub(super) const FUN: &[Entry] = &[
     ("fx.moon", ["MOON GRAVITY!", "MONDSCHWERKRAFT!", "GRAVITÉ LUNAIRE !", "¡GRAVEDAD LUNAR!", "GRAVITÀ LUNARE!"]),
     ("fx.ice", ["ICE RINK!", "EISBAHN!", "PATINOIRE !", "¡PISTA DE HIELO!", "PISTA DI GHIACCIO!"]),
     ("fx.turbo", ["TURBO TIME!", "TURBO-ZEIT!", "HEURE DU TURBO !", "¡HORA DEL TURBO!", "ORA DEL TURBO!"]),
-    ("fx.swapped", ["STEERING SWAPPED!", "LENKUNG VERTAUSCHT!", "DIRECTION INVERSÉE !", "¡DIRECCIÓN INVERTIDA!", "STERZO INVERTITO!"]),
     ("fx.giant", ["GIANT MODE!", "RIESEN-MODUS!", "MODE GÉANT !", "¡MODO GIGANTE!", "MODALITÀ GIGANTE!"]),
     ("fx.tiny", ["TINY MODE!", "MINI-MODUS!", "MODE MINUSCULE !", "¡MODO DIMINUTO!", "MODALITÀ MINI!"]),
     ("fx.cows", ["IT'S RAINING COWS!", "ES REGNET KÜHE!", "IL PLEUT DES VACHES !", "¡LLUEVEN VACAS!", "PIOVONO MUCCHE!"]),
@@ -106,7 +104,7 @@ pub(super) const FUN: &[Entry] = &[
     ("quip.title.10", ["Made with love and one (1) rooster.", "Mit Liebe gemacht und einem (1) Hahn.", "Fait avec amour et un (1) coq.", "Hecho con cariño y un (1) gallo.", "Fatto con amore e un (1) gallo."]),
     ("quip.title.11", ["Do not feed the tube-men.", "Bitte die Schlauchmänner nicht füttern.", "Ne pas nourrir les bonshommes gonflables.", "No alimentes a los muñecos hinchables.", "Non nutrire gli omini gonfiabili."]),
     ("quip.title.12", ["Warning: contains techno.", "Achtung: enthält Techno.", "Attention : contient de la techno.", "Aviso: contiene techno.", "Attenzione: contiene techno."]),
-    ("quip.title.13", ["Serious mode is in Settings. If you must.", "Der Ernst-Modus steckt in den Einstellungen. Wenn es sein muss.", "Le mode sérieux est dans les Réglages. Si vous y tenez.", "El modo serio está en Ajustes. Si te empeñas.", "La modalità seria è nelle Impostazioni. Se proprio devi."]),
+    ("quip.title.13", ["Normal mode is one button up. If you must.", "Der normale Modus ist einen Knopf weiter oben. Wenn es sein muss.", "Le mode normal est juste au-dessus. Si vous y tenez.", "El modo normal está justo encima. Si te empeñas.", "La modalità normale è un pulsante più su. Se proprio devi."]),
     ("quip.pause.0", ["Take a breather. The cows can wait.", "Verschnauf mal. Die Kühe warten.", "Reprenez votre souffle. Les vaches peuvent attendre.", "Tómate un respiro. Las vacas pueden esperar.", "Prenditi una pausa. Le mucche possono aspettare."]),
     ("quip.pause.1", ["Paused. The chicken is judging you.", "Pause. Das Huhn beurteilt dich.", "En pause. Le poulet vous juge.", "Pausa. La gallina te está juzgando.", "In pausa. La gallina ti sta giudicando."]),
     ("quip.pause.2", ["Have a snack. The ducks will hold your place.", "Gönn dir einen Snack. Die Enten halten deinen Platz.", "Prenez un en-cas. Les canards gardent votre place.", "Come algo. Los patos te guardan el sitio.", "Fatti uno spuntino. Le papere ti tengono il posto."]),
@@ -133,11 +131,9 @@ pub(super) const FUN: &[Entry] = &[
     ("quip.load.13", ["Sharpening the lasers…", "Laser werden geschärft…", "On aiguise les lasers…", "Afilando los láseres…", "Affilo i laser…"]),
     ("quip.load.14", ["Consulting the cows…", "Die Kühe werden befragt…", "On consulte les vaches…", "Consultando a las vacas…", "Consulto le mucche…"]),
     ("quip.load.15", ["Removing the brakes… just kidding.", "Bremsen werden ausgebaut… War ein Scherz.", "Retrait des freins… je plaisante.", "Quitando los frenos… es broma.", "Rimuovo i freni… scherzavo."]),
-    ("hud.edition_bonkers", ["TODORA  /  BONKERS EDITION", "TODORA  /  VERRÜCKTE EDITION", "TODORA  /  ÉDITION DINGUE", "TODORA  /  EDICIÓN LOCA", "TODORA  /  EDIZIONE FOLLE"]),
-    ("hud.edition_silly", ["TODORA  /  SILLY MODE", "TODORA  /  ALBERNER MODUS", "TODORA  /  MODE RIGOLO", "TODORA  /  MODO PAYASO", "TODORA  /  MODALITÀ BUFFA"]),
-    ("title.sticker", ["BONKERS EDITION!", "VERRÜCKTE EDITION!", "ÉDITION DINGUE !", "¡EDICIÓN LOCA!", "EDIZIONE FOLLE!"]),
-    ("hud.fun_keys", ["H  Honk    E  Hop", "H  Hupe    E  Hopser", "H  Klaxon    E  Saut", "H  Claxon    E  Salto", "H  Clacson    E  Saltello"]),
-    ("hud.fun_keys_silly", ["H  Honk", "H  Hupe", "H  Klaxon", "H  Claxon", "H  Clacson"]),
+    ("hud.edition_bonkers", ["TODORA  /  BONKERS MODE", "TODORA  /  VERRÜCKTER MODUS", "TODORA  /  MODE DINGUE", "TODORA  /  MODO LOCO", "TODORA  /  MODALITÀ FOLLE"]),
+    ("title.sticker", ["BONKERS MODE!", "VERRÜCKTER MODUS!", "MODE DINGUE !", "¡MODO LOCO!", "MODALITÀ FOLLE!"]),
+    ("hud.fun_keys", ["H  Honk    E  Hop    F9  Normal mode", "H  Hupe    E  Hopser    F9  Normaler Modus", "H  Klaxon    E  Saut    F9  Mode normal", "H  Claxon    E  Salto    F9  Modo normal", "H  Clacson    E  Saltello    F9  Modalità normale"]),
     // The controls.
     ("act.horn", ["Horn", "Hupe", "Klaxon", "Claxon", "Clacson"]),
     ("act.hop", ["Hop", "Hopser", "Saut", "Salto", "Saltello"]),

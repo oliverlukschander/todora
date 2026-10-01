@@ -1,11 +1,14 @@
 //! The title screen the game opens on, and the fade that covers a change of
 //! circuit.
 //!
-//! Over a slow orbit of the circuit last driven: **Drive**, **Circuits**,
-//! **World leaderboard**, **This week's challenge**, **Settings** and **Quit**,
-//! chosen like the pause menu. The world is stopped behind it, so the countdown
-//! and the first-drive cards wait for Drive. Settings and the leaderboard come
-//! back here rather than to the pause. Visual checks skip it.
+//! Over a slow orbit of the circuit last driven: **Drive**, **Bonkers mode**,
+//! **Circuits**, **World leaderboard**, **This week's challenge**, **Settings**
+//! and **Quit**, chosen like the pause menu. Drive is the game; Bonkers mode is
+//! the second way to play it (see [`crate::fun`]), and while it is the one chosen
+//! the logo and the tagline show what it is like. The world is stopped behind
+//! it, so the countdown and the first-drive cards wait for Drive. Settings and
+//! the leaderboard come back here rather than to the pause. Visual checks skip
+//! it.
 //!
 //! A change of circuit fades in from black over a third of a second, so the
 //! frame the new circuit is built on never shows half of it.
@@ -24,6 +27,7 @@ const ORBIT: f32 = 90.0;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Choice {
     Drive,
+    Bonkers,
     Circuits,
     Board,
     Weekly,
@@ -34,8 +38,9 @@ pub(crate) enum Choice {
 }
 
 impl Choice {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::Drive,
+        Self::Bonkers,
         Self::Circuits,
         Self::Board,
         Self::Weekly,
@@ -48,6 +53,7 @@ impl Choice {
     fn key(self) -> &'static str {
         match self {
             Self::Drive => "title.drive",
+            Self::Bonkers => "title.bonkers",
             Self::Circuits => "title.circuits",
             Self::Board => "title.board",
             Self::Weekly => "title.weekly",
@@ -78,6 +84,18 @@ impl Title {
         } else {
             Halt::Pause
         }
+    }
+
+    /// Put the choice on the `at`th button, for a visual check.
+    #[cfg(feature = "visual-check")]
+    pub(crate) fn point_at(&mut self, at: usize) {
+        self.at = at.min(Choice::ALL.len() - 1);
+    }
+
+    /// Whether the title is up with Bonkers mode the one chosen on it, which is
+    /// when it shows what Bonkers is like before it is driven.
+    pub(crate) fn tempting(title: Option<&Self>, halt: Halt) -> bool {
+        halt == Halt::Title && title.is_some_and(|t| Choice::ALL[t.at] == Choice::Bonkers)
     }
 }
 
@@ -168,37 +186,44 @@ fn setup(mut commands: Commands) {
             Visibility::Hidden,
         ))
         .with_children(|panel| {
-            panel.spawn((
-                crate::fun::quips::Logo,
-                UiTransform::default(),
-                label("TODORA", 72.0, TEXT),
-            ));
-            // A sticker, for editions that are not the plain one.
             panel
-                .spawn((
-                    crate::fun::quips::Sticker,
-                    UiTransform::default(),
-                    Node {
-                        display: Display::None,
-                        margin: UiRect::new(px(4), px(0), px(-6), px(6)),
-                        align_self: AlignSelf::FlexStart,
-                        padding: UiRect::axes(px(12), px(4)),
-                        border_radius: BorderRadius::all(px(6)),
-                        ..default()
-                    },
-                    BackgroundColor(crate::ui::ACCENT),
-                ))
-                .with_children(|sticker| {
-                    sticker.spawn((
-                        Text::new(crate::text::t("title.sticker")),
-                        crate::text::Tr("title.sticker"),
-                        TextFont {
-                            font_size: FontSize::Px(20.0),
-                            weight: FontWeight::BLACK,
+                .spawn(Node {
+                    align_items: AlignItems::Center,
+                    column_gap: px(16),
+                    ..default()
+                })
+                .with_children(|top| {
+                    top.spawn((
+                        crate::fun::quips::Logo,
+                        UiTransform::default(),
+                        label("TODORA", 72.0, TEXT),
+                    ));
+                    // A sticker for Bonkers mode, beside the logo and not under it,
+                    // so that its coming and going as the choice moves on and off
+                    // Bonkers moves nothing else.
+                    top.spawn((
+                        crate::fun::quips::Sticker,
+                        UiTransform::default(),
+                        Node {
+                            display: Display::None,
+                            padding: UiRect::axes(px(12), px(4)),
+                            border_radius: BorderRadius::all(px(6)),
                             ..default()
                         },
-                        TextColor(crate::ui::SURFACE),
-                    ));
+                        BackgroundColor(crate::ui::ACCENT),
+                    ))
+                    .with_children(|sticker| {
+                        sticker.spawn((
+                            Text::new(crate::text::t("title.sticker")),
+                            crate::text::Tr("title.sticker"),
+                            TextFont {
+                                font_size: FontSize::Px(20.0),
+                                weight: FontWeight::BLACK,
+                                ..default()
+                            },
+                            TextColor(crate::ui::SURFACE),
+                        ));
+                    });
                 });
             panel.spawn((
                 Subtitle,
@@ -223,7 +248,13 @@ fn setup(mut commands: Commands) {
                         BorderColor::all(LINE),
                     ))
                     .with_children(|button| {
-                        button.spawn(crate::text::label(choice.key(), 22.0, TEXT));
+                        // Bonkers in its purple, the colour its laps are shown in.
+                        let colour = if *choice == Choice::Bonkers {
+                            crate::ui::Palette::STANDARD.purple
+                        } else {
+                            TEXT
+                        };
+                        button.spawn(crate::text::label(choice.key(), 22.0, colour));
                     });
             }
             panel.spawn((
@@ -250,6 +281,7 @@ fn choose(
     mut exit: MessageWriter<AppExit>,
     mut profiles: MessageWriter<crate::online::profile::OpenProfile>,
     mut local: MessageWriter<crate::local::OpenLocal>,
+    settings: Option<ResMut<crate::settings::Settings>>,
 ) {
     // Back from a page opened here, or on the way out to the road.
     if *halt == Halt::Nothing || *halt == Halt::Pause {
@@ -272,8 +304,17 @@ fn choose(
         return;
     }
     match Choice::ALL[title.at] {
+        // In whichever mode the game is in, which is the plain one unless
+        // Bonkers was switched on from the settings page here.
         Choice::Drive => {
             title.active = false;
+            *halt = Halt::Nothing;
+        }
+        Choice::Bonkers => {
+            title.active = false;
+            if let Some(mut settings) = settings {
+                settings.bonkers = true;
+            }
             *halt = Halt::Nothing;
         }
         Choice::Circuits => {
@@ -282,11 +323,15 @@ fn choose(
             menus.write(crate::menu::OpenMenu(crate::menu::Page::Circuit));
         }
         Choice::Board => *halt = Halt::Board,
+        // A challenge is for laps that count.
         Choice::Weekly => {
             title.active = false;
             if let Some(challenge) = challenge {
                 go.write(crate::track::GoTo(challenge.circuit()));
                 mode.set_if_neq(crate::car::Mode::Regular);
+            }
+            if let Some(mut settings) = settings {
+                settings.bonkers = false;
             }
             *halt = Halt::Nothing;
         }
@@ -407,12 +452,14 @@ fn draw(
         return;
     }
     let circuits = crate::track::all_circuits().len();
-    // A different tagline each time the game is opened, and the plain one when
-    // it is not that kind of game.
+    // A different joke each time the game is opened, while Bonkers is chosen,
+    // and the plain tagline otherwise.
     let pick = *tagline
         .get_or_insert_with(|| crate::fun::rng::Rng::random().below(crate::fun::quips::TITLE));
+    let bonkers =
+        fun.as_ref().is_some_and(|fun| fun.bonkers()) || Title::tempting(Some(&*title), *halt);
     for mut subtitle in &mut subtitles {
-        let words = if fun.as_ref().is_some_and(|fun| fun.silly()) {
+        let words = if bonkers {
             crate::fun::quips::tagline(circuits, pick)
         } else {
             crate::text::tf("title.subtitle", &[&circuits])
@@ -464,6 +511,7 @@ mod tests {
                 ..default()
             })
             .init_resource::<crate::car::Mode>()
+            .init_resource::<crate::settings::Settings>()
             .add_message::<crate::menu::OpenMenu>()
             .add_message::<crate::track::GoTo>()
             .add_message::<AppExit>()
@@ -491,7 +539,7 @@ mod tests {
             Title::back_to(Some(app.world().resource::<Title>())),
             Halt::Title
         );
-        for _ in 0..4 {
+        for _ in 0..5 {
             tap(&mut app, KeyCode::ArrowDown);
         }
         tap(&mut app, KeyCode::Enter);
@@ -502,7 +550,7 @@ mod tests {
         );
         *app.world_mut().resource_mut::<Halt>() = Halt::Title;
         app.update();
-        for _ in 0..4 {
+        for _ in 0..5 {
             tap(&mut app, KeyCode::ArrowUp);
         }
         tap(&mut app, KeyCode::Enter);
@@ -512,5 +560,41 @@ mod tests {
             Title::back_to(Some(app.world().resource::<Title>())),
             Halt::Pause
         );
+        assert!(
+            !app.world().resource::<crate::settings::Settings>().bonkers,
+            "Drive is the game as it shipped"
+        );
+    }
+
+    #[test]
+    fn bonkers_is_the_second_way_to_play_and_the_title_shows_it_while_it_is_chosen() {
+        let mut app = app();
+        let tempting = |app: &App| {
+            Title::tempting(
+                Some(app.world().resource::<Title>()),
+                *app.world().resource::<Halt>(),
+            )
+        };
+        assert!(!tempting(&app), "Drive is chosen first");
+        tap(&mut app, KeyCode::ArrowDown);
+        assert!(tempting(&app), "the next is Bonkers");
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(*app.world().resource::<Halt>(), Halt::Nothing);
+        assert!(app.world().resource::<crate::settings::Settings>().bonkers);
+        assert!(!tempting(&app), "and the title has gone");
+    }
+
+    #[test]
+    fn the_weekly_challenge_is_driven_for_laps_that_count() {
+        let mut app = app();
+        app.world_mut()
+            .resource_mut::<crate::settings::Settings>()
+            .bonkers = true;
+        for _ in 0..4 {
+            tap(&mut app, KeyCode::ArrowDown);
+        }
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(*app.world().resource::<Halt>(), Halt::Nothing);
+        assert!(!app.world().resource::<crate::settings::Settings>().bonkers);
     }
 }

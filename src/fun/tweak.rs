@@ -21,6 +21,13 @@ use super::Fun;
 use super::air::Air;
 use crate::car::{DriveSet, Handling, Player};
 
+/// How much of its grip a car keeps in the air. None, in life. In Bonkers some,
+/// the way every arcade racer has it, so that a hop on the way into a bend lands
+/// on the road and not beside it: with none, a car that left a crest went
+/// wherever it was pointing until it came down, and the hills sent it off into
+/// the grass more often than not.
+pub(crate) const AIR_GRIP: f32 = 0.35;
+
 /// What is being changed about the handling this step.
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Tweaks {
@@ -48,6 +55,26 @@ impl Tweaks {
         *self == Self::NEUTRAL
     }
 
+    /// What Bonkers asks of the handling at `speed`: a boost of strength `push`,
+    /// ice and hyperdrive at strengths `ice` and `hyper`, each 0 to 1, and
+    /// whether the car is in the air. The one place these are worked out, so that
+    /// what the game drives and what the tests drive are the same.
+    ///
+    /// Ice leaves a little over half the grip and hyperdrive adds a fifth to the
+    /// speed. Each was more, and each was a few seconds of not being able to
+    /// steer: ice at three tenths of the grip is a car that cannot take a
+    /// corner at any speed worth driving, and hyperdrive at a third more was
+    /// faster than every speed the settings offer.
+    pub(crate) fn bonkers(speed: f32, push: f32, ice: f32, hyper: f32, airborne: bool) -> Self {
+        Self {
+            speed: speed * (1.0 + 0.2 * hyper),
+            grip: 1.0 - 0.45 * ice,
+            power: 1.0 + 1.4 * push,
+            top: 1.0 + 0.5 * push,
+            airborne,
+        }
+    }
+
     /// `handling` as it is to be driven this step.
     pub(crate) fn apply(&self, handling: &Handling) -> Handling {
         if self.is_neutral() {
@@ -73,10 +100,11 @@ impl Tweaks {
         h.off_road_drag *= k;
         // Downforce and drag are per speed squared, which already scales.
         if self.airborne {
-            // Nothing to push against: the car goes where it was going, and
-            // slows only as the air slows it.
-            h.grip *= 0.05;
-            h.downforce *= 0.05;
+            // Nothing for the engine or the brakes to push against, so the car
+            // slows only as the air slows it; and a little of the grip, which is
+            // what the steering is left with.
+            h.grip *= AIR_GRIP;
+            h.downforce *= AIR_GRIP;
             h.accel = 0.0;
             h.brake = 0.0;
             h.engine_braking = 0.0;
@@ -145,20 +173,19 @@ fn resolve(
     mut tweaks: ResMut<Tweaks>,
 ) {
     let wanted = if fun.bonkers() && crate::local::solo(race) {
-        let push = boost.strength();
         let (ice, hyper) = chaos.as_ref().map_or((0.0, 0.0), |c| {
             (
                 c.strength(super::events::Effect::Ice),
                 c.strength(super::events::Effect::Hyper),
             )
         });
-        Tweaks {
-            speed: fun.speed.scale() * (1.0 + 0.3 * hyper),
-            grip: 1.0 - 0.7 * ice,
-            power: 1.0 + 1.4 * push,
-            top: 1.0 + 0.5 * push,
-            airborne: cars.iter().any(|air| air.flying),
-        }
+        Tweaks::bonkers(
+            fun.speed.scale(),
+            boost.strength(),
+            ice,
+            hyper,
+            cars.iter().any(|air| air.flying),
+        )
     } else {
         Tweaks::NEUTRAL
     };
@@ -225,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn the_air_has_nothing_to_push_against() {
+    fn the_air_has_nothing_to_push_against_and_a_little_to_steer_with() {
         let stock = Handling::SHOOTING_BRAKE;
         let flying = Tweaks {
             airborne: true,
@@ -236,7 +263,8 @@ mod tests {
             (flying.accel, flying.brake, flying.engine_braking),
             (0.0, 0.0, 0.0)
         );
-        assert!(flying.grip < stock.grip * 0.1);
+        assert_eq!(flying.grip, stock.grip * AIR_GRIP);
+        assert!(flying.grip < stock.grip * 0.5, "it is not the road");
         assert_eq!(flying.drag, stock.drag, "the air still slows a car");
     }
 
@@ -287,20 +315,20 @@ mod tests {
     ///
     /// The one place it is not asked for is the shipped speed on a hilly road,
     /// which is the shipped car on a hill it was never built for. There the
-    /// plain AI, which cannot see a crest coming, goes wide off the road where it
-    /// drops away (the engine's own test of a tyre being on the road looks at how
-    /// far the wheel is from the surface, and a fall of more than half a metre
-    /// under a wheel is not touching it) or stalls on the steepest of the climbs
-    /// and is rescued. Three of the hundred and fifty-three did, when this was
-    /// written. It is not a problem to a person: a lap of a hilly road is a
-    /// Bonkers lap, and no Bonkers lap counts.
+    /// plain AI, which cannot see a crest coming, can go wide off the road where
+    /// it drops away (the engine's own test of a tyre being on the road looks at
+    /// how far the wheel is from the surface, and a fall of more than half a
+    /// metre under a wheel is not touching it) or stall on the steepest of the
+    /// climbs and be rescued. It is not a problem to a person: a lap of a hilly
+    /// road is a Bonkers lap, and no Bonkers lap counts.
     #[test]
     fn every_circuit_can_be_lapped_at_every_speed_and_wildness() {
-        const SPEEDS: [f32; 4] = [1.0, 1.6, 2.4, 3.6];
+        let speeds: Vec<f32> = super::super::Speed::ALL.iter().map(|s| s.scale()).collect();
         let circuits = crate::track::all_circuits();
         let mut rows = Vec::new();
         let mut bad = Vec::new();
         std::thread::scope(|scope| {
+            let speeds = &speeds;
             let handles: Vec<_> = circuits
                 .chunks(4)
                 .map(|some| {
@@ -310,14 +338,14 @@ mod tests {
                             for wild in 0..=3u8 {
                                 let track = Track::with_wild(circuit, wild);
                                 let times: Vec<Option<f32>> =
-                                    SPEEDS.iter().map(|k| lap(&track, *k)).collect();
+                                    speeds.iter().map(|k| lap(&track, *k)).collect();
                                 let cells: String = times
                                     .iter()
                                     .map(|t| t.map_or("   none".into(), |t| format!("{t:7.1}")))
                                     .collect();
                                 rows.push(format!("{:>24} w{wild}  {cells}", circuit.id));
                                 let mut before: Option<(f32, f32)> = None;
-                                for (k, time) in SPEEDS.iter().zip(&times) {
+                                for (k, time) in speeds.iter().zip(&times) {
                                     let Some(time) = time else {
                                         if *k > 1.0 || wild == 0 {
                                             bad.push(format!(
@@ -352,10 +380,11 @@ mod tests {
             }
         });
         rows.sort();
-        println!(
-            "{:>24}     {:>7}{:>7}{:>7}{:>7}",
-            "", "x1", "x1.6", "x2.4", "x3.6"
-        );
+        let heads: String = speeds
+            .iter()
+            .map(|k| format!("{:>7}", format!("x{k}")))
+            .collect();
+        println!("{:>24}     {heads}", "");
         for row in rows {
             println!("{row}");
         }
@@ -375,7 +404,7 @@ mod tests {
             let track = Track::new(circuit);
             let stock = lap(&track, 1.0).unwrap_or_else(|| panic!("{id} at stock speed"));
             let mut before = 1.0;
-            for k in [1.6, 2.4, 3.6] {
+            for k in super::super::Speed::ALL[1..].iter().map(|s| s.scale()) {
                 let fast = lap(&track, k)
                     .unwrap_or_else(|| panic!("the AI cannot lap {id} at {k} times the speed"));
                 let ratio = stock / fast;

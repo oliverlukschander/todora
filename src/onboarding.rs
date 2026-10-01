@@ -226,9 +226,9 @@ fn count_misses(
     mut guide: ResMut<Guide>,
 ) {
     for lap in laps.read() {
-        // A lap that did not count because it was never going to, as the
-        // Bonkers Edition's are not, is not a lap that missed: the hint is for
-        // the drivers whose laps might have.
+        // A lap that was never going to count, as no lap in Bonkers mode is,
+        // is not a lap that missed: the hint is for the drivers whose laps
+        // might have.
         let for_glory = timer
             .as_ref()
             .and_then(|t| t.report.as_ref())

@@ -99,7 +99,7 @@ pub(crate) fn listed() -> Vec<(String, String, String)> {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(Update, (count, per_lap).chain().run_if(super::silly));
+    app.add_systems(Update, (count, per_lap).chain().run_if(super::bonkers));
 }
 
 /// Fold what was done this frame into the totals, and see what it earned.

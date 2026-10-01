@@ -16,12 +16,12 @@
 
 use bevy::{light::NotShadowCaster, prelude::*};
 
+use super::Fun;
 use super::air::Landed;
 use super::mount::Honk;
 use super::parts::{Kit, PARTY, Shape, rainbow};
 use super::rng::Rng;
 use super::tweak::Boost;
-use super::{Fun, Silliness};
 use crate::car::{Car, Controls, Player, SCALE, level};
 use crate::lap::LapFinished;
 use crate::track::Track;
@@ -129,7 +129,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                (tyre_smoke, flames, dust, streaks, celebrate).run_if(super::silly),
+                (tyre_smoke, flames, dust, streaks, celebrate).run_if(super::bonkers),
                 spawn,
                 fly,
             )
@@ -554,7 +554,7 @@ fn streaks(
     mut rng: Local<Option<Rng>>,
     cars: Query<(&Transform, &Car), With<Player>>,
 ) {
-    if fun.level < Silliness::Bonkers || fun.calm {
+    if !fun.bonkers() || fun.calm {
         return;
     }
     let Ok((at, car)) = cars.single() else {

@@ -1232,13 +1232,74 @@ fn smoothstep(t: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
+/// Plan curvature, in 1/m, from which a bend starts to keep the hills off itself,
+/// and at which it keeps all of them off: radii of 125 m and 40 m. The first is
+/// about the tightest a car at full speed can follow on the grip it has in the
+/// air (see [`crate::fun::tweak::AIR_GRIP`]).
+const HILLS_EASE_FROM: f32 = 0.008;
+const HILLS_GONE_AT: f32 = 0.025;
+/// Metres before a bend and after it that its flatness reaches: the braking for
+/// it, and the way out.
+const BEND_REACH: f32 = 28.0;
+/// The road over which the edges of that are softened, three times over, so that
+/// the hills fade in and out with no kink of their own for a car to leave.
+const BEND_SOFTEN: f32 = 9.0;
+
+/// How much of the hills each station keeps: all of them on the straights, none
+/// in a bend that wants all of a driver's attention, and less on the way into one
+/// and out of it. A crest in a corner throws a car off the road on the outside,
+/// with no brakes to slow it while it is up there, and a steep climb beside a
+/// corner is where a car that ran wide is stranded on the grass; on a straight a
+/// crest is a jump, and a climb is a climb.
+fn straightness(line: &[Vec3], step: f32) -> Vec<f32> {
+    let n = line.len();
+    let bend: Vec<f32> = (0..n)
+        .map(|i| {
+            smoothstep(
+                (curvature_at(line, i).abs() - HILLS_EASE_FROM) / (HILLS_GONE_AT - HILLS_EASE_FROM),
+            )
+        })
+        .collect();
+    // Each station is as much of a bend as the most of one within reach of it,
+    // and that is then softened.
+    let reach = ((BEND_REACH / step) as usize).min(n / 2);
+    let mut near: Vec<f32> = (0..n)
+        .map(|i| {
+            (0..=reach)
+                .flat_map(|d| [bend[(i + d) % n], bend[(i + n - d) % n]])
+                .fold(0.0f32, f32::max)
+        })
+        .collect();
+    let half = ((BEND_SOFTEN / step) as usize / 2).max(1);
+    for _ in 0..3 {
+        near = blur(&near, half);
+    }
+    near.iter().map(|b| 1.0 - b.clamp(0.0, 1.0)).collect()
+}
+
+/// The mean of `half` stations either side of each, round the closed lap.
+fn blur(values: &[f32], half: usize) -> Vec<f32> {
+    let n = values.len() as isize;
+    let at = |i: isize| f64::from(values[i.rem_euclid(n) as usize]);
+    let half = half as isize;
+    let width = (2 * half + 1) as f64;
+    let mut sum: f64 = (-half..=half).map(at).sum();
+    let mut out = Vec::with_capacity(values.len());
+    for i in 0..n {
+        out.push((sum / width) as f32);
+        sum += at(i + half + 1) - at(i - half);
+    }
+    out
+}
+
 /// Make the circuit's elevation wilder: more of the surveyed relief, rolling
 /// hills of its own on top, and ramps to jump off on the straights. The plan is
 /// not touched, so the circuit is the same circuit; only how high it goes.
 ///
 /// It is a function of how far round the lap, and of the circuit's name, so the
 /// same circuit always gets the same hills, and it fades to nothing at the start
-/// line and at any crossing.
+/// line and at any crossing. The hills it adds keep to the straights (see
+/// [`straightness`]): the corners keep the relief the circuit has of its own.
 fn make_wild(line: &mut [Vec3], over: &[Overpass], level: u8, name: &str) {
     use crate::fun::rng::Rng;
     let Some(wild) = WILDNESS.get(usize::from(level).saturating_sub(1)) else {
@@ -1255,6 +1316,7 @@ fn make_wild(line: &mut [Vec3], over: &[Overpass], level: u8, name: &str) {
     let envelope_phase = rng.range(0.0, std::f32::consts::TAU);
     let envelope_span = rng.range(210.0, 350.0);
 
+    let keep = straightness(line, step);
     // Stations that are the middles of crossings, on either road.
     let crossings: Vec<usize> = over
         .iter()
@@ -1321,7 +1383,7 @@ fn make_wild(line: &mut [Vec3], over: &[Overpass], level: u8, name: &str) {
                 }
             })
             .sum();
-        point.y = point.y * (1.0 + (wild.relief - 1.0) * fade) + (hills + ramp) * fade;
+        point.y = point.y * (1.0 + (wild.relief - 1.0) * fade) + (hills + ramp) * fade * keep[i];
     }
     cap_grade_to(line, wild.grade);
 }

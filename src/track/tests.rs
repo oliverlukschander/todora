@@ -1826,7 +1826,11 @@ fn the_lobby_is_reached_from_a_wild_circuit_and_stays_reached() {
         .init_resource::<crate::fun::Together>()
         .init_resource::<crate::local::LocalRace>()
         .init_resource::<crate::multiplayer::Session>()
-        .insert_resource(crate::settings::Settings::default())
+        .insert_resource(crate::settings::Settings {
+            bonkers: true,
+            wild: crate::fun::Wild::Rollercoaster,
+            ..crate::settings::Settings::default()
+        })
         .insert_resource(WildRequest(2))
         .insert_resource(Track::with_wild(circuits::first(), 2))
         .add_systems(Update, (crate::fun::resolve, loading::switch).chain());

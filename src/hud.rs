@@ -298,14 +298,9 @@ fn setup(mut commands: Commands) {
     }, BackgroundColor(PANEL)));
 }
 
-/// What the control hints were last written for.
-type Seen = (
-    bool,
-    &'static str,
-    bool,
-    crate::text::Language,
-    crate::fun::Silliness,
-);
+/// What the control hints were last written for: whether there is a pad, the
+/// radio, the effects, the language, and whether it is Bonkers.
+type Seen = (bool, &'static str, bool, crate::text::Language, bool);
 
 /// Rewritten only when a pad comes or goes, the radio or effects change, or
 /// the language does.
@@ -317,15 +312,13 @@ fn draw_controls(
     mut seen: Local<Option<Seen>>,
 ) {
     use crate::text::{t, tf};
-    let level = fun
-        .as_ref()
-        .map_or(crate::fun::Silliness::Serious, |f| f.level);
+    let bonkers = fun.as_ref().is_some_and(|f| f.bonkers());
     let wanted = (
         pads.is_empty(),
         sound.station(),
         sound.effects,
         crate::text::current(),
-        level,
+        bonkers,
     );
     if *seen == Some(wanted) {
         return;
@@ -338,14 +331,11 @@ fn draw_controls(
     let effects = t(if sound.effects { "word.on" } else { "word.off" }).to_lowercase();
     let radio = t(sound.station()).to_lowercase();
     let mut hint = format!("{keys}\n{}", tf("hud.sound", &[&radio, &effects]));
-    // The horn, and in the silliest game the hop, for those with a keyboard.
-    if pads.is_empty() && level >= crate::fun::Silliness::Silly {
+    // The horn, the hop and the way back to the plain game, for those with a
+    // keyboard.
+    if pads.is_empty() && bonkers {
         hint.push_str("    ");
-        hint.push_str(t(if level >= crate::fun::Silliness::Bonkers {
-            "hud.fun_keys"
-        } else {
-            "hud.fun_keys_silly"
-        }));
+        hint.push_str(t("hud.fun_keys"));
     }
     if let Ok(mut text) = text.single_mut() {
         *seen = Some(wanted);

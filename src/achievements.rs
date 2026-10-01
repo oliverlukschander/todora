@@ -408,14 +408,26 @@ pub(crate) struct Toast {
     showing: Option<(String, f32)>,
 }
 
-/// Every award there is to list: the serious ones, and the silly ones in a game
-/// that is silly enough for them.
-pub(crate) fn listed(silly: bool) -> Vec<(String, String, String)> {
+/// Every award there is to list: the game's own, and Bonkers mode's when `bonkers`.
+pub(crate) fn listed(bonkers: bool) -> Vec<(String, String, String)> {
     let mut out = all();
-    if silly {
+    if bonkers {
         out.extend(crate::fun::awards::listed());
     }
     out
+}
+
+/// Whether Bonkers mode's awards are listed with the rest: while it is being
+/// played, and for good once any of them has been earned, so that a collection
+/// with some in it keeps showing them and one that has never been near Bonkers
+/// is the list the game shipped with.
+pub(crate) fn lists_bonkers(settings: &crate::settings::Settings, earned: Option<&Earned>) -> bool {
+    settings.bonkers
+        || earned.is_some_and(|earned| {
+            crate::fun::awards::IDS
+                .iter()
+                .any(|id| earned.earned.contains_key(*id))
+        })
 }
 
 pub(crate) fn announce(earned: &mut Earned, toast: &mut Toast, ids: &[impl AsRef<str>]) {
@@ -582,8 +594,8 @@ fn draw(
     let Ok((mut text, mut visibility, mut node)) = texts.single_mut() else {
         return;
     };
-    // Where the fun layer keeps its score is where this would be, so it goes below.
-    let top = if fun.is_some_and(|fun| fun.silly()) {
+    // Where Bonkers keeps its score is where this would be, so it goes below.
+    let top = if fun.is_some_and(|fun| fun.bonkers()) {
         px(128)
     } else {
         px(24)

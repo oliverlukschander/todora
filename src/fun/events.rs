@@ -1,11 +1,14 @@
 //! Things that happen to you.
 //!
 //! Every half a minute or so, and whenever a mystery box is opened, something is
-//! done to the driving. The gravity goes. The road turns to ice. The wheel is
-//! wired the other way round. You become enormous, or the size of a shoe. The
-//! camera does a barrel roll. Cows start falling out of the sky. Each is for a
-//! few seconds, announced when it starts with a banner and a noise, and gone
-//! when it is done.
+//! done to the driving. The gravity goes. The road turns to ice. You become
+//! enormous, or the size of a shoe. The camera does a barrel roll. Cows start
+//! falling out of the sky. Each is for a few seconds, announced when it starts
+//! with a banner and a noise, and gone when it is done.
+//!
+//! None of it takes the steering away: the wheel wired the other way round was
+//! one of them once, and four seconds of a car that cannot be steered is four
+//! seconds of a car going off the road, which is not a joke the second time.
 //!
 //! What is *in force* is here — [`Chaos`] — and what it does goes through the
 //! same doors everything else uses: the gravity is [`Gravity`], which the air
@@ -20,8 +23,8 @@ use super::particles::{Burst, Kind, Tint};
 use super::props::Rain;
 use super::rng::Rng;
 use super::tweak::Boost;
-use super::{Fun, Mount, Silliness};
-use crate::car::{Controls, Player};
+use super::{Fun, Mount};
+use crate::car::Player;
 use crate::pause::Halt;
 use crate::sound::{Sfx, SfxKind};
 
@@ -31,7 +34,6 @@ pub(crate) enum Effect {
     Moon,
     Ice,
     Turbo,
-    Swapped,
     Giant,
     Tiny,
     Cows,
@@ -42,11 +44,10 @@ pub(crate) enum Effect {
 }
 
 impl Effect {
-    pub(crate) const ALL: [Self; 11] = [
+    pub(crate) const ALL: [Self; 10] = [
         Self::Moon,
         Self::Ice,
         Self::Turbo,
-        Self::Swapped,
         Self::Giant,
         Self::Tiny,
         Self::Cows,
@@ -62,7 +63,6 @@ impl Effect {
             Self::Moon => "fx.moon",
             Self::Ice => "fx.ice",
             Self::Turbo => "fx.turbo",
-            Self::Swapped => "fx.swapped",
             Self::Giant => "fx.giant",
             Self::Tiny => "fx.tiny",
             Self::Cows => "fx.cows",
@@ -77,9 +77,8 @@ impl Effect {
     pub(crate) fn seconds(self) -> f32 {
         match self {
             Self::Moon => 9.0,
-            Self::Ice => 7.0,
-            Self::Turbo => 5.0,
-            Self::Swapped => 4.0,
+            Self::Ice => 6.0,
+            Self::Turbo => 3.5,
             Self::Giant => 9.0,
             Self::Tiny => 9.0,
             Self::Cows => 7.0,
@@ -105,15 +104,14 @@ impl Effect {
 
     /// Whether it is something to be worried about, and gets a red banner.
     fn nasty(self) -> bool {
-        matches!(self, Self::Swapped | Self::Ice)
+        matches!(self, Self::Ice)
     }
 
     fn noise(self) -> SfxKind {
         match self {
             Self::Moon => SfxKind::Ufo,
-            Self::Ice => SfxKind::Whoosh,
+            Self::Ice => SfxKind::UhOh,
             Self::Turbo | Self::Hyper => SfxKind::Zoom,
-            Self::Swapped => SfxKind::UhOh,
             Self::Giant => SfxKind::Boom,
             Self::Tiny => SfxKind::Squeak,
             Self::Cows => SfxKind::HornMoo,
@@ -203,7 +201,12 @@ impl Chaos {
     }
 }
 
-/// The world's gravity, as a fraction of its usual.
+/// How hard turbo time pushes, as a boost: a boost pad's strength for most of five
+/// seconds was a car arriving at every corner half as fast again as it could take
+/// it, and well short of that, for not so long, is still a rush.
+pub(crate) const TURBO: f32 = 0.4;
+
+/// The world's gravity, as a fraction of its usual, for a car in the air.
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Gravity {
     pub scale: f32,
@@ -221,21 +224,18 @@ impl Gravity {
     }
 }
 
+/// How much of the world's gravity the moon leaves, at strength `moon` (0 to 1).
+/// Half, at the most: at a quarter a jump pad hung a car in the air for most of
+/// eight seconds with no brakes.
+pub(crate) fn moon_gravity(moon: f32) -> f32 {
+    1.0 - 0.5 * moon
+}
+
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Gravity>()
         .init_resource::<Chaos>()
         .add_systems(Update, (tick, open).chain().run_if(super::bonkers))
-        .add_systems(Update, calm_down.run_if(not(super::bonkers)))
-        // Once a frame, on what the input has just written, and not once a physics
-        // step on what is left of it: at four steps to a frame that is the wheel
-        // turned the one way and the other and the other and the other.
-        .add_systems(
-            PreUpdate,
-            swap.after(crate::input::InputSet)
-                .run_if(super::bonkers)
-                .run_if(crate::pause::running)
-                .run_if(crate::local::solo),
-        );
+        .add_systems(Update, calm_down.run_if(not(super::bonkers)));
 }
 
 /// Something is happening to you: say so, and make the noise.
@@ -266,7 +266,7 @@ fn begin(
         at,
     });
     match effect {
-        Effect::Turbo => boost.fire(1.0, effect.seconds()),
+        Effect::Turbo => boost.fire(TURBO, effect.seconds()),
         Effect::Cows => {
             rain.write(Rain { count: 12 });
         }
@@ -336,7 +336,7 @@ fn tick(
             );
         }
     }
-    let scale = 1.0 - 0.72 * chaos.strength(Effect::Moon);
+    let scale = moon_gravity(chaos.strength(Effect::Moon));
     if (gravity.scale - scale).abs() > 1e-4 {
         gravity.scale = scale;
     }
@@ -384,21 +384,6 @@ fn calm_down(mut chaos: ResMut<Chaos>, mut gravity: ResMut<Gravity>) {
     }
 }
 
-/// The wheel goes the other way. Only ever run right after the input has written
-/// the controls for the frame, so it turns what it has just been given.
-fn swap(chaos: Res<Chaos>, mut cars: Query<&mut Controls, With<Player>>) {
-    if chaos.has(Effect::Swapped) {
-        for mut controls in &mut cars {
-            controls.steer = -controls.steer;
-        }
-    }
-}
-
-#[allow(dead_code)]
-fn silly_enough(fun: &Fun) -> bool {
-    fun.level >= Silliness::Bonkers
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,9 +412,12 @@ mod tests {
         assert_eq!(c.strength(Effect::Ice), 0.0, "what is not on is not on");
     }
 
-    /// The game with everything on: a chicken, and neon, and no reduced motion.
+    /// Bonkers with everything on: a chicken, and neon, and no reduced motion.
     fn everything() -> Fun {
-        Fun::of(&crate::settings::Settings::default())
+        Fun::of(&crate::settings::Settings {
+            bonkers: true,
+            ..crate::settings::Settings::default()
+        })
     }
 
     #[test]
@@ -457,6 +445,7 @@ mod tests {
         // A car has nothing to swell or shrink, and with the neon off there is
         // nothing for a disco or a fisheye to be done to.
         let plain = Fun::of(&Settings {
+            bonkers: true,
             mount: Mount::Car,
             neon: false,
             ..Settings::default()
@@ -473,6 +462,7 @@ mod tests {
         }
         // Reduced motion has no camera roll, no disco and no fisheye either.
         let calm = Fun::of(&Settings {
+            bonkers: true,
             reduced_motion: true,
             ..Settings::default()
         });
@@ -532,28 +522,5 @@ mod tests {
         keys.sort_unstable();
         keys.dedup();
         assert_eq!(keys.len(), Effect::ALL.len());
-    }
-
-    #[test]
-    fn swapped_steering_is_the_other_way_and_only_while_it_lasts() {
-        let mut app = App::new();
-        app.insert_resource(chaos()).add_systems(Update, swap);
-        let car = app
-            .world_mut()
-            .spawn((
-                Player,
-                Controls {
-                    steer: 0.7,
-                    ..default()
-                },
-            ))
-            .id();
-        app.update();
-        assert_eq!(app.world().get::<Controls>(car).unwrap().steer, 0.7);
-        app.world_mut()
-            .resource_mut::<Chaos>()
-            .start(Effect::Swapped);
-        app.update();
-        assert_eq!(app.world().get::<Controls>(car).unwrap().steer, -0.7);
     }
 }

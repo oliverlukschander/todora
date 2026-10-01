@@ -550,11 +550,12 @@ fn drive(
     clicks: Query<(&Action, &Interaction), Changed<Interaction>>,
     mut profiles: MessageWriter<super::profile::OpenProfile>,
     mut race: RaceState,
+    earned: Option<Res<crate::achievements::Earned>>,
 ) {
     if *halt != Halt::Board || halt.is_changed() {
         return;
     }
-    let silly = settings.silliness >= crate::fun::Silliness::Silly;
+    let bonkers = crate::achievements::lists_bonkers(&settings, earned.as_deref());
     let pad = |button| pads.iter().any(|pad| pad.just_pressed(button));
     let action = clicks
         .iter()
@@ -622,7 +623,7 @@ fn drive(
             browse
                 .row
                 .saturating_sub(ROWS / 2)
-                .min(crate::achievements::listed(silly).len() - ROWS)
+                .min(crate::achievements::listed(bonkers).len() - ROWS)
                 + row
         } else {
             row
@@ -642,7 +643,7 @@ fn drive(
         }
     }
     if browse.view == View::Awards {
-        let n = crate::achievements::listed(silly).len() as i32;
+        let n = crate::achievements::listed(bonkers).len() as i32;
         browse.row = (browse.row as i32 + step.y).clamp(0, n - 1) as usize;
         return;
     }
@@ -872,7 +873,10 @@ fn draw(
         }
     }
     if browse.view == View::Awards {
-        let all = crate::achievements::listed(settings.silliness >= crate::fun::Silliness::Silly);
+        let all = crate::achievements::listed(crate::achievements::lists_bonkers(
+            &settings,
+            earned.as_deref(),
+        ));
         let first = browse.row.saturating_sub(ROWS / 2).min(all.len() - ROWS);
         let got = |id: &str| earned.as_ref().and_then(|e| e.earned.get(id).copied());
         if let Ok(mut text) = titles.single_mut() {

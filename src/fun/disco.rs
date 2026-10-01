@@ -702,7 +702,10 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_micros(16_667),
             ))
-            .insert_resource(Fun::of(&crate::settings::Settings::default()))
+            .insert_resource(Fun::of(&crate::settings::Settings {
+                bonkers: true,
+                ..crate::settings::Settings::default()
+            }))
             .init_resource::<crate::pause::Halt>()
             .init_resource::<Beat>()
             .init_resource::<Pose>()

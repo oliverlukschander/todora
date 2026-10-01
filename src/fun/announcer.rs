@@ -218,24 +218,24 @@ pub(super) fn plugin(app: &mut App) {
                 draw_score,
             )
                 .chain()
-                .run_if(super::silly),
+                .run_if(super::bonkers),
         )
         // Whether the panel is up is the HUD's to say, with its own rule for
         // when the game is stopped; it is put right after that, in every game,
-        // silly or not, or a game that is not would show a score of nothing.
+        // Bonkers or not, or a game that is not would show a score of nothing.
         .add_systems(Update, show_score.after(crate::hud::show))
         // And whatever was up when the fun stopped goes with it: nothing else
         // is left running to take it down.
-        .add_systems(Update, clear_words.run_if(not(super::silly)));
+        .add_systems(Update, clear_words.run_if(not(super::bonkers)));
 }
 
-/// Whether the score is showing: while there is a game to score, and it is silly.
+/// Whether the score is showing: while there is a game to score, and it is Bonkers.
 fn show_score(
     fun: Res<Fun>,
     halt: Res<crate::pause::Halt>,
     mut panel: Query<&mut Visibility, With<ScorePanel>>,
 ) {
-    let shown = fun.silly() && !halt.stopped();
+    let shown = fun.bonkers() && !halt.stopped();
     for mut visibility in &mut panel {
         visibility.set_if_neq(if shown {
             Visibility::Inherited
@@ -777,7 +777,7 @@ mod tests {
     }
 
     #[test]
-    fn the_score_is_shown_only_in_a_silly_game_whatever_the_hud_says() {
+    fn the_score_is_shown_only_in_bonkers_whatever_the_hud_says() {
         use crate::pause::Halt;
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -788,13 +788,8 @@ mod tests {
             .world_mut()
             .spawn((ScorePanel, Instrument, Visibility::Hidden))
             .id();
-        for (level, shown) in [
-            (super::super::Silliness::Serious, false),
-            (super::super::Silliness::Silly, true),
-            (super::super::Silliness::Bonkers, true),
-            (super::super::Silliness::Serious, false),
-        ] {
-            app.world_mut().resource_mut::<Fun>().level = level;
+        for (on, shown) in [(false, false), (true, true), (false, false)] {
+            app.world_mut().resource_mut::<Fun>().on = on;
             // The game is stopped, and then it starts, which is when the HUD
             // makes every one of its instruments visible.
             *app.world_mut().resource_mut::<Halt>() = Halt::Title;
@@ -802,14 +797,14 @@ mod tests {
             assert_eq!(
                 *app.world().get::<Visibility>(panel).unwrap(),
                 Visibility::Hidden,
-                "{level:?} stopped"
+                "Bonkers {on}, stopped"
             );
             *app.world_mut().resource_mut::<Halt>() = Halt::Nothing;
             app.update();
             assert_eq!(
                 *app.world().get::<Visibility>(panel).unwrap() != Visibility::Hidden,
                 shown,
-                "{level:?} driving"
+                "Bonkers {on}, driving"
             );
         }
     }
@@ -819,7 +814,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<Fun>()
-            .add_systems(Update, clear_words.run_if(not(super::super::silly)));
+            .add_systems(Update, clear_words.run_if(not(super::super::bonkers)));
         let banner = app
             .world_mut()
             .spawn(Banner {
@@ -836,12 +831,13 @@ mod tests {
                 from: Vec2::ZERO,
             })
             .id();
-        // In a silly game they are left to animate themselves away.
-        app.world_mut().resource_mut::<Fun>().level = super::super::Silliness::Silly;
+        // In Bonkers they are left to animate themselves away.
+        app.world_mut().resource_mut::<Fun>().on = true;
         app.update();
         assert!(app.world().get_entity(banner).is_ok() && app.world().get_entity(pop).is_ok());
-        // Not silly: nothing is left running to do it, so this is what does.
-        app.world_mut().resource_mut::<Fun>().level = super::super::Silliness::Serious;
+        // In the plain game nothing is left running to do it, so this is what
+        // does.
+        app.world_mut().resource_mut::<Fun>().on = false;
         app.update();
         assert!(app.world().get_entity(banner).is_err() && app.world().get_entity(pop).is_err());
     }

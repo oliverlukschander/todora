@@ -23,6 +23,8 @@ use crate::Reset;
 use crate::input::InputSet;
 use crate::menu::MenuSet;
 use crate::track::{Track, TrackSet};
+#[cfg(test)]
+pub(crate) use driver::{Driver, Style};
 pub(crate) use garage::Spec;
 pub(crate) use mode::Mode;
 pub(crate) use physics::{
