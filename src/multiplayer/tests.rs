@@ -1,5 +1,6 @@
 use super::*;
-use session::{Remote, VERSION};
+use remote::Remote;
+use session::VERSION;
 use std::collections::VecDeque;
 
 #[test]
@@ -298,30 +299,6 @@ fn malformed_oversized_and_nonphysical_packets_are_rejected() {
 }
 
 #[test]
-fn remote_smoothing_handles_reordering_resets_bridge_height_and_stale_data() {
-    let mut r = Remote::default();
-    r.push(sample(1, 1.0, 0.0), 20.0);
-    r.push(sample(2, 1.2, 2.0), 20.2);
-    let (p, _) = r.pose(20.2).unwrap();
-    assert!((p.x - 1.0).abs() < 0.001);
-    assert_eq!(
-        p.y, 4.0,
-        "use network elevation, never snap to the lower bridge road"
-    );
-    r.push(sample(1, 1.0, 100.0), 20.3);
-    assert_eq!(r.latest().unwrap().seq, 2);
-    assert!(r.pose(22.0).is_none());
-    let mut reset = sample(3, 1.3, 100.0);
-    reset.reset = 1;
-    r.push(reset, 20.3);
-    assert_eq!(
-        r.pose(20.3).unwrap().0.x,
-        100.0,
-        "no sweep through the circuit after a reset"
-    );
-}
-
-#[test]
 fn multiplayer_counts_only_valid_local_laps_and_never_imports_remote_records() {
     let mut app = App::new();
     let [s, _] = pair();
@@ -329,6 +306,7 @@ fn multiplayer_counts_only_valid_local_laps_and_never_imports_remote_records() {
         .init_resource::<Transport>()
         .init_resource::<Sending>()
         .init_resource::<Time<Real>>()
+        .init_resource::<Time<Fixed>>()
         .init_resource::<LapTimer>()
         .init_resource::<Halt>()
         .add_message::<LapFinished>()
@@ -392,4 +370,322 @@ fn online_pause_releases_controls_without_stopping_the_shared_clock() {
         .clear();
     app.update();
     assert!(app.world().resource::<Time<Virtual>>().is_paused());
+}
+
+// A car driving straight along +x at 40 m/s, as its snapshots would say.
+fn drive(seq: u64, time: f64) -> Snapshot {
+    Snapshot {
+        position: [40.0 * time as f32, 4.0, 0.0],
+        velocity: [40.0, 0.0, 0.0],
+        ..sample(seq, time, 0.0)
+    }
+}
+
+/// Feed `snapshots` (stamp on the sender's clock, arrival on ours) to a remote
+/// and draw it every 1/240 s until `until`, returning where it was drawn.
+fn play(snapshots: &[(f64, f64)], skew: f64, until: f64) -> Vec<(f64, Option<Vec3>)> {
+    let mut remote = Remote::default();
+    let mut arrivals: Vec<_> = snapshots.iter().enumerate().collect();
+    arrivals.sort_by(|a, b| a.1.1.total_cmp(&b.1.1));
+    let mut next = 0;
+    let mut drawn = vec![];
+    let mut now = 0.0;
+    while now < until {
+        while next < arrivals.len() && arrivals[next].1.1 <= now {
+            let (i, (stamp, _)) = arrivals[next];
+            let snapshot = drive(i as u64 + 1, *stamp);
+            // Their clock says a different time for the same place.
+            remote.push(
+                Snapshot {
+                    time: stamp + skew,
+                    ..snapshot
+                },
+                now,
+            );
+            next += 1;
+        }
+        drawn.push((now, remote.pose(now).map(|p| p.0)));
+        now += 1.0 / 240.0;
+    }
+    drawn
+}
+
+/// 60 snapshots a second from `from` to `to`; each arrives `delay` later,
+/// with `jitter` more that varies from one to the next.
+fn stream(from: f64, to: f64, delay: f64, jitter: f64) -> Vec<(f64, f64)> {
+    let mut noise = 12345u32;
+    (0..((to - from) * 60.0) as usize)
+        .map(|i| {
+            noise = noise.wrapping_mul(1664525).wrapping_add(1013904223);
+            let stamp = from + i as f64 / 60.0;
+            (
+                stamp,
+                stamp + delay + jitter * (noise >> 8) as f64 / (1 << 24) as f64,
+            )
+        })
+        .collect()
+}
+
+/// The furthest one frame's movement strays from a steady 40 m/s, in metres.
+fn stumble(drawn: &[(f64, Option<Vec3>)], after: f64) -> f32 {
+    drawn
+        .windows(2)
+        .filter(|w| w[0].0 > after)
+        .map(|w| (w[1].1.unwrap().x - w[0].1.unwrap().x - 40.0 / 240.0).abs())
+        .fold(0.0, f32::max)
+}
+
+#[test]
+fn the_far_car_glides_however_unevenly_its_snapshots_arrive() {
+    // Their clock is 87 s ahead of ours; packets take 30 to 50 ms, in any order.
+    let drawn = play(&stream(0.0, 8.0, 0.03, 0.02), 87.0, 8.0);
+    assert!(drawn.iter().skip(240).all(|d| d.1.is_some()));
+    // At 240 frames a second 40 m/s is 16.7 cm a frame, and no frame may be
+    // more than a tenth of that off.
+    assert!(stumble(&drawn, 3.0) < 0.017, "{}", stumble(&drawn, 3.0));
+    // Nor is the car drawn where it will be: it trails the newest snapshot.
+    let x = drawn.last().unwrap().1.unwrap().x;
+    assert!(x < 40.0 * (8.0 - 0.03) && x > 40.0 * (8.0 - 0.2), "{x}");
+}
+
+#[test]
+fn the_far_car_keeps_going_when_snapshots_stop_and_rejoins_without_a_jump() {
+    let mut snapshots = stream(0.0, 4.0, 0.03, 0.01);
+    // Nothing arrives for 300 ms.
+    snapshots.retain(|s| !(2.0..2.3).contains(&s.0));
+    snapshots.extend(stream(4.0, 6.0, 0.03, 0.01));
+    let drawn = play(&snapshots, 0.0, 6.0);
+    assert!(drawn.iter().skip(240).all(|d| d.1.is_some()));
+    // It is carried through the gap at speed, and eased back onto the real
+    // path when the snapshots return.
+    assert!(stumble(&drawn, 1.0) < 0.06, "{}", stumble(&drawn, 1.0));
+}
+
+#[test]
+fn a_reset_puts_the_far_car_there_and_never_sweeps_it_across_the_circuit() {
+    let mut r = Remote::default();
+    for i in 0..300 {
+        let t = i as f64 / 60.0;
+        r.push(drive(i + 1, t), t + 0.03);
+    }
+    let then = 5.03;
+    assert!(r.pose(then).unwrap().0.x > 150.0);
+    // Back on the grid, stopped, under a new epoch.
+    let mut grid = sample(301, 5.0, 0.0);
+    grid.reset = 1;
+    grid.velocity = [0.0; 3];
+    r.push(grid, then);
+    for frame in 0..30 {
+        let x = r.pose(then + frame as f64 / 240.0).unwrap().0.x;
+        assert!(x.abs() < 0.5, "swept through x = {x}");
+    }
+    // The same for a rescue, which changes nothing but where the car is.
+    let mut r = Remote::default();
+    for i in 0..60 {
+        r.push(drive(i + 1, i as f64 / 60.0), i as f64 / 60.0 + 0.03);
+    }
+    let mut elsewhere = drive(61, 1.0);
+    elsewhere.position = [900.0, 4.0, 500.0];
+    r.push(elsewhere, 1.03);
+    for frame in 0..30 {
+        let p = r.pose(1.03 + frame as f64 / 240.0).unwrap().0;
+        assert!(p.x > 800.0, "swept through {p}");
+    }
+}
+
+#[test]
+fn a_long_silence_hides_the_far_car_and_it_returns_where_it_is() {
+    let mut r = Remote::default();
+    for i in 0..120 {
+        r.push(drive(i + 1, i as f64 / 60.0), i as f64 / 60.0 + 0.03);
+    }
+    assert!(r.pose(2.1).is_some());
+    assert!(r.pose(2.0 + 1.6).is_none());
+    r.push(drive(500, 10.0), 10.03);
+    let x = r.pose(10.03).unwrap().0.x;
+    assert!((x - 400.0).abs() < 5.0, "{x}");
+}
+
+#[test]
+fn stale_duplicate_and_impossible_snapshots_change_nothing() {
+    let mut r = Remote::default();
+    for i in 0..60 {
+        r.push(drive(i + 1, i as f64 / 60.0), i as f64 / 60.0 + 0.03);
+    }
+    let before = r.pose(1.03).unwrap();
+    let mut old = drive(3, 0.05);
+    old.position = [-500.0, 4.0, 0.0];
+    r.push(old, 1.03);
+    r.push(drive(60, 59.0 / 60.0), 1.03);
+    let mut nan = drive(61, 1.0);
+    nan.position[0] = f32::NAN;
+    r.push(nan, 1.03);
+    assert_eq!(r.latest().unwrap().seq, 60);
+    assert_eq!(r.pose(1.03).unwrap(), before);
+    // The height on the wire is the height drawn: a bridge is not the road below.
+    assert_eq!(before.0.y, 4.0);
+}
+
+#[test]
+fn the_link_is_described_by_what_arrived() {
+    let mut r = Remote::default();
+    // Every tenth snapshot is lost; the others take 20 ms plus up to 20 more.
+    let snapshots: Vec<_> = stream(0.0, 5.0, 0.02, 0.02)
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| i % 10 != 9)
+        .collect();
+    let mut arrivals = snapshots.clone();
+    arrivals.sort_by(|a, b| a.1.1.total_cmp(&b.1.1));
+    for (i, (stamp, arrives)) in arrivals {
+        r.push(drive(i as u64 + 1, stamp), arrives);
+    }
+    let link = r.stats(5.1).unwrap();
+    assert!((link.lost - 0.1).abs() < 0.03, "{link:?}");
+    assert!((0.008..0.03).contains(&link.jitter), "{link:?}");
+    assert!((link.interval - 1.0 / 60.0).abs() < 0.004, "{link:?}");
+}
+
+#[test]
+fn snapshots_from_the_last_build_still_decode() {
+    // Exactly as the previous build put one on the wire.
+    let wire = br#"{"State":{"seq":5,"reset":0,"time":12.5,"position":[1.0,4.0,-2.0],"rotation":[0.0,0.0,0.0,1.0],"velocity":[10.0,0.0,0.0],"lap":3.5,"invalid":false,"paused":false,"laps":0,"best":null}}"#;
+    let Some(Packet::State(s)) = Packet::decode(wire) else {
+        panic!("not decoded");
+    };
+    assert_eq!((s.seq, s.time, s.position), (5, 12.5, [1.0, 4.0, -2.0]));
+    assert!(wire.len() + 200 > Packet::State(sample(1, 1.0, 1.0)).encode().len());
+}
+
+#[test]
+fn snapshots_go_out_steadily_at_sixty_a_second_however_frames_come() {
+    for fps in [30.0, 45.0, 60.0, 90.0, 144.0, 240.0] {
+        let mut sending = Sending::default();
+        let (mut now, mut sent, mut last, mut longest) = (10.0, 0, 0.0, 0.0f64);
+        let mut noise = 7u32;
+        while now < 20.0 {
+            noise = noise.wrapping_mul(1664525).wrapping_add(1013904223);
+            now += 1.0 / fps * (0.97 + 0.06 * (noise >> 8) as f64 / (1 << 24) as f64);
+            if sending.due(now) {
+                if last > 0.0 {
+                    longest = longest.max(now - last);
+                }
+                sent += 1;
+                last = now;
+            }
+        }
+        let wanted = fps.min(60.0) * 10.0;
+        assert!(
+            (sent as f64 - wanted).abs() < wanted * 0.03,
+            "{fps} fps sent {sent}"
+        );
+        // Never a snapshot late by more than the frame that was in the way.
+        assert!(
+            longest < 1.0 / fps.min(60.0) + 1.0 / fps + 0.003,
+            "{fps} fps: {longest}"
+        );
+    }
+}
+
+#[test]
+fn a_snapshot_is_stamped_with_when_the_car_was_where_it_is() {
+    #[derive(Resource, Default)]
+    struct Seen(Vec<(f64, f32)>);
+    fn step(mut cars: Query<&mut Transform, With<Player>>, time: Res<Time>) {
+        for mut car in &mut cars {
+            car.translation.x += 10.0 * time.delta_secs();
+        }
+    }
+    fn watch(
+        real: Res<Time<Real>>,
+        fixed: Res<Time<Fixed>>,
+        cars: Query<&Transform, With<Player>>,
+        mut seen: ResMut<Seen>,
+    ) {
+        seen.0.push((
+            state_time(&real, &fixed),
+            cars.single().unwrap().translation.x,
+        ));
+    }
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(Time::<Fixed>::from_hz(240.0))
+        .init_resource::<Seen>()
+        .add_systems(FixedUpdate, step)
+        .add_systems(Update, watch);
+    app.world_mut().spawn((Player, Transform::default()));
+    // Frames of every length: shorter than a step, longer, and not a multiple.
+    for ms in [16.7, 8.3, 33.0, 12.0, 4.0, 7.0, 21.0, 2.5]
+        .into_iter()
+        .cycle()
+        .take(240)
+    {
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_secs_f64(ms / 1e3),
+        ));
+        app.update();
+    }
+    let seen = &app.world().resource::<Seen>().0;
+    assert!(seen.len() > 200);
+    // The car at 10 m/s is at 10 * (the time its last step took it to). Stamped
+    // with the frame's own time it would be up to 4 ms out, which is 4 cm.
+    for (stamp, x) in seen.iter().skip(5) {
+        assert!((f64::from(*x) / 10.0 - stamp).abs() < 2e-4, "{stamp}: {x}");
+    }
+}
+
+#[test]
+fn the_far_car_is_drawn_where_the_playback_puts_it_and_the_panel_reports_the_link() {
+    fn feed(time: Res<Time<Real>>, mut session: ResMut<Session>, mut frame: Local<u64>) {
+        // A snapshot per frame, taking 30 ms, from a clock 87 s ahead of ours.
+        let now = time.elapsed_secs_f64();
+        if now > 0.05 {
+            *frame += 1;
+            let stamp = now - 0.03;
+            let snapshot = Snapshot {
+                time: stamp + 87.0,
+                ..drive(*frame, stamp)
+            };
+            session.receive(Packet::State(snapshot), now);
+        }
+    }
+    let [session, _] = pair();
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins)
+        .insert_resource(session)
+        .init_resource::<Halt>()
+        .add_systems(Update, (feed, draw).chain());
+    let car = app
+        .world_mut()
+        .spawn((RemoteCar, Transform::default(), Visibility::Hidden))
+        .id();
+    let status = app.world_mut().spawn((Status, Text::new(""))).id();
+    for _ in 0..180 {
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_secs_f64(1.0 / 60.0),
+        ));
+        app.update();
+    }
+    let now = app.world().resource::<Time<Real>>().elapsed_secs_f64();
+    let session = app.world().resource::<Session>();
+    let (drawn, _) = session
+        .remote
+        .pose(now)
+        .expect("the far car is on the road");
+    assert_eq!(
+        *app.world().get::<Visibility>(car).unwrap(),
+        Visibility::Visible
+    );
+    assert_eq!(
+        app.world().get::<Transform>(car).unwrap().translation,
+        drawn
+    );
+    // Behind the newest snapshot by the link's delay, not ahead of it.
+    let newest = 40.0 * (now - 0.03) as f32;
+    assert!(
+        drawn.x < newest && drawn.x > newest - 40.0 * 0.15,
+        "{drawn}"
+    );
+    let text = &app.world().get::<Text>(status).unwrap().0;
+    assert!(text.contains("ms behind · jitter"), "{text}");
 }

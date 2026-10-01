@@ -161,12 +161,25 @@ TODORA_LOCAL_PEER=join cargo run --features multiplayer-test
 ## Protocol and remaining hardware checks
 
 GameKit carries versioned, bounded JSON packets. Session controls use reliable
-delivery; 30 Hz car snapshots use unreliable delivery. The receiver rejects
-malformed poses, stale sequences and old reset epochs, interpolates with a
-100 ms buffer, and limits extrapolation to 100 ms. Full 3D positions preserve
-Suzuka's bridge elevation. A reset or recovery snaps instead of sweeping a car
+delivery; car snapshots, up to 60 a second, use unreliable delivery, and a
+failed unreliable send is only logged. Each snapshot is stamped with when the
+physics state was true (the frame's time less the fixed step's overstep), on a
+steady schedule. The receiver rejects malformed poses, stale sequences and old
+reset epochs. It draws the far car from the stamps, not from arrival times: a
+playhead trails the sender's clock by the measured delay spread (the 95th
+percentile of arrival delay plus half a snapshot interval), speeding up or slowing by
+at most 10% to follow the link, and the car is interpolated along a curve that
+uses both snapshots' velocities. Past the newest snapshot it is predicted on
+an arc, at its speed and rate of turn, for 0.4 s and then eased to a stop; a
+correction when data returns fades over 0.2 s. Full 3D positions preserve
+Suzuka's bridge elevation. A reset or a rescue snaps instead of sweeping a car
 across the circuit. Stale cars disappear after 1.5 seconds; a silent connection
 ends after 15 seconds while driving. Matchmaking and loading have longer limits.
+
+The panel shows the link's state under the lap times: how far behind the fastest
+packets the car is drawn, jitter, and the share of snapshots lost or too late.
+The same line, with the snapshot rate, goes to `todora-gc.log` every two
+seconds while driving.
 
 Remote cars never enter local physics or the lap/ghost recording queries.
 Remote lap statistics are displayed as reported and never update local best
@@ -177,8 +190,51 @@ Before calling Game Center multiplayer verified, test two properly signed Macs
 with distinct accounts: authentication, invitations, cancellation, automatic
 matching, circuit changes during setup, countdown skew, controller input,
 pause, restarts, invalid laps, valid finish records, disconnection/rejoining,
-sleep/wake and packet loss across different Internet connections. No live
-Game Center match or tvOS build has been verified yet.
+sleep/wake and packet loss across different Internet connections. No tvOS
+build has been verified yet.
+
+## Live match on 2026-09-29
+
+Two Macs connected through an accepted Game Center invitation and drove
+together. Getting there needed three fixes in `native/game_center.m` and a log,
+worth knowing if the invitation flow is touched again:
+
+- The listener is registered after sign-in, as GameKit's guidance has it, not
+  when the bridge is created.
+- Accepting an invitation makes GameKit cancel the open matchmaking window
+  *before* it calls `didAcceptInvite`. The cancel is held for 1.5 s so the
+  invitation can take over instead of ending the session.
+- The picker lives in a plain window of our own. Presented through
+  `GKDialogController`, it crashed the app shortly after the window closed (a
+  heap abort; AppKit had logged "Use of freed session detected").
+- `todora-gc.log` in the sandbox container's Application Support directory
+  records each callback and the link line above; it starts over past 256 KB.
+
+The far car was seen jumping. Playback anchored to the newest packet, and
+snapshots were stamped with the frame's time and sent 30 a second from the
+frame loop, so the timing of the car followed the timing of the network.
+The playback and sender described above replaced that.
+
+## Far-car smoothness without a network
+
+`src/multiplayer/netsim.rs` puts a car on a fast figure of eight (about
+50 m/s, up to 2.5 g), sends its snapshots across a simulated link and draws
+them at a receiver's frame rate. The links have delay, exponential jitter,
+retransmission spikes, bursty loss, reordering, 87 s of clock skew and drift,
+an 80 ms slowdown and receiver stalls. The tests require, for every seed and
+link, that the car is never missing, that no frame's movement strays from its
+neighbours by more than a few centimetres (a millimetre at the 99th
+percentile) and that the delay stays bounded. A build older than this one
+sending to it is also covered. For the full table:
+
+```sh
+cargo test --lib netsim::report -- --ignored --nocapture
+```
+
+In this simulator, with 60 Hz at both ends, the previous playback and sender
+had a 99th-percentile judder of 103 cm on a clean LAN, 117 cm on WiFi and
+151 cm on a poor link. This build's is under a millimetre on all three, with
+the car 35 to 110 ms behind instead of 115 to 175 ms.
 
 ## Verified locally on 2026-09-21
 

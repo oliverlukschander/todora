@@ -1,7 +1,7 @@
 //! Two-player practice protocol. GameKit transports bytes; this owns the rules.
+use super::remote::Remote;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
 
 pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "/practice-1");
 pub const MAX_PACKET: usize = 2048;
@@ -72,7 +72,7 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    fn valid(&self) -> bool {
+    pub(super) fn valid(&self) -> bool {
         valid_time(self.time)
             && self
                 .position
@@ -310,70 +310,5 @@ impl Session {
             self.status = "Shared practice · no car contact · M to leave".into();
         }
         vec![]
-    }
-}
-
-#[derive(Default)]
-pub struct Remote {
-    samples: VecDeque<Snapshot>,
-    pub received_at: f64,
-}
-
-impl Remote {
-    pub fn latest(&self) -> Option<&Snapshot> {
-        self.samples.back()
-    }
-    pub fn push(&mut self, sample: Snapshot, now: f64) {
-        if !sample.valid() {
-            return;
-        }
-        if let Some(last) = self.samples.back() {
-            if sample.seq <= last.seq || sample.time <= last.time || sample.reset < last.reset {
-                return;
-            }
-            if sample.reset != last.reset
-                || Vec3::from_array(sample.position).distance(Vec3::from_array(last.position))
-                    > 12.0
-            {
-                self.samples.clear();
-            }
-        }
-        self.received_at = now;
-        self.samples.push_back(sample);
-        while self.samples.len() > 32 {
-            self.samples.pop_front();
-        }
-    }
-    pub fn pose(&self, now: f64) -> Option<(Vec3, Quat)> {
-        let last = self.samples.back()?;
-        let age = now - self.received_at;
-        if !(0.0..1.5).contains(&age) {
-            return None;
-        }
-        // Render 100 ms behind the newest sender timestamp. Never project a
-        // remote car far into the future when packets stop arriving.
-        let target = last.time - 0.1 + age.min(0.2);
-        let pose = |s: &Snapshot| {
-            (
-                Vec3::from_array(s.position),
-                Quat::from_array(s.rotation).normalize(),
-            )
-        };
-        for (a, b) in self.samples.iter().zip(self.samples.iter().skip(1)) {
-            if a.time <= target && target <= b.time {
-                let t = ((target - a.time) / (b.time - a.time)) as f32;
-                let (ap, ar) = pose(a);
-                let (bp, br) = pose(b);
-                return Some((ap.lerp(bp, t), ar.slerp(br, t)));
-            }
-        }
-        if target < self.samples.front()?.time {
-            return Some(pose(self.samples.front()?));
-        }
-        let (p, r) = pose(last);
-        Some((
-            p + Vec3::from_array(last.velocity) * (target - last.time).clamp(0.0, 0.1) as f32,
-            r,
-        ))
     }
 }

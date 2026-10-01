@@ -1,6 +1,9 @@
 //! Shared practice: local physics, a buffered remote car, and Game Center.
 #[cfg(feature = "multiplayer-test")]
 mod check;
+#[cfg(test)]
+mod netsim;
+mod remote;
 mod session;
 #[cfg(test)]
 mod tests;
@@ -57,7 +60,7 @@ impl Plugin for MultiplayerPlugin {
                     .after(crate::car::CarResetSet)
                     .after(TrackSet),
             )
-            .add_systems(Update, (send_state, draw).chain());
+            .add_systems(Update, (send_state, draw, log_link).chain());
         #[cfg(feature = "multiplayer-test")]
         check::configure(app);
     }
@@ -77,11 +80,34 @@ struct ButtonLabel;
 struct Status;
 #[derive(Component)]
 struct MultiplayerPanel;
+/// Snapshots a second, at most; fewer when frames come slower than that.
+const SEND_HZ: f64 = 60.0;
+
 #[derive(Resource, Default)]
 struct Sending {
     next: f64,
     seq: u64,
     reset: u64,
+}
+
+impl Sending {
+    /// Whether a snapshot is due at frame time `now`. The schedule is steady:
+    /// a frame that comes late is not made good by sending twice.
+    fn due(&mut self, now: f64) -> bool {
+        // A frame a hair early would only put the next snapshot a whole frame late.
+        if now + 0.002 < self.next {
+            return false;
+        }
+        self.next = (self.next + 1.0 / SEND_HZ).max(now);
+        true
+    }
+}
+
+/// When the physics state a frame sees was true. The car is where the last
+/// step put it, which is up to a step behind the frame; stamped with the
+/// frame's own time it would look to the other Mac as though it jittered.
+fn state_time(real: &Time<Real>, fixed: &Time<Fixed>) -> f64 {
+    real.elapsed_secs_f64() - fixed.overstep().as_secs_f64()
 }
 
 fn config(track: &Track, mode: Mode) -> Config {
@@ -308,6 +334,7 @@ fn observe_resets(
 #[allow(clippy::too_many_arguments)]
 fn send_state(
     time: Res<Time<Real>>,
+    fixed: Res<Time<Fixed>>,
     mut session: ResMut<Session>,
     mut transport: ResMut<Transport>,
     mut sending: ResMut<Sending>,
@@ -326,19 +353,17 @@ fn send_state(
             );
         }
     }
-    let now = time.elapsed_secs_f64();
-    if !session.driving() || now < sending.next {
+    if !session.driving() || !sending.due(time.elapsed_secs_f64()) {
         return;
     }
     let Ok((at, car)) = player.single() else {
         return;
     };
-    sending.next = now + 1.0 / 30.0;
     sending.seq += 1;
     transport.send(&Packet::State(Snapshot {
         seq: sending.seq,
         reset: sending.reset,
-        time: now,
+        time: state_time(&time, &fixed),
         position: at.translation.to_array(),
         rotation: at.rotation.to_array(),
         velocity: car.velocity.to_array(),
@@ -348,6 +373,24 @@ fn send_state(
         laps: session.local_laps,
         best: session.local_best,
     }));
+}
+
+/// The link's condition once every two seconds, for whoever reads the log.
+fn log_link(
+    time: Res<Time<Real>>,
+    session: Res<Session>,
+    mut transport: ResMut<Transport>,
+    mut next: Local<f64>,
+) {
+    let now = time.elapsed_secs_f64();
+    if !session.driving() || now < *next {
+        return;
+    }
+    *next = now + 2.0;
+    if let Some(link) = session.remote.stats(now) {
+        let rate = 1.0 / link.interval.max(1e-3);
+        transport.log(&format!("link {} · {rate:.0} snapshots/s", link.line()));
+    }
 }
 
 fn draw(
@@ -385,7 +428,7 @@ fn draw(
         } else if session.driving() {
             let best = |t: Option<f32>| t.map_or("—".into(), |t| format!("{t:.3}s"));
             let remote = session.remote.latest();
-            let state = if now - session.remote.received_at > 1.5 {
+            let state = if now - session.remote.received_at > remote::SILENCE {
                 " · reconnecting…"
             } else if remote.is_some_and(|r| r.paused) {
                 " · paused"
@@ -394,14 +437,19 @@ fn draw(
             } else {
                 ""
             };
+            let link = session
+                .remote
+                .stats(now)
+                .map_or(String::new(), |link| format!("\n{}", link.line()));
             format!(
-                "SHARED PRACTICE · NO CONTACT\nYou: {} laps · best {}\n{}: {} laps · best {}{}",
+                "SHARED PRACTICE · NO CONTACT\nYou: {} laps · best {}\n{}: {} laps · best {}{}{}",
                 session.local_laps,
                 best(session.local_best),
                 session.peer,
                 remote.map_or(0, |s| s.laps),
                 best(remote.and_then(|s| s.best)),
-                state
+                state,
+                link
             )
         } else {
             session.status.clone()

@@ -62,6 +62,16 @@ impl Transport {
         }
     }
 
+    /// A line for the diagnostic log beside Game Center's own, where there is one.
+    pub fn log(&mut self, line: &str) {
+        #[cfg(all(target_os = "macos", feature = "game-center"))]
+        unsafe {
+            native::todora_gc_log(line.as_ptr(), line.len());
+        }
+        #[cfg(not(all(target_os = "macos", feature = "game-center")))]
+        let _ = line;
+    }
+
     pub fn send(&mut self, packet: &Packet) {
         let bytes = packet.encode();
         #[cfg(feature = "multiplayer-test")]
@@ -130,6 +140,7 @@ mod native {
         pub fn todora_gc_start();
         pub fn todora_gc_leave();
         pub fn todora_gc_send(bytes: *const u8, length: usize, reliable: bool);
+        pub fn todora_gc_log(bytes: *const u8, length: usize);
         pub fn todora_gc_poll(bytes: *mut u8, capacity: usize, length: *mut usize) -> i32;
         pub fn todora_gc_support_directory(bytes: *mut u8, capacity: usize) -> usize;
     }
