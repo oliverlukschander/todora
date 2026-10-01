@@ -22,9 +22,9 @@ The circuits are laid out from public GPS traces of real circuits, and each carr
 
 Selecting a circuit shows its name and animated loading lights while it prepares. Driving stays paused until the circuit is ready. Reduced Motion keeps the lights still.
 
-Version 0.11.3 fixes repeating pitch surges and beating in the engine sound at cruising and maximum speed. It includes all 51 circuits, collections, the loading screen, driver profiles and local split-screen.
+Version 0.12.0 adds Bonkers mode, a second way to play beside the plain game, and mends Game Center invitations in the multiplayer build. It includes all 51 circuits, collections, the loading screen, driver profiles and local split-screen.
 
-[Download Todora 0.11.3 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.11.3/Todora.dmg) · [for Linux x86-64](https://github.com/oliverlukschander/todora/releases/download/v0.11.3/Todora-linux-x86_64.tar.gz) · [Release notes](docs/releases/v0.11.3.md)
+[Download Todora 0.12.0 for Apple Silicon Macs](https://github.com/oliverlukschander/todora/releases/download/v0.12.0/Todora.dmg) · [for Linux x86-64](https://github.com/oliverlukschander/todora/releases/download/v0.12.0/Todora-linux-x86_64.tar.gz) · [Release notes](docs/releases/v0.12.0.md)
 
 The separate **Todora-Multiplayer.dmg** in the same release adds Game Center
 shared practice for two registered Apple Silicon Macs. It requires each
