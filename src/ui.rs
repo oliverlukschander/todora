@@ -75,6 +75,12 @@ fn font(mut fonts: ResMut<Assets<Font>>) {
         .expect("the default font asset is available");
 }
 
+/// Offscreen captures have no native display scale. The normal UI scaler
+/// remains the sole writer, using the recorder's fixed scale when present.
+#[cfg(feature = "promo")]
+#[derive(Resource)]
+pub(crate) struct CaptureScale(pub f32);
+
 /// The HUD is sized against the window as the display draws it natively, so
 /// lowering the render scale (which lowers the scale factor, and so grows the
 /// logical window) leaves it the same size on screen. The chosen text size
@@ -83,7 +89,15 @@ fn scale(
     windows: Query<&Window>,
     settings: Option<Res<crate::settings::Settings>>,
     mut scale: ResMut<UiScale>,
+    #[cfg(feature = "promo")] capture: Option<Res<CaptureScale>>,
 ) {
+    #[cfg(feature = "promo")]
+    if let Some(capture) = capture {
+        if (scale.0 - capture.0).abs() > 0.001 {
+            scale.0 = capture.0;
+        }
+        return;
+    }
     if let Ok(window) = windows.single() {
         let native = window.resolution.base_scale_factor();
         let (width, height) = (
@@ -242,5 +256,39 @@ impl Navigation {
             },
             now,
         )
+    }
+}
+
+#[cfg(all(test, feature = "promo"))]
+mod capture_tests {
+    use super::*;
+
+    #[test]
+    fn capture_scale_stays_fixed_despite_virtual_window_size() {
+        let mut app = App::new();
+        app.init_resource::<UiScale>().add_systems(Update, scale);
+        let window = app
+            .world_mut()
+            .spawn(Window {
+                resolution: bevy::window::WindowResolution::new(1920, 1080),
+                ..default()
+            })
+            .id();
+        app.update();
+        assert_eq!(app.world().resource::<UiScale>().0, 1.25);
+
+        app.insert_resource(CaptureScale(1.35));
+        for width in [1920.0, 640.0, 2560.0, 1920.0] {
+            app.world_mut()
+                .get_mut::<Window>(window)
+                .unwrap()
+                .resolution
+                .set(width, 1080.0);
+            app.update();
+            assert_eq!(app.world().resource::<UiScale>().0, 1.35);
+        }
+        app.world_mut().remove_resource::<CaptureScale>();
+        app.update();
+        assert_eq!(app.world().resource::<UiScale>().0, 1.25);
     }
 }

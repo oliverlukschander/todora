@@ -1,0 +1,108 @@
+{
+  "stills": {
+    "hero": [
+      "hero-front",
+      0
+    ],
+    "title": [
+      "title",
+      0
+    ],
+    "circuits": [
+      "circuits",
+      0
+    ],
+    "awards": [
+      "awards",
+      0
+    ],
+    "profile": [
+      "profile",
+      0
+    ],
+    "accessibility": [
+      "accessibility",
+      0
+    ],
+    "audio": [
+      "audio",
+      0
+    ],
+    "split-screen": [
+      "split-screen",
+      0
+    ],
+    "bonnet": [
+      "bonnet",
+      0
+    ],
+    "trackside": [
+      "trackside",
+      0
+    ],
+    "grid": [
+      "grid",
+      3
+    ],
+    "cockpit": [
+      "cockpit",
+      1
+    ],
+    "best": [
+      "finish",
+      17
+    ],
+    "ghost": [
+      "ghost",
+      2
+    ],
+    "bonkers": [
+      "bonkers",
+      1
+    ],
+    "gt": [
+      "hero",
+      0
+    ],
+    "chase": [
+      "corner",
+      1
+    ],
+    "chicken": [
+      "chicken",
+      0
+    ]
+  },
+  "cuts": [
+    [
+      "grid",
+      0,
+      5.5
+    ],
+    [
+      "corner",
+      0,
+      3.5
+    ],
+    [
+      "cockpit",
+      0,
+      3
+    ],
+    [
+      "finish",
+      16,
+      3
+    ],
+    [
+      "ghost",
+      0,
+      2
+    ],
+    [
+      "bonkers",
+      0,
+      3
+    ]
+  ]
+}

@@ -444,7 +444,7 @@ fn show_guide(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn open_screen(
+pub(crate) fn open_screen(
     mut halt: ResMut<crate::pause::Halt>,
     mut page: ResMut<crate::settings::Page>,
     mut browse: ResMut<crate::online::Browse>,

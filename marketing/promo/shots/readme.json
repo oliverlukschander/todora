@@ -1,0 +1,370 @@
+{
+  "hero": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 0.1,
+    "lead_in": 0,
+    "progress": 0.06,
+    "speed": 0,
+    "hud": false,
+    "circuit": "spa-francorchamps",
+    "camera": {
+      "kind": "car",
+      "from": [
+        -2.3,
+        0.42,
+        1.8
+      ],
+      "look": [
+        0,
+        0.24,
+        0
+      ],
+      "fov": 36
+    }
+  },
+  "title": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 0.1,
+    "lead_in": 0,
+    "progress": 0.06,
+    "speed": 0,
+    "hud": true,
+    "circuit": "red-bull-ring",
+    "env": {
+      "TODORA_SCREEN": "title"
+    }
+  },
+  "circuits": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 0.1,
+    "lead_in": 0,
+    "progress": 0.06,
+    "speed": 0,
+    "hud": true,
+    "circuit": "le-mans",
+    "env": {
+      "TODORA_SCREEN": "circuits",
+      "TODORA_COLLECTION": "2"
+    }
+  },
+  "awards": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 0.1,
+    "lead_in": 0,
+    "progress": 0.06,
+    "speed": 0,
+    "hud": true,
+    "circuit": "red-bull-ring",
+    "env": {
+      "TODORA_SCREEN": "board",
+      "TODORA_VIEW": "5"
+    }
+  },
+  "profile": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 0.1,
+    "lead_in": 0,
+    "progress": 0.06,
+    "speed": 0,
+    "hud": true,
+    "circuit": "red-bull-ring",
+    "env": {
+      "TODORA_SCREEN": "profile"
+    }
+  },
+  "accessibility": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 0.1,
+    "lead_in": 0,
+    "progress": 0.06,
+    "speed": 0,
+    "hud": true,
+    "circuit": "red-bull-ring",
+    "env": {
+      "TODORA_SCREEN": "settings",
+      "TODORA_TAB": "2"
+    }
+  },
+  "audio": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 0.1,
+    "lead_in": 0,
+    "progress": 0.06,
+    "speed": 0,
+    "hud": true,
+    "circuit": "red-bull-ring",
+    "env": {
+      "TODORA_SCREEN": "settings",
+      "TODORA_TAB": "0"
+    }
+  },
+  "split-screen": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 0.1,
+    "lead_in": 0,
+    "progress": null,
+    "speed": 0,
+    "hud": true,
+    "circuit": "red-bull-ring",
+    "env": {
+      "TODORA_SCREEN": "local",
+      "TODORA_PLAYERS": "4"
+    }
+  },
+  "grid": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 5.5,
+    "lead_in": 0,
+    "progress": null,
+    "speed": 0,
+    "hud": true,
+    "circuit": "red-bull-ring",
+    "lights_only": true,
+    "camera": {
+      "kind": "anchor",
+      "at": [
+        -1.25,
+        0.32,
+        2.7
+      ],
+      "look": [
+        0,
+        0.22,
+        0
+      ],
+      "follow": true,
+      "fov": 36
+    }
+  },
+  "corner": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 4,
+    "lead_in": 16,
+    "progress": null,
+    "speed": 0,
+    "hud": true,
+    "circuit": "spa-francorchamps",
+    "zoom": 0.7,
+    "hide": [
+      "WASD",
+      "Garage"
+    ]
+  },
+  "cockpit": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 4,
+    "lead_in": 24,
+    "progress": null,
+    "speed": 0,
+    "hud": true,
+    "circuit": "suzuka",
+    "settings": {
+      "camera": "cockpit"
+    },
+    "hide": [
+      "WASD",
+      "Garage"
+    ]
+  },
+  "bonnet": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 0.1,
+    "lead_in": 12,
+    "progress": null,
+    "speed": 0,
+    "hud": true,
+    "circuit": "le-mans",
+    "settings": {
+      "camera": "bonnet"
+    },
+    "hide": [
+      "WASD",
+      "Garage"
+    ]
+  },
+  "finish": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 23,
+    "lead_in": 80,
+    "progress": null,
+    "speed": 0,
+    "hud": true,
+    "circuit": "red-bull-ring",
+    "drivers": [
+      "easy",
+      "plain"
+    ],
+    "zoom": 0.7,
+    "hide": [
+      "WASD",
+      "Garage"
+    ]
+  },
+  "ghost": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 4,
+    "lead_in": 9,
+    "progress": null,
+    "speed": 0,
+    "hud": true,
+    "circuit": "red-bull-ring",
+    "drivers": [
+      "easy"
+    ],
+    "ghost_from": "finish",
+    "zoom": 0.7,
+    "hide": [
+      "WASD",
+      "Garage"
+    ]
+  },
+  "bonkers": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 4,
+    "lead_in": 1,
+    "progress": 0.16,
+    "speed": 10,
+    "hud": true,
+    "circuit": "red-bull-ring",
+    "env": {
+      "TODORA_BONKERS": "1"
+    },
+    "zoom": 0.65,
+    "hide": [
+      "WASD",
+      "Garage"
+    ]
+  },
+  "trackside": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 0.1,
+    "lead_in": 0,
+    "progress": 0.955,
+    "speed": 0,
+    "hud": false,
+    "circuit": "red-bull-ring",
+    "camera": {
+      "kind": "car",
+      "from": [
+        -2.4,
+        0.36,
+        0.6
+      ],
+      "look": [
+        0,
+        0.24,
+        0.2
+      ],
+      "fov": 30
+    }
+  },
+  "hero-front": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 0.1,
+    "lead_in": 0,
+    "progress": null,
+    "speed": 0,
+    "hud": false,
+    "circuit": "red-bull-ring",
+    "camera": {
+      "kind": "anchor",
+      "at": [
+        -0.5,
+        0.24,
+        1.75
+      ],
+      "look": [
+        0.5,
+        0.28,
+        0
+      ],
+      "follow": true,
+      "fov": 31
+    }
+  },
+  "chicken": {
+    "width": 1920,
+    "height": 1080,
+    "scale_factor": 2,
+    "fps": 60,
+    "seconds": 0.1,
+    "lead_in": 0.15,
+    "progress": 0.16,
+    "speed": 0,
+    "hud": false,
+    "circuit": "red-bull-ring",
+    "env": {
+      "TODORA_BONKERS": "1"
+    },
+    "zoom": 0.65,
+    "hide": [
+      "WASD",
+      "Garage"
+    ],
+    "camera": {
+      "kind": "car",
+      "from": [
+        -2.5,
+        1.1,
+        2.3
+      ],
+      "look": [
+        0,
+        0.5,
+        0
+      ],
+      "fov": 38
+    }
+  }
+}

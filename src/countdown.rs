@@ -263,7 +263,7 @@ fn hold(
 }
 
 #[derive(Component)]
-struct Pod;
+pub(crate) struct Pod;
 #[derive(Component)]
 struct Light(u8);
 #[derive(Component)]

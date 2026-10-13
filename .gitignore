@@ -4,3 +4,7 @@
 *.blend1
 *.blend2
 __pycache__/
+
+/marketing/promo/.cache/
+/marketing/promo/exports/video/*.mp4
+/marketing/promo/preview/

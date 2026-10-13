@@ -1,0 +1,99 @@
+/* Todora launch kit: shared type and components for every graphic.
+   Colours are the game's own (src/ui.rs, src/hud.rs); the face is Figtree,
+   the game's font (assets/fonts/Figtree.ttf, SIL OFL 1.1). Sizes are set per
+   graphic with --u, one "unit" of type, so a layout scales as one piece. */
+@font-face {
+  font-family: Figtree;
+  src: url("../../../../assets/fonts/Figtree.ttf");
+  font-weight: 300 900;
+}
+:root {
+  --ink: #0b1115;
+  --panel: #131a1f;
+  --paper: #e8f0f2;
+  --muted: #91a3ad;
+  --lime: #c4f55c;
+  --purple: #bd6bff;
+  --green: #61db6b;
+  --yellow: #fad445;
+  --u: 10px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  position: relative;
+  overflow: hidden;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: Figtree, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "tnum" 1;
+}
+.shot { position: absolute; inset: 0; background-size: cover; background-repeat: no-repeat; }
+.shade { position: absolute; inset: 0; }
+.abs { position: absolute; }
+
+/* The wordmark and what sits under it. */
+.lockup { display: flex; flex-direction: column; }
+.lockup.center { align-items: center; text-align: center; }
+.word {
+  font-weight: 900;
+  font-size: calc(var(--u) * 10);
+  letter-spacing: 0.02em;
+  line-height: 0.82;
+  text-shadow: 0 calc(var(--u) * 0.2) calc(var(--u) * 2.4) rgba(0, 0, 0, 0.3);
+}
+.bar { display: flex; gap: calc(var(--u) * 0.7); margin-top: calc(var(--u) * 1.6); }
+.bar i {
+  display: block;
+  width: calc(var(--u) * 6.2);
+  height: calc(var(--u) * 0.55);
+  border-radius: var(--u);
+  background: var(--purple);
+}
+.tagline {
+  font-weight: 600;
+  font-size: calc(var(--u) * 2.15);
+  margin-top: calc(var(--u) * 2);
+  letter-spacing: 0.005em;
+  text-shadow: 0 1px calc(var(--u) * 1.6) rgba(0, 0, 0, 0.35);
+}
+.cta { font-weight: 700; font-size: calc(var(--u) * 1.6); color: var(--lime); }
+.url { font-weight: 600; font-size: calc(var(--u) * 1.6); margin-top: calc(var(--u) * 0.5); }
+.handle {
+  font-weight: 600;
+  font-size: calc(var(--u) * 1.05);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: calc(var(--u) * 1.2);
+}
+
+/* A card in the HUD's own style: 'TODORA / FEATURE' in lime over a title. */
+.card {
+  background: rgba(11, 17, 21, 0.86);
+  border-radius: calc(var(--u) * 2);
+  padding: calc(var(--u) * 3) calc(var(--u) * 3.4) calc(var(--u) * 3.1);
+}
+.card .feature {
+  font-weight: 600;
+  font-size: calc(var(--u) * 2.2);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lime);
+  margin-bottom: calc(var(--u) * 1.5);
+}
+.card .title {
+  font-weight: 800;
+  font-size: calc(var(--u) * 8.4);
+  letter-spacing: -0.015em;
+  line-height: 0.98;
+}
+.card .sub {
+  font-weight: 500;
+  font-size: calc(var(--u) * 3);
+  line-height: 1.25;
+  margin-top: calc(var(--u) * 1.6);
+}
+.purple { color: var(--purple); }
+.dim { color: rgba(232, 240, 242, 0.34); }

@@ -20,6 +20,8 @@ mod onboarding;
 mod online;
 mod pause;
 mod persistence;
+#[cfg(feature = "promo")]
+mod promo;
 mod replay;
 mod settings;
 mod skid;
@@ -39,21 +41,23 @@ use bevy::{asset::AssetPlugin, prelude::*};
 
 pub fn run() {
     let mut app = App::new();
-    app.add_plugins(
-        DefaultPlugins
-            .set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "Todora".into(),
-                    ..default()
-                }),
-                ..default()
-            })
-            .set(AssetPlugin {
-                file_path: asset_folder(),
+    let plugins = DefaultPlugins
+        .set(AssetPlugin {
+            file_path: asset_folder(),
+            ..default()
+        })
+        .set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "Todora".into(),
                 ..default()
             }),
-    )
-    .add_plugins(GamePlugin);
+            ..default()
+        });
+    #[cfg(feature = "promo")]
+    let plugins = promo::plugins(plugins);
+    app.add_plugins(plugins).add_plugins(GamePlugin);
+    #[cfg(feature = "promo")]
+    promo::configure(&mut app);
     #[cfg(feature = "visual-check")]
     visual_check::configure(&mut app);
     app.run();

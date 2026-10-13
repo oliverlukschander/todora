@@ -11,6 +11,8 @@ members = [".", "server"]
 
 [features]
 visual-check = []
+# Offscreen marketing captures; excluded from release builds.
+promo = ["visual-check"]
 game-center = []
 multiplayer-test = []
 

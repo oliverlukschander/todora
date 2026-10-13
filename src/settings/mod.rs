@@ -333,6 +333,10 @@ fn key(value: &impl std::fmt::Debug) -> String {
 
 /// Where this machine keeps what Todora saves: the laps and these settings.
 pub(crate) fn data_dir() -> Option<PathBuf> {
+    #[cfg(feature = "promo")]
+    if let Some(dir) = std::env::var_os("TODORA_PROMO_DATA") {
+        return Some(PathBuf::from(dir));
+    }
     #[cfg(all(target_os = "macos", feature = "game-center"))]
     let base = crate::multiplayer::support_directory();
     #[cfg(target_os = "windows")]
