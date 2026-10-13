@@ -2,11 +2,13 @@
 
 **One lap at a time. Then one more.**
 
-[![The pale blue and orange OMARCHY GT #95 at Styrian Bowl](docs/images/hero.jpg)](docs/images/todora-short.mp4)
+https://github.com/user-attachments/assets/94c698e4-262f-4f8d-a97d-0bb20761a3a4
+
+*20 seconds of real gameplay · 60 fps · silent*
 
 A free arcade racer with **51 scaled real-world circuits**, a ghost to chase and purple sectors to earn. Take the **OMARCHY GT #95** out alone, share a screen with up to four players, or trade the car for a chicken in **Bonkers mode**.
 
-**[Download for Mac](https://github.com/oliverlukschander/todora/releases/download/v0.12.0/Todora.dmg)** · **[Download for Linux](https://github.com/oliverlukschander/todora/releases/download/v0.12.0/Todora-linux-x86_64.tar.gz)** · [Watch 20 seconds of gameplay](docs/images/todora-short.mp4)
+**[Download for Mac](https://github.com/oliverlukschander/todora/releases/download/v0.12.0/Todora.dmg)** · **[Download for Linux](https://github.com/oliverlukschander/todora/releases/download/v0.12.0/Todora-linux-x86_64.tar.gz)** · [Download the gameplay video](docs/images/todora-short.mp4)
 
 Apple Silicon Mac · x86-64 Linux · Free · Open source under MIT
 

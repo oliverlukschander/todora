@@ -102,3 +102,7 @@ whose size and position should stay fixed while the gameplay behind it moves.
 The corrected five gameplay sources pass across all **2,340 frames**: corner, cockpit, ghost and Bonkers have identical label bounds throughout; finish varies by one pixel on one edge due to compression. The before-fix source fails the same check. The focused capture-scale test, default-build check, formatting and Clippy also pass.
 
 The final 720p edit was decoded in full. Its five gameplay segments were also checked frame by frame using a white circuit-name text region inside the HUD panel: the bounds varied by at most one pixel after compression. The 20-second file retains H.264 High, yuv420p, 60 fps, BT.709 and faststart.
+
+## Inline README player
+
+The corrected 4,712,036-byte compact clip was uploaded as a native GitHub attachment. GitHub’s Markdown API was checked before publication: the standalone attachment URL produces a `<video controls>` player. The repository copy remains as a download fallback; no release was published or modified.

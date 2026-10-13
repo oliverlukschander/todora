@@ -35,7 +35,14 @@ The opt-in `promo` feature disables Winit and renders to a Bevy image using Meta
 
 ## Release handoff
 
-The README links to the checked-in short clip, so it has no dependency on a future upload. GitHub may show a download instead of an inline player. For a prominent release trailer, Oliver can attach `marketing/promo/exports/video/todora-0.12-gameplay-16x9.mp4` to release **v0.12.0** under a new name, **`todora-0.12-gameplay-16x9.mp4`**, and change both README video links to that asset's URL. Keep the existing `todora-30s-16x9.mp4`: the release notes identify it as older footage. The kit scripts do not upload assets or edit releases.
+The README opens with a native GitHub video attachment, uploaded from the corrected `docs/images/todora-short.mp4`:
+
+https://github.com/user-attachments/assets/94c698e4-262f-4f8d-a97d-0bb20761a3a4
+
+Leave the attachment URL alone in its paragraph: GitHub renders it as a player. An HTML video tag pointing at a raw repository MP4 is stripped by GitHub's renderer. The checked-in compact clip remains available through the README's download link. If the footage changes, upload the replacement and update this attachment URL; re-exporting the local MP4 does not update the hosted attachment.
+
+For a release trailer, Oliver can attach `exports/video/todora-0.12-gameplay-16x9.mp4` to release **v0.12.0** under that filename. Keep the existing `todora-30s-16x9.mp4`: the release notes identify it as older footage. No release assets were changed.
+
 
 ## Credits
 
